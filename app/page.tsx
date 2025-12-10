@@ -1,6 +1,18 @@
+// app/page.tsx
 import Image from "next/image";
+import { supabase } from "@/lib/supabaseClient";
 
-export default function Home() {
+// ⬇️ Make this async so we can await Supabase
+export default async function Home() {
+  // ⬇️ Fetch data from Supabase
+  const { data: projects, error } = await supabase
+    .from("projects")
+    .select("*")
+    .order("created_at", { ascending: false });
+
+  console.log("Supabase data:", projects);
+  console.log("Supabase error:", error);
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
       <main className="flex min-h-screen w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
@@ -12,6 +24,34 @@ export default function Home() {
           height={20}
           priority
         />
+
+        {/* 🔵 Supabase section */}
+        <div className="mb-8 w-full">
+          <h2 className="text-xl font-bold text-black dark:text-white mb-2">
+            Projects from Supabase
+          </h2>
+
+          {error && <p className="text-red-600">Error: {error.message}</p>}
+
+          {!error && (!projects || projects.length === 0) && (
+            <p className="text-zinc-600 dark:text-zinc-400">
+              No projects found.
+            </p>
+          )}
+
+          {projects && projects.length > 0 && (
+            <ul className="text-zinc-800 dark:text-zinc-200 list-disc pl-5">
+              {projects.map((p: any) => (
+                <li key={p.id}>
+                  <strong>{p.name}</strong>{" "}
+                  <span className="text-sm text-zinc-500">({p.status})</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        {/* Your original content below */}
         <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
           <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
             To get started, edit the page.tsx file.
@@ -34,6 +74,7 @@ export default function Home() {
             center.
           </p>
         </div>
+
         <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
           <a
             className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
