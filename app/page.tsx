@@ -92,54 +92,7 @@ export default async function Home() {
   }
 
   return (
-    <>
-      <style jsx global>{`
-        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Space+Mono:wght@400;700&display=swap');
-
-        :root {
-          --color-primary: #1c1917;
-          --color-accent: #fbbf24;
-        }
-
-        .font-serif {
-          font-family: 'Playfair Display', serif;
-        }
-
-        .font-mono {
-          font-family: 'Space Mono', monospace;
-        }
-
-        @keyframes slideInUp {
-          from {
-            opacity: 0;
-            transform: translateY(30px);
-          }
-          to {
-            opacity: 1;
-            transform: translateY(0);
-          }
-        }
-
-        .project-card {
-          animation: slideInUp 0.6s ease-out forwards;
-          opacity: 0;
-        }
-
-        @keyframes fadeIn {
-          from {
-            opacity: 0;
-          }
-          to {
-            opacity: 1;
-          }
-        }
-
-        .header-animate {
-          animation: fadeIn 0.8s ease-out;
-        }
-      `}</style>
-
-      <div className="min-h-screen bg-stone-50">
+    <div className="min-h-screen bg-stone-50">
         <div className="mx-auto max-w-7xl px-6 py-16">
           {/* Header */}
           <header className="header-animate mb-16">
@@ -184,6 +137,5 @@ export default async function Home() {
           )}
         </div>
       </div>
-    </>
   );
 }
