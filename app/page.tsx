@@ -1,13 +1,87 @@
 // app/page.tsx
 
-export const dynamic = "force-dynamic"; // ensure server-side runtime fetching
+export const dynamic = "force-dynamic";
 
-import Image from "next/image";
 import { supabase } from "@/lib/supabaseClient";
 
-// ⬇️ Make this async so we can await Supabase
+type Project = {
+  id: number;
+  name: string;
+  status: string;
+  description: string | null;
+  created_at: string;
+};
+
+function StatusBadge({ status }: { status: string }) {
+  const statusStyles: Record<string, string> = {
+    active: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    pending: "bg-amber-50 text-amber-700 border-amber-200",
+    completed: "bg-blue-50 text-blue-700 border-blue-200",
+    archived: "bg-stone-200 text-stone-700 border-stone-300",
+  };
+
+  const baseStyle = "px-3 py-1 text-xs font-medium border rounded-full uppercase tracking-wider";
+  const style = statusStyles[status.toLowerCase()] || "bg-gray-50 text-gray-700 border-gray-200";
+
+  return <span className={`${baseStyle} ${style}`}>{status}</span>;
+}
+
+function ProjectCard({ project, index }: { project: Project; index: number }) {
+  const formattedDate = project.created_at
+    ? new Date(project.created_at).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : "—";
+
+  return (
+    <article
+      className="project-card group relative bg-white border-2 border-stone-900 p-8 transition-all duration-300 hover:-translate-y-1 hover:shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]"
+      style={{
+        animationDelay: `${index * 100}ms`,
+      }}
+    >
+      {/* Corner accent */}
+      <div className="absolute top-0 right-0 w-16 h-16 bg-amber-400 -translate-y-3 translate-x-3 -z-10 transition-transform duration-300 group-hover:translate-x-4 group-hover:-translate-y-4" />
+
+      <div className="flex items-start justify-between mb-4">
+        <div className="flex-1">
+          <div className="flex items-center gap-3 mb-2">
+            <span className="text-sm font-mono text-stone-400">#{project.id}</span>
+            <StatusBadge status={project.status} />
+          </div>
+          <h3 className="text-3xl font-serif font-bold text-stone-900 leading-tight mb-1">
+            {project.name}
+          </h3>
+        </div>
+      </div>
+
+      <p className="text-stone-600 leading-relaxed mb-6 min-h-[3rem]">
+        {project.description || "No description provided"}
+      </p>
+
+      <div className="flex items-center justify-between pt-4 border-t border-stone-200">
+        <time className="text-sm font-mono text-stone-500">{formattedDate}</time>
+        <svg
+          className="w-5 h-5 text-stone-400 transition-transform duration-300 group-hover:translate-x-1"
+          fill="none"
+          stroke="currentColor"
+          viewBox="0 0 24 24"
+        >
+          <path
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeWidth={2}
+            d="M9 5l7 7-7 7"
+          />
+        </svg>
+      </div>
+    </article>
+  );
+}
+
 export default async function Home() {
-  // ⬇️ Fetch data from Supabase
   const { data: projects, error } = await supabase
     .from("projects")
     .select("*")
@@ -18,60 +92,98 @@ export default async function Home() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex w-full max-w-5xl flex-col gap-8 p-8 bg-white dark:bg-black">
-        <header className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Image src="/next.svg" alt="Next" width={80} height={20} />
-            <h1 className="text-2xl font-semibold">Projects</h1>
-          </div>
-        </header>
+    <>
+      <style jsx global>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Space+Mono:wght@400;700&display=swap');
 
-        <section>
-          <h2 className="text-lg font-medium mb-4">Projects table</h2>
+        :root {
+          --color-primary: #1c1917;
+          --color-accent: #fbbf24;
+        }
 
+        .font-serif {
+          font-family: 'Playfair Display', serif;
+        }
+
+        .font-mono {
+          font-family: 'Space Mono', monospace;
+        }
+
+        @keyframes slideInUp {
+          from {
+            opacity: 0;
+            transform: translateY(30px);
+          }
+          to {
+            opacity: 1;
+            transform: translateY(0);
+          }
+        }
+
+        .project-card {
+          animation: slideInUp 0.6s ease-out forwards;
+          opacity: 0;
+        }
+
+        @keyframes fadeIn {
+          from {
+            opacity: 0;
+          }
+          to {
+            opacity: 1;
+          }
+        }
+
+        .header-animate {
+          animation: fadeIn 0.8s ease-out;
+        }
+      `}</style>
+
+      <div className="min-h-screen bg-stone-50">
+        <div className="mx-auto max-w-7xl px-6 py-16">
+          {/* Header */}
+          <header className="header-animate mb-16">
+            <div className="flex items-end gap-4 mb-4">
+              <h1 className="text-7xl font-serif font-black text-stone-900 leading-none">
+                Projects
+              </h1>
+              <span className="text-2xl font-mono text-amber-500 mb-2">
+                {projects?.length || 0}
+              </span>
+            </div>
+            <div className="h-1 w-32 bg-amber-400" />
+          </header>
+
+          {/* Error State */}
           {error && (
-            <div className="text-red-600 mb-4">
-              Error loading projects: {error.message}
+            <div className="border-2 border-red-500 bg-red-50 p-6 mb-8">
+              <p className="font-mono text-red-800">
+                <span className="font-bold">Error:</span> {error.message}
+              </p>
             </div>
           )}
 
+          {/* Empty State */}
           {!error && (!projects || projects.length === 0) && (
-            <div className="text-zinc-600">No projects found.</div>
-          )}
-
-          {projects && projects.length > 0 && (
-            <div className="overflow-x-auto rounded border">
-              <table className="min-w-full divide-y">
-                <thead className="bg-gray-50">
-                  <tr>
-                    <th className="px-4 py-2 text-left">ID</th>
-                    <th className="px-4 py-2 text-left">Name</th>
-                    <th className="px-4 py-2 text-left">Status</th>
-                    <th className="px-4 py-2 text-left">Description</th>
-                    <th className="px-4 py-2 text-left">Created At</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {projects.map((p: any) => (
-                    <tr key={p.id} className="odd:bg-white even:bg-gray-50">
-                      <td className="px-4 py-2 text-sm">{p.id}</td>
-                      <td className="px-4 py-2">{p.name}</td>
-                      <td className="px-4 py-2">{p.status}</td>
-                      <td className="px-4 py-2">{p.description ?? "—"}</td>
-                      <td className="px-4 py-2 text-sm text-zinc-500">
-                        {p.created_at
-                          ? new Date(p.created_at).toLocaleString()
-                          : "—"}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            <div className="text-center py-20">
+              <div className="inline-block border-2 border-stone-900 bg-white p-12">
+                <p className="text-xl font-serif text-stone-600">
+                  No projects found
+                </p>
+              </div>
             </div>
           )}
-        </section>
-      </main>
-    </div>
+
+          {/* Projects Grid */}
+          {projects && projects.length > 0 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
+              {projects.map((project: Project, index: number) => (
+                <ProjectCard key={project.id} project={project} index={index} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
   );
 }
