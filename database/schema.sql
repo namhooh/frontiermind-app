@@ -86,6 +86,73 @@ CREATE TABLE contract_status (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE clause (
+  id BIGSERIAL PRIMARY KEY,
+  contract_id BIGSERIAL,
+  project_id BIGSERIAL,
+  name VARCHAR NOT NULL,
+  clause_type_id BIGSERIAL,
+  clause_category_id BIGSERIAL,
+  section_ref VARCHAR,
+  raw_text VARCHAR,
+  clause_responsibleparty_id BIGSERIAL,
+  normalized_payload JSONB,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+  updated_by_id BIGSERIAL, 
+  version INTEGER
+);
+
+CREATE TABLE clause_responsibleparty (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  address VARCHAR NOT NULL,
+  country VARCHAR NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE clause_type (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  code VARCHAR NOT NULL,
+  description VARCHAR,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE clause_category (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  code VARCHAR NOT NULL,
+  description VARCHAR,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE meter (
+  id BIGSERIAL PRIMARY KEY,
+  project_id BIGSERIAL,
+  meter_type_id BIGSERIAL,
+  meter_vendor_id BIGSERIAL,
+  model VARCHAR NOT NULL,
+  unit VARCHAR NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE meter_type (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  code VARCHAR NOT NULL,
+  description VARCHAR,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE meter_vendor (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  address VARCHAR NOT NULL,
+  country VARCHAR NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 
 
 
