@@ -56,9 +56,9 @@ CREATE TABLE contract (
   effective_date DATE,
   end_date DATE,
   file_location URL,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  updated_by_id BIGSERIAL, 
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by VARCHAR, 
   version INTEGER
 );
 
@@ -97,9 +97,9 @@ CREATE TABLE clause (
   raw_text VARCHAR,
   clause_responsibleparty_id BIGSERIAL,
   normalized_payload JSONB,
-  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-  updated_by_id BIGSERIAL, 
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_by VARCHAR, 
   version INTEGER
 );
 
@@ -153,6 +153,43 @@ CREATE TABLE meter_vendor (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TYPE updated_frequency AS ENUM ('daily', 'hourly', '15min', 'min', 'sec', 'millisec');
+CREATE TABLE data_source (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  description VARCHAR NOT NULL,
+  updated_frequency updated_frequency NOT NULL DEFAULT 'daily',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TYPE status AS ENUM ('open', 'closed');
+CREATE TABLE event (
+  id BIGSERIAL PRIMARY KEY,
+  project_id BIGSERIAL,
+  organization_id BIGSERIAL,
+  data_source_id BIGSERIAL,
+  event_type_id BIGSERIAL,
+  description VARCHAR NOT NULL,
+  raw_data JSONB,
+  metric_outcome JSONB,
+  time_start TIMESTAMPTZ NOT NULL DEFAULT,
+  time_acknowledged TIMESTAMPTZ NOT NULL DEFAULT,
+  time_fixed TIMESTAMPTZ NOT NULL DEFAULT,
+  time_end TIMESTAMPTZ NOT NULL DEFAULT,
+  status status NOT NULL DEFAULT 'open',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by VARCHAR,
+  updated_by VARCHAR, 
+);
+
+CREATE TABLE event_type (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  code VARCHAR NOT NULL,
+  description VARCHAR,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
 
 
