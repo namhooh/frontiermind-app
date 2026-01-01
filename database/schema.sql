@@ -191,6 +191,90 @@ CREATE TABLE event_type (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE default_event (
+  id BIGSERIAL PRIMARY KEY,
+  project_id BIGSERIAL,
+  organization_id BIGSERIAL,
+  contract_id BIGSERIAL,
+  event_id BIGSERIAL,
+  default_event_type_id BIGSERIAL,
+  description VARCHAR NOT NULL,
+  metadata_detail JSONB,
+  cure_deadline DATETIME,
+  time_start TIMESTAMPTZ NOT NULL DEFAULT,
+  time_acknowledged TIMESTAMPTZ NOT NULL DEFAULT,
+  time_cured TIMESTAMPTZ NOT NULL DEFAULT,
+  status status NOT NULL DEFAULT 'open',
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by VARCHAR,
+  updated_by VARCHAR, 
+);
+
+CREATE TABLE default_event_type (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  code VARCHAR NOT NULL,
+  description VARCHAR,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE rule_output (
+  id BIGSERIAL PRIMARY KEY,
+  project_id BIGSERIAL,
+  default_event_id BIGSERIAL,
+  clause_id BIGSERIAL,
+  rule_output_type_id BIGSERIAL,
+  currency_id BIGSERIAL,
+  description VARCHAR NOT NULL,
+  metadata_detail JSONB,
+  ld_amount DECIMAL,
+  invoice_adjustment DECIMAL,
+  breach BOOLEAN NOT NULL DEFAULT true,
+  excuse BOOLEAN NOT NULL DEFAULT false,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+  created_by VARCHAR,
+  updated_by VARCHAR, 
+);
+
+CREATE TABLE rule_output_type (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  code VARCHAR NOT NULL,
+  description VARCHAR,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE currency (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  code VARCHAR NOT NULL UNIQUE   -- USD, EUR, ZAR, etc.
+);
+
+CREATE TABLE notification (
+  id BIGSERIAL PRIMARY KEY,
+  organization_id BIGSERIAL,
+  project_id BIGSERIAL,
+  default_event_id BIGSERIAL,
+  rule_output_id BIGSERIAL,
+  notification_type_id BIGSERIAL,
+  description VARCHAR NOT NULL,
+  metadata_detail JSONB,
+  time_notified DATETIME,
+  time_due DATETIME,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE notification_type (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  code VARCHAR NOT NULL,
+  description VARCHAR,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+
 
 
 -- =========================
