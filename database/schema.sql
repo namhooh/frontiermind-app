@@ -130,8 +130,9 @@ CREATE TABLE clause_category (
 CREATE TABLE meter (
   id BIGSERIAL PRIMARY KEY,
   project_id BIGSERIAL,
+  asset_id BIGSERIAL,
+  vendor_id BIGSERIAL,
   meter_type_id BIGSERIAL,
-  meter_vendor_id BIGSERIAL,
   model VARCHAR NOT NULL,
   unit VARCHAR NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -145,7 +146,7 @@ CREATE TABLE meter_type (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE meter_vendor (
+CREATE TABLE vendor (
   id BIGSERIAL PRIMARY KEY,
   name VARCHAR NOT NULL,
   address VARCHAR NOT NULL,
@@ -274,7 +275,35 @@ CREATE TABLE notification_type (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE asset (
+  id BIGSERIAL PRIMARY KEY,
+  project_id BIGSERIAL,
+  asset_type_id BIGSERIAL,
+  vendor_id BIGSERIAL,
+  name VARCHAR NOT NULL,
+  description VARCHAR,
+  model VARCHAR,
+  serial_code VARCHAR,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 
+CREATE TABLE asset_type (
+  id BIGSERIAL PRIMARY KEY,
+  name VARCHAR NOT NULL,
+  code VARCHAR NOT NULL,
+  description VARCHAR,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE meter_reading (
+  id BIGSERIAL PRIMARY KEY,
+  project_id BIGSERIAL,
+  meter_id BIGSERIAL,
+  meter_type_id BIGSERIAL,
+  value NUMBER NOT NULL,
+  reading_timestamp NOT NULL DATETIME,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+)
 
 
 -- =========================
