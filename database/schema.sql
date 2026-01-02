@@ -12,7 +12,7 @@ CREATE TABLE organization (
 
 CREATE TABLE role (
   id BIGSERIAL PRIMARY KEY,
-  organization_id BIGSERIAL,
+  organization_id BIGSERIAL REFERENCES organization(id),
   name VARCHAR NOT NULL,
   email VARCHAR NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -20,8 +20,8 @@ CREATE TABLE role (
 
 CREATE TABLE contractor (
   id BIGSERIAL PRIMARY KEY,
-  project_id BIGSERIAL,
-  contractor_type_id BIGSERIAL,
+  project_id BIGSERIAL REFERENCES project(id), -- N:M
+  contractor_type_id BIGSERIAL REFERENCES contractor_type(id),
   name VARCHAR NOT NULL,
   email VARCHAR NOT NULL,
   address VARCHAR NOT NULL,
@@ -39,20 +39,20 @@ CREATE TABLE contractor_type (
 
 CREATE TABLE project (
   id BIGSERIAL PRIMARY KEY,
-  organization_id BIGSERIAL,
+  organization_id BIGSERIAL REFERENCES organization(id), -- N:M
   name VARCHAR NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE contract (
   id BIGSERIAL PRIMARY KEY,
-  organization_id BIGSERIAL,
-  project_id BIGSERIAL,
+  project_id BIGSERIAL REFERENCES project(id),
+  organization_id BIGSERIAL REFERENCES organization(id), -- N:M
+  contract_counterparty_id BIGSERIAL REFERENCES contract_counterparty(id), -- N:M
+  contract_type_id BIGSERIAL REFERENCES contract_type(id),
+  contract_status_id BIGSERIAL REFERENCES contract_status(id), -- N:M
   name VARCHAR NOT NULL,
   description VARCHAR,
-  contract_counterparty_id BIGSERIAL,
-  contract_type_id BIGSERIAL,
-  contract_status_id BIGSERIAL,
   effective_date DATE,
   end_date DATE,
   file_location URL,
@@ -88,14 +88,14 @@ CREATE TABLE contract_status (
 
 CREATE TABLE clause (
   id BIGSERIAL PRIMARY KEY,
-  contract_id BIGSERIAL,
-  project_id BIGSERIAL,
+  project_id BIGSERIAL REFERENCES project(id),
+  contract_id BIGSERIAL REFERENCES contract(id),
+  clause_responsibleparty_id BIGSERIAL REFERENCES clause_responsibleparty(id), -- N:M
+  clause_type_id BIGSERIAL REFERENCES clause_type(id), 
+  clause_category_id BIGSERIAL REFERENCES clause_category(id), 
   name VARCHAR NOT NULL,
-  clause_type_id BIGSERIAL,
-  clause_category_id BIGSERIAL,
   section_ref VARCHAR,
   raw_text VARCHAR,
-  clause_responsibleparty_id BIGSERIAL,
   normalized_payload JSONB,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -129,10 +129,10 @@ CREATE TABLE clause_category (
 
 CREATE TABLE meter (
   id BIGSERIAL PRIMARY KEY,
-  project_id BIGSERIAL,
-  asset_id BIGSERIAL,
-  vendor_id BIGSERIAL,
-  meter_type_id BIGSERIAL,
+  project_id BIGSERIAL REFERENCES project(id),
+  asset_id BIGSERIAL REFERENCES asset(id),
+  vendor_id BIGSERIAL REFERENCES vendor(id), -- N:M
+  meter_type_id BIGSERIAL REFERENCES meter_type(id),
   model VARCHAR NOT NULL,
   unit VARCHAR NOT NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -166,10 +166,10 @@ CREATE TABLE data_source (
 CREATE TYPE status AS ENUM ('open', 'closed');
 CREATE TABLE event (
   id BIGSERIAL PRIMARY KEY,
-  project_id BIGSERIAL,
-  organization_id BIGSERIAL,
-  data_source_id BIGSERIAL,
-  event_type_id BIGSERIAL,
+  project_id BIGSERIAL REFERENCES project(id),
+  organization_id BIGSERIAL REFERENCES organization(id), -- N:M
+  data_source_id BIGSERIAL REFERENCES data_source(id), -- N:M
+  event_type_id BIGSERIAL REFERENCES event_type(id),
   description VARCHAR NOT NULL,
   raw_data JSONB,
   metric_outcome JSONB,
@@ -194,11 +194,11 @@ CREATE TABLE event_type (
 
 CREATE TABLE default_event (
   id BIGSERIAL PRIMARY KEY,
-  project_id BIGSERIAL,
-  organization_id BIGSERIAL,
-  contract_id BIGSERIAL,
-  event_id BIGSERIAL,
-  default_event_type_id BIGSERIAL,
+  project_id BIGSERIAL REFERENCES project(id),
+  organization_id BIGSERIAL REFERENCES organization(id), -- N:M
+  contract_id BIGSERIAL REFERENCES contract(id), -- N:M
+  event_id BIGSERIAL REFERENCES event(id), -- N:M
+  default_event_type_id BIGSERIAL REFERENCES default_event_type(id),
   description VARCHAR NOT NULL,
   metadata_detail JSONB,
   cure_deadline DATETIME,
@@ -222,11 +222,11 @@ CREATE TABLE default_event_type (
 
 CREATE TABLE rule_output (
   id BIGSERIAL PRIMARY KEY,
-  project_id BIGSERIAL,
-  default_event_id BIGSERIAL,
-  clause_id BIGSERIAL,
-  rule_output_type_id BIGSERIAL,
-  currency_id BIGSERIAL,
+  project_id BIGSERIAL REFERENCES project(id),
+  default_event_id BIGSERIAL REFERENCES default_event(id), 
+  clause_id BIGSERIAL REFERENCES clause(id), -- N:M
+  rule_output_type_id BIGSERIAL REFERENCES rule_output_type(id),
+  currency_id BIGSERIAL REFERENCES currency(id),
   description VARCHAR NOT NULL,
   metadata_detail JSONB,
   ld_amount DECIMAL,
@@ -255,11 +255,11 @@ CREATE TABLE currency (
 
 CREATE TABLE notification (
   id BIGSERIAL PRIMARY KEY,
-  organization_id BIGSERIAL,
-  project_id BIGSERIAL,
-  default_event_id BIGSERIAL,
-  rule_output_id BIGSERIAL,
-  notification_type_id BIGSERIAL,
+  organization_id BIGSERIAL REFERENCES organization(id), -- N:M
+  project_id BIGSERIAL REFERENCES project(id),
+  default_event_id BIGSERIAL REFERENCES default_event(id), 
+  rule_output_id BIGSERIAL REFERENCES rule_output(id), 
+  notification_type_id BIGSERIAL REFERENCES notification_type(id),
   description VARCHAR NOT NULL,
   metadata_detail JSONB,
   time_notified DATETIME,
@@ -277,9 +277,9 @@ CREATE TABLE notification_type (
 
 CREATE TABLE asset (
   id BIGSERIAL PRIMARY KEY,
-  project_id BIGSERIAL,
-  asset_type_id BIGSERIAL,
-  vendor_id BIGSERIAL,
+  project_id BIGSERIAL REFERENCES project(id),
+  asset_type_id BIGSERIAL REFERENCES asset_type(id),
+  vendor_id BIGSERIAL REFERENCES vendor(id), -- N:M
   name VARCHAR NOT NULL,
   description VARCHAR,
   model VARCHAR,
@@ -297,27 +297,29 @@ CREATE TABLE asset_type (
 
 CREATE TABLE meter_reading (
   id BIGSERIAL PRIMARY KEY,
-  project_id BIGSERIAL,
-  meter_id BIGSERIAL,
-  meter_type_id BIGSERIAL,
+  project_id BIGSERIAL REFERENCES project(id),
+  meter_id BIGSERIAL REFERENCES meter(id),
+  meter_type_id BIGSERIAL REFERENCES meter_type(id),
   value NUMBER NOT NULL,
   reading_timestamp NOT NULL DATETIME,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 )
+
+  
 
 
 -- =========================
 -- SECTION 2: RELATIONSHIPS
 -- =========================
 
-ALTER TABLE project
-ADD CONSTRAINT fk_project_organization
-FOREIGN KEY (organization_id)
-REFERENCES organization(id);
+-- ALTER TABLE project
+-- ADD CONSTRAINT fk_project_organization
+-- FOREIGN KEY (organization_id)
+-- REFERENCES organization(id);
 
 -- =========================
 -- SECTION 3: INDEXES
 -- =========================
 
-CREATE INDEX idx_project_organization_id
-ON project(organization_id);
+-- CREATE INDEX idx_project_organization_id
+-- ON project(organization_id);
