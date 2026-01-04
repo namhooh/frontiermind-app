@@ -513,7 +513,7 @@ CREATE TABLE regulatory_fee (
   unit_value DECIMAL,
   reading_timestamp TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-)
+);
 
 CREATE TABLE market_price_type (
   id BIGSERIAL PRIMARY KEY,
@@ -534,7 +534,7 @@ CREATE TABLE market_price (
   unit_value DECIMAL,
   reading_timestamp TIMESTAMPTZ,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-)
+);
 
 CREATE TABLE contractor_report (
   id BIGSERIAL PRIMARY KEY,
