@@ -20,7 +20,7 @@ INSERT INTO billing_period (id, name, start_date, end_date, created_at) VALUES
 -- Production is lower than expected due to inverter failures
 INSERT INTO meter_reading (id, project_id, meter_id, meter_type_id, value, reading_timestamp, created_at)
 SELECT
-    generate_series(1, 720) as id,
+    ROW_NUMBER() OVER (ORDER BY timestamp_val) as id,
     1 as project_id,
     1 as meter_id,
     1 as meter_type_id,
@@ -287,7 +287,7 @@ INSERT INTO contractor_report (id, project_id, counterparty_id, raw_text, metada
 INSERT INTO weather_data (id, weather_data_type_id, country, region, source, unit, unit_value,
                          reading_timestamp, created_at)
 SELECT
-    generate_series(1, 120) as id,
+    ROW_NUMBER() OVER (ORDER BY timestamp_val) as id,
     1 as weather_data_type_id,
     'USA' as country,
     'Texas' as region,
