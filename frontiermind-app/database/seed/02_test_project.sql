@@ -1,0 +1,88 @@
+-- =====================================================
+-- TEST PROJECT SETUP
+-- =====================================================
+-- Project, contracts, clauses, tariffs, assets, meters,
+-- and data sources for the SunValley Solar Farm.
+-- =====================================================
+
+BEGIN;
+
+-- Project
+INSERT INTO project (id, organization_id, name, created_at) VALUES
+(1, 1, 'SunValley Solar Farm - 50MW', '2023-02-01 09:00:00+00');
+
+-- Contracts
+INSERT INTO contract (id, project_id, organization_id, counterparty_id, contract_type_id, contract_status_id,
+                      name, description, effective_date, end_date, file_location,
+                      created_at, updated_at, updated_by, version) VALUES
+(1, 1, 1, 1, 1, 1,
+ 'TechCorp PPA - SunValley Solar',
+ '20-year Power Purchase Agreement with TechCorp Industries for 50MW solar facility',
+ '2024-01-01', '2043-12-31', '/contracts/ppa/techcorp_sunvalley_2024.pdf',
+ '2023-11-01 10:00:00+00', '2023-11-01 10:00:00+00', 'legal@greenpower.com', 1),
+(2, 1, 1, 2, 2, 1,
+ 'SolarMaint O&M Agreement - SunValley',
+ 'Full-service O&M agreement for SunValley Solar Farm',
+ '2024-01-01', '2028-12-31', '/contracts/om/solarmaint_sunvalley_2024.pdf',
+ '2023-12-01 10:00:00+00', '2023-12-01 10:00:00+00', 'ops@greenpower.com', 1);
+
+-- Clauses
+INSERT INTO clause (id, project_id, contract_id, clause_responsibleparty_id, clause_type_id, clause_category_id,
+                    name, section_ref, raw_text, normalized_payload,
+                    created_at, updated_at, updated_by, version) VALUES
+-- PPA Availability Clause with LDs
+(1, 1, 1, 1, 1, 1,
+ 'Guaranteed Availability',
+ 'Section 4.2',
+ 'Seller shall ensure the Facility achieves a minimum annual Availability of 95%. Availability shall be calculated as (Actual Operating Hours / (Total Hours - Excused Outage Hours)) × 100%. For each percentage point below 95%, Seller shall pay Buyer liquidated damages equal to $50,000 per percentage point per Contract Year.',
+ '{"guarantee_type": "availability", "threshold": 95, "threshold_unit": "percent", "calculation_period": "annual", "formula": "(actual_hours - excused_hours) / (total_hours - excused_hours) * 100", "ld_per_point": 50000, "ld_currency": "USD", "excused_events": ["grid_outage", "force_majeure", "buyer_curtailment"]}'::jsonb,
+ '2023-11-01 10:00:00+00', '2023-11-01 10:00:00+00', 'legal@greenpower.com', 1),
+-- PPA Energy Pricing
+(2, 1, 1, 1, 2, 2,
+ 'Energy Pricing',
+ 'Section 3.1',
+ 'Buyer shall pay Seller for Delivered Energy at a rate of $0.045 per kWh, escalating at 2% annually.',
+ '{"rate_type": "energy", "base_rate": 0.045, "unit": "kWh", "currency": "USD", "escalation_rate": 0.02, "escalation_period": "annual"}'::jsonb,
+ '2023-11-01 10:00:00+00', '2023-11-01 10:00:00+00', 'legal@greenpower.com', 1),
+-- O&M Availability SLA
+(3, 1, 2, 2, 3, 1,
+ 'O&M Availability Performance',
+ 'Schedule A, Section 2.1',
+ 'Contractor shall maintain the Facility to achieve minimum 95% annual Availability. If Availability falls below 95% due to Contractor negligence or failure to perform maintenance, Contractor shall compensate Owner for resulting lost revenue and liquidated damages.',
+ '{"sla_type": "availability", "threshold": 95, "threshold_unit": "percent", "compensation_scope": ["lost_revenue", "ld_passthrough"], "exclusions": ["force_majeure", "equipment_defects", "owner_directed_outages"]}'::jsonb,
+ '2023-12-01 10:00:00+00', '2023-12-01 10:00:00+00', 'ops@greenpower.com', 1),
+-- O&M Service Fee
+(4, 1, 2, 2, 2, 3,
+ 'Monthly Service Fee',
+ 'Section 5.1',
+ 'Owner shall pay Contractor a fixed monthly service fee of $85,000, payable within 30 days of invoice.',
+ '{"fee_type": "fixed_monthly", "amount": 85000, "currency": "USD", "payment_terms": "net_30"}'::jsonb,
+ '2023-12-01 10:00:00+00', '2023-12-01 10:00:00+00', 'ops@greenpower.com', 1);
+
+-- Clause Tariffs
+INSERT INTO clause_tariff (id, project_id, contract_id, tariff_type_id, currency_id,
+                          name, valid_from, valid_to, base_rate, unit, logic_parameters, created_at) VALUES
+(1, 1, 1, 1, 1,
+ 'PPA Energy Rate - Year 1',
+ '2024-01-01', '2024-12-31', 0.045, 'kWh',
+ '{"escalation_rate": 0.02, "annual_adjustment": true}'::jsonb,
+ '2023-11-01 10:00:00+00');
+
+-- Assets
+INSERT INTO asset (id, project_id, asset_type_id, vendor_id, name, description, model, serial_code, created_at) VALUES
+(1, 1, 2, 2, 'Central Inverter 1', 'Primary 2.5MW central inverter', 'PVS980-58', 'INV-001-2023', '2023-08-15 10:00:00+00'),
+(2, 1, 2, 2, 'Central Inverter 2', 'Secondary 2.5MW central inverter', 'PVS980-58', 'INV-002-2023', '2023-08-15 10:00:00+00');
+
+-- Meters
+INSERT INTO meter (id, project_id, asset_id, vendor_id, meter_type_id, model, unit, created_at) VALUES
+(1, 1, NULL, 3, 1, 'PM5560', 'kWh', '2023-09-01 10:00:00+00'),
+(2, 1, NULL, 3, 2, 'PM5560', 'kWh', '2023-09-01 10:00:00+00');
+
+-- Data Sources
+INSERT INTO data_source (id, name, description, updated_frequency, created_at) VALUES
+(1, 'SCADA System', 'Plant supervisory control and data acquisition system', '15min', '2023-09-01 10:00:00+00'),
+(2, 'Weather Station', 'On-site meteorological station', '15min', '2023-09-01 10:00:00+00'),
+(3, 'Revenue Meter', 'Utility interconnection revenue meter', 'hourly', '2023-09-01 10:00:00+00'),
+(4, 'Contractor Report', 'Monthly O&M contractor reports', 'daily', '2023-09-01 10:00:00+00');
+
+COMMIT;
