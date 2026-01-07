@@ -1,0 +1,6 @@
+{
+  "buildCommand": "cd frontiermind-app && npm run build",
+  "devCommand": "cd frontiermind-app && npm run dev",
+  "installCommand": "cd frontiermind-app && npm install",
+  "outputDirectory": "frontiermind-app/.next"
+}
