@@ -10,7 +10,8 @@
       "Bash(git commit -m \"$\\(cat <<''EOF''\nFix duplicate key error in seed data\n\nReplace generate_series with ROW_NUMBER\\(\\) to avoid cross-join \nthat was creating duplicate IDs in meter_reading and weather_data \ninserts. The two generate_series statements were creating a \ncartesian product instead of correlated values.\n\n🤖 Generated with [Claude Code]\\(https://claude.com/claude-code\\)\n\nCo-Authored-By: Claude Sonnet 4.5 <noreply@anthropic.com>\nEOF\n\\)\")",
       "Bash(git commit:*)",
       "Bash(cat:*)",
-      "Bash(git pull:*)"
+      "Bash(git pull:*)",
+      "Bash(npm run build:*)"
     ]
   }
 }
