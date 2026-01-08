@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { Pool } from 'pg';
 import { testQueries } from '@/lib/testQueries';
+import { requireAuth } from '@/lib/auth/helpers';
 
 // Create PostgreSQL pool
 const pool = new Pool({
@@ -13,6 +14,9 @@ export async function GET(request: NextRequest) {
   const queryId = searchParams.get('id');
 
   try {
+    // Require authentication (staff can read)
+    await requireAuth();
+
     if (!queryId) {
       // Return list of all queries without executing them
       return NextResponse.json({
@@ -49,6 +53,18 @@ export async function GET(request: NextRequest) {
     });
 
   } catch (error) {
+    // Handle authentication errors
+    if (error instanceof Error &&
+        (error.message === 'Unauthorized' ||
+         error.message === 'Insufficient permissions' ||
+         error.message === 'User role not found')) {
+      return NextResponse.json(
+        { error: error.message },
+        { status: 401 }
+      );
+    }
+
+    // Handle other errors
     console.error('Query execution error:', error);
     return NextResponse.json(
       {
