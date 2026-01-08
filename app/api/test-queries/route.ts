@@ -54,6 +54,7 @@ export async function GET(request: NextRequest) {
 
   } catch (error) {
     console.error('API error:', error);
+    console.error('Error stack:', error instanceof Error ? error.stack : 'No stack');
 
     // Handle authentication errors
     if (error instanceof Error) {
@@ -73,13 +74,23 @@ export async function GET(request: NextRequest) {
           { status: 500 }
         );
       }
+
+      // Return detailed error for debugging
+      return NextResponse.json(
+        {
+          error: 'Server error',
+          message: error.message,
+          stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        },
+        { status: 500 }
+      );
     }
 
-    // Handle other errors
+    // Handle non-Error objects
     return NextResponse.json(
       {
-        error: 'Failed to execute query',
-        message: error instanceof Error ? error.message : 'Unknown error'
+        error: 'Unknown server error',
+        message: String(error)
       },
       { status: 500 }
     );

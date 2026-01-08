@@ -135,7 +135,11 @@ export default function TestQueriesPage() {
         if (data.queries) {
           setQueries(data.queries);
         } else if (data.error) {
-          setPageError(data.error);
+          // Show detailed error message if available
+          const errorMsg = data.message
+            ? `${data.error}: ${data.message}`
+            : data.error;
+          setPageError(errorMsg);
         }
       })
       .catch(err => {
