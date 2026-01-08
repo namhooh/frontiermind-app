@@ -120,13 +120,28 @@ export default function TestQueriesPage() {
   const [loadingQuery, setLoadingQuery] = useState<number | null>(null);
   const [results, setResults] = useState<Record<number, QueryResult>>({});
   const [errors, setErrors] = useState<Record<number, string>>({});
+  const [pageError, setPageError] = useState<string | null>(null);
 
   useEffect(() => {
     // Fetch list of queries
     fetch('/api/test-queries')
-      .then(res => res.json())
-      .then(data => setQueries(data.queries))
-      .catch(err => console.error('Failed to load queries:', err));
+      .then(res => {
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        return res.json();
+      })
+      .then(data => {
+        if (data.queries) {
+          setQueries(data.queries);
+        } else if (data.error) {
+          setPageError(data.error);
+        }
+      })
+      .catch(err => {
+        console.error('Failed to load queries:', err);
+        setPageError(err instanceof Error ? err.message : 'Failed to load queries');
+      });
   }, []);
 
   const executeQuery = async (id: number) => {
@@ -169,6 +184,13 @@ export default function TestQueriesPage() {
             Contract Compliance & Invoicing Engine test queries. Execute queries to verify the end-to-end functioning of the system.
           </p>
         </header>
+
+        {pageError && (
+          <div className="mb-8 p-6 bg-red-50 border-2 border-red-500">
+            <h3 className="font-mono text-lg font-bold text-red-800 mb-2">Error Loading Queries</h3>
+            <p className="font-mono text-sm text-red-700">{pageError}</p>
+          </div>
+        )}
 
         <div className="space-y-8">
           {queries.map((query) => (
