@@ -53,19 +53,29 @@ export async function GET(request: NextRequest) {
     });
 
   } catch (error) {
+    console.error('API error:', error);
+
     // Handle authentication errors
-    if (error instanceof Error &&
-        (error.message === 'Unauthorized' ||
-         error.message === 'Insufficient permissions' ||
-         error.message === 'User role not found')) {
-      return NextResponse.json(
-        { error: error.message },
-        { status: 401 }
-      );
+    if (error instanceof Error) {
+      if (error.message === 'Unauthorized' ||
+          error.message === 'Insufficient permissions' ||
+          error.message === 'User role not found') {
+        return NextResponse.json(
+          { error: error.message },
+          { status: 401 }
+        );
+      }
+
+      // Handle database errors
+      if (error.message.startsWith('Database error:')) {
+        return NextResponse.json(
+          { error: 'Database connection error', message: error.message },
+          { status: 500 }
+        );
+      }
     }
 
     // Handle other errors
-    console.error('Query execution error:', error);
     return NextResponse.json(
       {
         error: 'Failed to execute query',

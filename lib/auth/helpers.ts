@@ -17,33 +17,48 @@ export async function getCurrentUser() {
 }
 
 export async function getUserRole(userId: string) {
-  const result = await pool.query(
-    `SELECT r.*, o.name as organization_name
-     FROM role r
-     LEFT JOIN organization o ON r.organization_id = o.id
-     WHERE r.user_id = $1 AND r.is_active = true`,
-    [userId]
-  )
+  try {
+    const result = await pool.query(
+      `SELECT r.*, o.name as organization_name
+       FROM role r
+       LEFT JOIN organization o ON r.organization_id = o.id
+       WHERE r.user_id = $1 AND r.is_active = true`,
+      [userId]
+    )
 
-  return result.rows[0] || null
+    return result.rows[0] || null
+  } catch (error) {
+    console.error('Database error in getUserRole:', error)
+    throw new Error(`Database error: ${error instanceof Error ? error.message : 'Unknown error'}`)
+  }
 }
 
 export async function requireAuth(requiredRole?: 'admin' | 'staff') {
-  const user = await getCurrentUser()
+  try {
+    const user = await getCurrentUser()
 
-  if (!user) {
-    throw new Error('Unauthorized')
+    if (!user) {
+      throw new Error('Unauthorized')
+    }
+
+    console.log('Auth: User authenticated, ID:', user.id)
+
+    const role = await getUserRole(user.id)
+
+    if (!role) {
+      console.log('Auth: No role found for user:', user.id)
+      throw new Error('User role not found')
+    }
+
+    console.log('Auth: User role:', role.role_type, 'Org:', role.organization_name)
+
+    if (requiredRole && role.role_type !== requiredRole) {
+      throw new Error('Insufficient permissions')
+    }
+
+    return { user, role }
+  } catch (error) {
+    console.error('Auth error in requireAuth:', error)
+    throw error
   }
-
-  const role = await getUserRole(user.id)
-
-  if (!role) {
-    throw new Error('User role not found')
-  }
-
-  if (requiredRole && role.role_type !== requiredRole) {
-    throw new Error('Insufficient permissions')
-  }
-
-  return { user, role }
 }
