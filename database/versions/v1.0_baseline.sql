@@ -1,3 +1,9 @@
+-- Schema Version: v1.0 (Baseline)
+-- Description: Initial database schema with 50+ tables for contract compliance system
+-- Generated: 2025-01-XX (Baseline creation date)
+-- DO NOT EDIT - This is a snapshot for reference only
+-- Source of truth: This baseline file + migrations/
+
 -- =========================
 -- SECTION 1: TABLES
 -- =========================
