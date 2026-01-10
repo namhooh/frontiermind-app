@@ -46,7 +46,7 @@
 │     • Create anonymized version of contract                 │
 │                                                              │
 │  Step 4: Document Parsing (LlamaParse API)                  │
-│     • Send anonymized text to LlamaParse                    │
+│     • Send anonymized document to LlamaParse                │
 │     • Extract structured text from PDF                      │
 │     • Preserve tables, headers, section numbers             │
 │     • Cost: $0.30 per 100 pages                            │
@@ -313,20 +313,23 @@ Requirements:
    - async process_contract(file_path: str) -> ContractParseResult
 
 2. Pipeline (EXACT ORDER):
-   a. Parse document with LlamaParse
+   a. Detect PII with Presidio (LOCAL, BEFORE any external APIs)
+      - Use PIIDetector service
+      - Find: emails, SSNs, phone numbers, names
+      - Log PII entities found
+
+   b. Anonymize PII (LOCAL)
+      - Replace PII with placeholders
+      - Create encrypted mapping
+      - Store mapping separately
+
+   c. Parse document with LlamaParse
+      - Send anonymized document to LlamaParse API
       - Use custom parsing instructions for energy contracts
       - Focus on availability, LD, pricing clauses
 
-   b. Detect PII with Presidio (LOCAL, before external APIs)
-      - Use PIIDetector service
-      - Log PII entities found
-
-   c. Anonymize PII (LOCAL)
-      - Replace PII with placeholders
-      - Create encrypted mapping
-
    d. Extract clauses with Claude API
-      - Send anonymized text only
+      - Send anonymized, parsed text to Claude 3.5 Sonnet
       - Extract: availability, LD, pricing, payment terms
       - Return structured JSON with normalized_payload
 
@@ -680,9 +683,9 @@ IMPORTANT: PII Detection MUST happen BEFORE any external API calls.
 
 Pipeline order is CRITICAL:
 1. ✅ Upload document
-2. ✅ Parse with LlamaParse (or PyMuPDF for text PDFs)
-3. ✅ Detect PII with Presidio (LOCAL)
-4. ✅ Anonymize PII (LOCAL)
+2. ✅ Detect PII with Presidio (LOCAL)
+3. ✅ Anonymize PII (LOCAL)
+4. ✅ THEN send to LlamaParse (sees anonymized document only)
 5. ✅ THEN send to Claude API (sees anonymized text only)
 6. ✅ Store in database (anonymized + encrypted mapping)
 
