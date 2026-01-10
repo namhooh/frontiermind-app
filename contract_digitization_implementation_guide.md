@@ -1,0 +1,942 @@
+# Contract Digitization Workflow - Implementation Guide
+
+## For VS Code + Claude Code Development
+
+---
+
+## 🎯 Project Overview
+
+**Goal:** Build an energy contract compliance system that automatically parses contracts, detects defaults, calculates liquidated damages, and manages the entire compliance workflow.
+
+**Architecture:** Hybrid (Python Backend + Next.js Frontend)
+
+---
+
+## 📋 System Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                  FRONTEND (Vercel/Next.js)                   │
+│                     TypeScript/React                         │
+│  • User uploads contracts                                   │
+│  • Dashboard showing defaults, LDs, invoices                │
+│  • Forms for manual data entry                              │
+│  • API client calling Python backend                        │
+└────────────┬────────────────────────────────────────────────┘
+             │ HTTPS/REST API
+             │
+┌────────────▼────────────────────────────────────────────────┐
+│              PYTHON BACKEND (FastAPI/Cloud Run)              │
+│                                                              │
+│  CONTRACT PARSING PIPELINE:                                 │
+│  ────────────────────────────────────────────────────────   │
+│                                                              │
+│  Step 1: Document Upload                                    │
+│     • Receive PDF/DOCX file from frontend                   │
+│     • Save temporarily for processing                        │
+│                                                              │
+│  Step 2: PII Detection (LOCAL - Presidio) ⭐                │
+│     • Detect PII BEFORE any external API calls              │
+│     • Find: emails, SSNs, phone numbers, names              │
+│     • Privacy-first approach                                │
+│                                                              │
+│  Step 3: PII Anonymization (LOCAL - Presidio)               │
+│     • Replace PII with placeholders                         │
+│     • Store encrypted PII mapping for later                 │
+│     • Create anonymized version of contract                 │
+│                                                              │
+│  Step 4: Document Parsing (LlamaParse API)                  │
+│     • Send anonymized text to LlamaParse                    │
+│     • Extract structured text from PDF                      │
+│     • Preserve tables, headers, section numbers             │
+│     • Cost: $0.30 per 100 pages                            │
+│                                                              │
+│  Step 5: Clause Extraction (Claude API)                     │
+│     • Send parsed text to Claude 3.5 Sonnet                 │
+│     • Extract key clauses:                                  │
+│       - Availability guarantees (95% uptime, etc.)          │
+│       - Liquidated damages (LD) formulas                    │
+│       - Pricing terms                                       │
+│       - Payment terms                                       │
+│     • Normalize to standard JSON schema                     │
+│     • Cost: $0.50-1.00 per contract                        │
+│                                                              │
+│  Step 6: Database Storage (Supabase/PostgreSQL)             │
+│     • Store contract metadata                               │
+│     • Store extracted clauses                               │
+│     • Store PII mapping (encrypted, separate table)         │
+│     • Link to project/organization                          │
+│                                                              │
+│  RULES ENGINE:                                              │
+│  ────────────────────────────────────────────────────────   │
+│  • Evaluate meter data against contract clauses            │
+│  • Detect defaults (availability < threshold)              │
+│  • Calculate liquidated damages                            │
+│  • Generate notifications                                   │
+│  • Create invoices                                          │
+│                                                              │
+│  DATA PROCESSING:                                           │
+│  ────────────────────────────────────────────────────────   │
+│  • Aggregate hourly meter readings (pandas)                │
+│  • Calculate availability, capacity factor                  │
+│  • Handle missing data, interpolation                       │
+│  • Time-series analysis                                     │
+└────────────┬────────────────────────────────────────────────┘
+             │
+┌────────────▼────────────────────────────────────────────────┐
+│              DATABASE (Supabase/PostgreSQL)                  │
+│                                                              │
+│  EXISTING TABLES (ALREADY IMPLEMENTED):                     │
+│  ✅ contract - Contract master table                       │
+│  ✅ clause - Individual contract clauses with              │
+│              normalized_payload JSONB                       │
+│  ✅ clause_type, clause_category - Clause classification   │
+│  ✅ clause_tariff - Tariff-specific clause data            │
+│  ✅ default_event - Contract breach events                 │
+│  ✅ rule_output - LD calculation results                   │
+│  ✅ meter_reading, meter_aggregate - Metering data         │
+│  ✅ invoice_header, invoice_line_item - Billing tables     │
+│  ✅ notification - Alert system                            │
+│  ✅ organization, project, counterparty - Multi-tenant     │
+│                                                              │
+│  Row-Level Security (RLS) enabled                           │
+│  Multi-tenant isolation via organization_id                 │
+│                                                              │
+│  TABLES TO BE ADDED (Phase 2):                             │
+│  ❌ contract_pii_mapping - Encrypted PII storage (P0)      │
+│  ❌ contract parsing status fields in contract table (P1)  │
+│  ❌ clause enhancements: summary, beneficiary_party,       │
+│      confidence_score (P2)                                  │
+│                                                              │
+│  See database/migrations/002-005 for migration details.    │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 📊 Implementation Status
+
+**CURRENT STATE (Phase 1 - Completed):**
+- ✅ **Database Schema:** 50+ tables for contract compliance, invoicing, and metering
+  - contract, clause, clause_type, clause_category, clause_tariff
+  - meter_reading, meter_aggregate
+  - default_event, rule_output (for LD calculations)
+  - invoice_header, invoice_line_item, invoice_comparison
+  - notification, event, fault
+  - organization, project, counterparty (multi-tenant structure)
+- ✅ **Next.js Frontend:** Authentication system (Supabase Auth), test queries dashboard
+- ✅ **Deployment:** Vercel (production-ready)
+
+**PLANNED STATE (Phase 2 - Contract Digitization):**
+- ❌ **Python Backend:** Not yet implemented (Tasks 1.1-1.4 below)
+- ❌ **PII Detection:** Presidio integration pending (Task 1.2)
+- ❌ **Contract Parser:** LlamaParse + Claude API integration pending (Task 1.3)
+- ❌ **Database Migrations:** Need to add contract_pii_mapping table and parsing status fields (see database/migrations/002-005)
+- ❌ **Rules Engine:** LD calculation automation pending (Phase 2)
+
+**Next Steps:**
+1. Create database migrations for PII mapping and parsing status fields
+2. Initialize Python FastAPI backend
+3. Implement contract parsing pipeline (PII detection → parsing → clause extraction)
+4. Build rules engine for automated LD calculations
+
+---
+
+## 🏗️ Project Structure
+
+```
+energy-compliance-system/
+│
+├── frontend/                          # Next.js application (Vercel)
+│   ├── app/
+│   │   ├── contracts/
+│   │   │   ├── upload/
+│   │   │   │   └── page.tsx          # Contract upload UI
+│   │   │   └── [id]/
+│   │   │       └── page.tsx          # View contract details
+│   │   ├── dashboard/
+│   │   │   └── page.tsx              # Main dashboard
+│   │   ├── defaults/
+│   │   │   └── page.tsx              # Default events list
+│   │   └── api/
+│   │       └── contracts/
+│   │           └── route.ts          # API route (proxy to Python)
+│   ├── components/
+│   │   ├── ContractUpload.tsx
+│   │   ├── DashboardStats.tsx
+│   │   └── DefaultEventCard.tsx
+│   ├── lib/
+│   │   ├── api-client.ts             # Python backend client
+│   │   └── supabase.ts               # Supabase client
+│   ├── package.json
+│   ├── tsconfig.json
+│   └── next.config.js
+│
+├── backend/                           # Python FastAPI application
+│   ├── main.py                       # FastAPI app entry point
+│   ├── requirements.txt              # Python dependencies
+│   ├── Dockerfile                    # For Cloud Run deployment
+│   │
+│   ├── api/                          # API routes
+│   │   ├── __init__.py
+│   │   ├── contracts.py              # Contract endpoints
+│   │   ├── rules.py                  # Rules engine endpoints
+│   │   └── meters.py                 # Meter data endpoints
+│   │
+│   ├── services/                     # Business logic
+│   │   ├── __init__.py
+│   │   ├── contract_parser.py        # CONTRACT PARSING PIPELINE
+│   │   ├── pii_detector.py           # Presidio integration
+│   │   ├── rules_engine.py           # Rules evaluation
+│   │   └── meter_aggregator.py       # Meter data processing
+│   │
+│   ├── models/                       # Pydantic models
+│   │   ├── __init__.py
+│   │   ├── contract.py
+│   │   ├── clause.py
+│   │   └── rule_result.py
+│   │
+│   ├── db/                           # Database utilities
+│   │   ├── __init__.py
+│   │   └── connection.py
+│   │
+│   └── tests/                        # pytest tests
+│       ├── test_contract_parser.py
+│       ├── test_pii_detector.py
+│       └── test_rules_engine.py
+│
+├── database/                          # Database schema & migrations
+│   ├── schema/
+│   │   └── 00_initial_schema.sql    # Your existing schema
+│   ├── migrations/
+│   │   └── (future migrations)
+│   └── seed/
+│       ├── 00_reference_data.sql    # Lookup tables
+│       └── 01_test_data.sql         # Test scenario
+│
+└── docs/                             # Documentation
+    ├── API.md                        # API documentation
+    ├── DEPLOYMENT.md                 # Deployment guide
+    └── ARCHITECTURE.md               # This file
+```
+
+---
+
+## 🔧 Implementation Instructions for Claude Code
+
+### **Phase 1: Python Backend Setup (Week 1-2)**
+
+#### **Task 1.1: Initialize Python Backend**
+
+**Prompt for Claude Code:**
+
+```
+Create a FastAPI backend for energy contract compliance system.
+
+Requirements:
+1. Create backend/ folder with FastAPI structure
+2. Set up main.py with CORS for Vercel frontend
+3. Create requirements.txt with:
+   - fastapi
+   - uvicorn
+   - presidio-analyzer
+   - presidio-anonymizer
+   - llama-parse
+   - anthropic
+   - pandas
+   - numpy
+   - sqlalchemy
+   - psycopg2-binary
+   - python-dotenv
+   - pydantic
+4. Create .env.example with:
+   - LLAMA_CLOUD_API_KEY
+   - ANTHROPIC_API_KEY
+   - SUPABASE_DB_URL
+   - SUPABASE_SERVICE_KEY
+5. Add health check endpoint at /health
+
+Use Python 3.11+ with type hints and async where appropriate.
+```
+
+#### **Task 1.2: Implement PII Detection Service**
+
+**Prompt for Claude Code:**
+
+```
+Implement PII detection service using Microsoft Presidio.
+
+File: backend/services/pii_detector.py
+
+Requirements:
+1. Class: PIIDetector with methods:
+   - detect(text: str) -> List[PIIEntity]
+   - anonymize(text: str, entities: List[PIIEntity]) -> AnonymizedResult
+   - create_mapping(entities: List[PIIEntity], original_text: str) -> dict
+
+2. Detect these PII types:
+   - EMAIL_ADDRESS
+   - PHONE_NUMBER
+   - PERSON (names)
+   - US_SSN
+   - CREDIT_CARD
+   - Custom: CONTRACT_ID (pattern: PPA-YYYY-NNNNNN)
+
+3. Anonymization strategies:
+   - EMAIL: replace with <EMAIL_REDACTED>
+   - PHONE: replace with <PHONE_REDACTED>
+   - PERSON: replace with <NAME_REDACTED>
+   - SSN/CREDIT_CARD: redact completely
+   - ORG: keep (needed for context)
+
+4. Return AnonymizedResult with:
+   - anonymized_text: str
+   - pii_count: int
+   - entities_found: List[PIIEntity]
+   - mapping: dict (for potential re-identification)
+
+Include error handling and logging.
+Use spaCy en_core_web_lg model.
+```
+
+#### **Task 1.3: Implement Contract Parser Service**
+
+**Prompt for Claude Code:**
+
+```
+Implement contract parsing service with privacy-first design.
+
+File: backend/services/contract_parser.py
+
+Requirements:
+1. Class: ContractParser with method:
+   - async process_contract(file_path: str) -> ContractParseResult
+
+2. Pipeline (EXACT ORDER):
+   a. Parse document with LlamaParse
+      - Use custom parsing instructions for energy contracts
+      - Focus on availability, LD, pricing clauses
+
+   b. Detect PII with Presidio (LOCAL, before external APIs)
+      - Use PIIDetector service
+      - Log PII entities found
+
+   c. Anonymize PII (LOCAL)
+      - Replace PII with placeholders
+      - Create encrypted mapping
+
+   d. Extract clauses with Claude API
+      - Send anonymized text only
+      - Extract: availability, LD, pricing, payment terms
+      - Return structured JSON with normalized_payload
+
+   e. Store in database
+      - Save contract metadata
+      - Save clauses with normalized data
+      - Save encrypted PII mapping (separate table)
+
+3. Return ContractParseResult with:
+   - contract_id: int
+   - clauses: List[ExtractedClause]
+   - pii_detected: int
+   - pii_anonymized: int
+   - processing_time: float
+   - status: str
+
+Include comprehensive error handling and logging.
+Add timing for each step.
+Use Pydantic models for all data structures.
+```
+
+#### **Task 1.4: Create API Endpoints**
+
+**Prompt for Claude Code:**
+
+```
+Create API endpoints for contract processing.
+
+File: backend/api/contracts.py
+
+Endpoints:
+1. POST /api/contracts/parse
+   - Accept file upload (PDF/DOCX)
+   - Call ContractParser.process_contract()
+   - Return processing results
+   - Handle errors gracefully
+
+2. GET /api/contracts/{contract_id}
+   - Retrieve contract details
+   - Include clauses
+   - Exclude PII mapping (admin only)
+
+3. GET /api/contracts/{contract_id}/clauses
+   - List all clauses for contract
+   - Filter by clause_type (query param)
+
+4. POST /api/contracts/{contract_id}/decrypt-pii
+   - Admin only endpoint
+   - Decrypt PII mapping
+   - Require authentication
+   - Log access
+
+Include request/response models using Pydantic.
+Add OpenAPI documentation.
+Use dependency injection for services.
+```
+
+---
+
+### **Phase 2: Database Integration (Week 2)**
+
+#### **Task 2.1: Add PII Mapping Table**
+
+**Prompt for Claude Code:**
+
+```
+Create database migration for PII mapping storage.
+
+File: database/migrations/2025_01_10_01_add_pii_mapping.sql
+
+Requirements:
+1. Create table: contract_pii_mapping
+   - id: BIGSERIAL PRIMARY KEY
+   - contract_id: BIGINT REFERENCES contract(id) ON DELETE CASCADE
+   - encrypted_mapping: BYTEA NOT NULL
+   - pii_entities_count: INTEGER
+   - created_at: TIMESTAMPTZ DEFAULT NOW()
+   - created_by: UUID REFERENCES auth.users(id)
+   - accessed_at: TIMESTAMPTZ
+   - accessed_by: UUID REFERENCES auth.users(id)
+
+2. Add indexes:
+   - contract_id
+   - created_at
+
+3. Enable RLS:
+   - Only admins can SELECT
+   - Only system can INSERT
+
+4. Add helper function:
+   - get_decrypted_pii_mapping(contract_id, encryption_key) -> JSONB
+   - Requires admin role
+
+5. Add comments explaining encryption approach
+
+Include UP and DOWN migrations.
+Use pgcrypto extension for encryption.
+```
+
+#### **Task 2.2: Create Database Service**
+
+**Prompt for Claude Code:**
+
+```
+Implement database service for contract storage.
+
+File: backend/db/contract_repository.py
+
+Requirements:
+1. Class: ContractRepository with methods:
+   - store_contract(metadata: dict, clauses: List[Clause], pii_mapping: dict) -> int
+   - get_contract(contract_id: int) -> Contract
+   - get_clauses(contract_id: int, clause_type: Optional[str]) -> List[Clause]
+   - store_pii_mapping(contract_id: int, mapping: dict, encryption_key: str) -> None
+   - get_pii_mapping(contract_id: int, encryption_key: str) -> dict (admin only)
+
+2. Use SQLAlchemy ORM or raw SQL with psycopg2
+3. Handle transactions properly (rollback on error)
+4. Use connection pooling
+5. Add retry logic for transient failures
+
+Include comprehensive error handling.
+Log all database operations.
+Use prepared statements to prevent SQL injection.
+```
+
+---
+
+### **Phase 3: Rules Engine (Week 3-4)**
+
+#### **Task 3.1: Implement Rules Engine**
+
+**Prompt for Claude Code:**
+
+```
+Implement native Python rules engine for contract compliance.
+
+File: backend/services/rules_engine.py
+
+Requirements:
+1. Class: RulesEngine with method:
+   - evaluate_period(contract_id: int, period_start: date, period_end: date) -> RuleEvaluationResult
+
+2. Rule Types to Implement:
+
+   a. AvailabilityRule:
+      - Load meter data for period
+      - Calculate actual availability: (total_hours - outage_hours) / total_hours * 100
+      - Compare to clause threshold (e.g., 95%)
+      - If breach: calculate LD = shortfall * ld_per_point
+      - Apply cap if specified
+      - Return RuleResult with all details
+
+   b. CapacityFactorRule:
+      - Load generation data
+      - Calculate capacity factor
+      - Compare to guarantee
+      - Calculate LD if applicable
+
+   c. PricingRule:
+      - Apply escalation formulas
+      - Calculate current rates
+      - Handle CPI adjustments
+
+3. Each rule should:
+   - Use pandas for data manipulation
+   - Handle missing data
+   - Account for excused events (force majeure, grid outages)
+   - Log all calculations
+   - Return structured results
+
+4. Return RuleEvaluationResult with:
+   - default_events: List[DefaultEvent]
+   - ld_total: Decimal
+   - notifications_generated: int
+   - processing_notes: List[str]
+
+Use Decimal for all financial calculations (no float).
+Include comprehensive docstrings.
+Add unit tests for each rule type.
+```
+
+#### **Task 3.2: Create Rules API Endpoints**
+
+**Prompt for Claude Code:**
+
+```
+Create API endpoints for rules engine.
+
+File: backend/api/rules.py
+
+Endpoints:
+1. POST /api/rules/evaluate
+   - Body: { contract_id, period_start, period_end }
+   - Evaluate all rules for period
+   - Store default events in database
+   - Generate notifications
+   - Return results
+
+2. GET /api/rules/defaults
+   - Query params: project_id, status, date_range
+   - List default events
+   - Include LD amounts
+   - Pagination support
+
+3. POST /api/rules/defaults/{id}/cure
+   - Mark default as cured
+   - Calculate final LD after cure
+   - Update invoice
+
+Include request/response models.
+Add validation for date ranges.
+Log all rule evaluations for audit trail.
+```
+
+---
+
+### **Phase 4: Frontend Integration (Week 4-5)**
+
+#### **Task 4.1: Create Contract Upload Component**
+
+**Prompt for Claude Code:**
+
+```
+Create React component for contract upload.
+
+File: frontend/components/ContractUpload.tsx
+
+Requirements:
+1. File upload with drag-and-drop
+2. Accept only .pdf and .docx files
+3. Show upload progress
+4. Display processing status:
+   - Uploading...
+   - Detecting PII...
+   - Parsing document...
+   - Extracting clauses...
+   - Storing in database...
+   - Complete!
+5. Show results:
+   - Contract ID
+   - Clauses extracted count
+   - PII entities detected
+   - Processing time
+6. Error handling with user-friendly messages
+7. Link to view contract details
+
+Use Next.js 14 App Router.
+Use Tailwind CSS for styling.
+Use React Query for API calls.
+Include loading states and error boundaries.
+```
+
+#### **Task 4.2: Create API Client for Python Backend**
+
+**Prompt for Claude Code:**
+
+```
+Create TypeScript API client for Python backend.
+
+File: frontend/lib/api-client.ts
+
+Requirements:
+1. Class: APIClient with methods:
+   - uploadContract(file: File) -> Promise<ContractParseResult>
+   - getContract(id: number) -> Promise<Contract>
+   - getClauses(contractId: number, type?: string) -> Promise<Clause[]>
+   - evaluateRules(contractId: number, periodStart: Date, periodEnd: Date) -> Promise<RuleEvaluationResult>
+   - getDefaults(filters?: DefaultFilters) -> Promise<DefaultEvent[]>
+
+2. Features:
+   - Automatic retry on network errors
+   - Request/response logging
+   - Error handling with typed errors
+   - Progress tracking for uploads
+   - Authentication token injection
+   - Base URL from environment variable
+
+3. TypeScript interfaces for all request/response types
+
+Use fetch API with proper headers.
+Include TypeScript generics for type safety.
+Add JSDoc comments for each method.
+```
+
+---
+
+### **Phase 5: Deployment (Week 5-6)**
+
+#### **Task 5.1: Create Dockerfile for Python Backend**
+
+**Prompt for Claude Code:**
+
+```
+Create Dockerfile for deploying Python backend to Google Cloud Run.
+
+File: backend/Dockerfile
+
+Requirements:
+1. Use python:3.11-slim base image
+2. Install system dependencies:
+   - gcc (for compiling Python packages)
+   - libpq-dev (for PostgreSQL)
+3. Copy requirements.txt and install Python packages
+4. Download spaCy model: en_core_web_lg
+5. Copy application code
+6. Set environment variables:
+   - PORT=8080
+   - PYTHONUNBUFFERED=1
+7. Run with: uvicorn main:app --host 0.0.0.0 --port 8080
+
+Optimize for:
+- Small image size (use multi-stage if needed)
+- Fast startup time
+- Security (non-root user)
+```
+
+#### **Task 5.2: Create Cloud Run Deployment Script**
+
+**Prompt for Claude Code:**
+
+```
+Create deployment script for Google Cloud Run.
+
+File: backend/deploy.sh
+
+Requirements:
+1. Build Docker image
+2. Push to Google Container Registry
+3. Deploy to Cloud Run with:
+   - Memory: 2Gi
+   - Timeout: 300s
+   - Max instances: 10
+   - Allow unauthenticated (or setup auth)
+   - Environment variables from .env
+
+4. Output the service URL
+
+Include error checking at each step.
+Add options for dev/staging/prod environments.
+```
+
+---
+
+## 📝 Key Implementation Notes for Claude Code
+
+### **Critical Privacy Point:**
+
+```
+IMPORTANT: PII Detection MUST happen BEFORE any external API calls.
+
+Pipeline order is CRITICAL:
+1. ✅ Upload document
+2. ✅ Parse with LlamaParse (or PyMuPDF for text PDFs)
+3. ✅ Detect PII with Presidio (LOCAL)
+4. ✅ Anonymize PII (LOCAL)
+5. ✅ THEN send to Claude API (sees anonymized text only)
+6. ✅ Store in database (anonymized + encrypted mapping)
+
+DO NOT send PII to external services.
+```
+
+### **Data Models (Pydantic)**
+
+```python
+# backend/models/contract.py
+
+from pydantic import BaseModel, Field
+from typing import List, Dict, Optional
+from datetime import datetime
+from decimal import Decimal
+
+class PIIEntity(BaseModel):
+    entity_type: str
+    start: int
+    end: int
+    score: float
+    text: str
+
+class AnonymizedResult(BaseModel):
+    anonymized_text: str
+    pii_count: int
+    entities_found: List[PIIEntity]
+    mapping: Dict[str, str]
+
+class ExtractedClause(BaseModel):
+    clause_name: str
+    section_reference: str
+    clause_type: str  # "availability", "liquidated_damages", etc.
+    clause_category: str  # "availability", "pricing", etc.
+    raw_text: str
+    summary: str
+    responsible_party: str
+    beneficiary_party: Optional[str]
+    normalized_payload: Dict[str, any]  # Structured data for rules
+    confidence_score: float
+
+class ContractParseResult(BaseModel):
+    contract_id: int
+    clauses: List[ExtractedClause]
+    pii_detected: int
+    pii_anonymized: int
+    processing_time: float
+    status: str
+
+class RuleResult(BaseModel):
+    breach: bool
+    rule_type: str
+    clause_id: int
+    calculated_value: Optional[float]
+    threshold_value: Optional[float]
+    shortfall: Optional[float]
+    ld_amount: Optional[Decimal]
+    details: Dict[str, any]
+
+class RuleEvaluationResult(BaseModel):
+    contract_id: int
+    period_start: datetime
+    period_end: datetime
+    default_events: List[RuleResult]
+    ld_total: Decimal
+    notifications_generated: int
+    processing_notes: List[str]
+```
+
+### **Environment Variables**
+
+```bash
+# .env (DO NOT COMMIT)
+
+# Python Backend
+LLAMA_CLOUD_API_KEY=llx_xxxxx
+ANTHROPIC_API_KEY=sk-ant-xxxxx
+SUPABASE_DB_URL=postgresql://user:pass@db.supabase.co:5432/postgres
+SUPABASE_SERVICE_KEY=eyJxxxxx
+PII_ENCRYPTION_KEY=your-strong-encryption-key
+
+# Frontend
+NEXT_PUBLIC_SUPABASE_URL=https://yourproject.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJxxxxx
+NEXT_PUBLIC_PYTHON_BACKEND_URL=https://backend.run.app
+```
+
+### **Testing Strategy**
+
+```python
+# backend/tests/test_contract_parser.py
+
+import pytest
+from services.contract_parser import ContractParser
+from services.pii_detector import PIIDetector
+
+@pytest.fixture
+def sample_contract_text():
+    return """
+    POWER PURCHASE AGREEMENT
+
+    Between SunValley Solar LLC (john.smith@sunvalley.com, 555-123-4567)
+    and GridCorp Energy Inc.
+
+    Section 4.1 Availability Guarantee
+    Seller shall ensure the Facility achieves a minimum annual
+    Availability of 95%.
+
+    Section 4.2 Liquidated Damages
+    For each percentage point below 95%, Seller shall pay $50,000.
+    """
+
+def test_pii_detection(sample_contract_text):
+    detector = PIIDetector()
+    entities = detector.detect(sample_contract_text)
+
+    # Should find email and phone
+    assert len(entities) >= 2
+    assert any(e.entity_type == "EMAIL_ADDRESS" for e in entities)
+    assert any(e.entity_type == "PHONE_NUMBER" for e in entities)
+
+def test_pii_anonymization(sample_contract_text):
+    detector = PIIDetector()
+    entities = detector.detect(sample_contract_text)
+    result = detector.anonymize(sample_contract_text, entities)
+
+    # PII should be removed
+    assert "john.smith@sunvalley.com" not in result.anonymized_text
+    assert "555-123-4567" not in result.anonymized_text
+    assert "<EMAIL_REDACTED>" in result.anonymized_text
+    assert "<PHONE_REDACTED>" in result.anonymized_text
+
+@pytest.mark.asyncio
+async def test_contract_parsing_pipeline():
+    parser = ContractParser()
+    # Test with sample PDF
+    result = await parser.process_contract("tests/fixtures/sample_ppa.pdf")
+
+    assert result.contract_id > 0
+    assert len(result.clauses) > 0
+    assert result.pii_detected >= 0
+    assert result.processing_time > 0
+
+    # Check availability clause extracted
+    availability_clauses = [
+        c for c in result.clauses
+        if c.clause_type == "availability"
+    ]
+    assert len(availability_clauses) > 0
+    assert availability_clauses[0].normalized_payload["threshold"] == 95.0
+```
+
+---
+
+## 🚀 Step-by-Step Getting Started
+
+### **For Claude Code in VS Code:**
+
+**Step 1: Set Up Python Backend**
+
+```
+Prompt: "Following the structure in IMPLEMENTATION_GUIDE.md, create the Python backend folder structure with FastAPI, initialize main.py with CORS, and create requirements.txt with all dependencies listed."
+```
+
+**Step 2: Implement PII Detection**
+
+```
+Prompt: "Implement backend/services/pii_detector.py following Task 1.2 in the guide. Include Presidio integration, custom recognizers for energy contracts, and comprehensive error handling."
+```
+
+**Step 3: Implement Contract Parser**
+
+```
+Prompt: "Implement backend/services/contract_parser.py following Task 1.3. CRITICAL: PII detection must happen BEFORE any external API calls. Follow the exact pipeline order specified."
+```
+
+**Step 4: Create API Endpoints**
+
+```
+Prompt: "Create backend/api/contracts.py with endpoints specified in Task 1.4. Include Pydantic models for request/response, OpenAPI docs, and error handling."
+```
+
+**Step 5: Test Locally**
+
+```bash
+cd backend
+pip install -r requirements.txt
+python -m spacy download en_core_web_lg
+uvicorn main:app --reload
+# Test at http://localhost:8000/docs
+```
+
+**Step 6: Set Up Frontend**
+
+```
+Prompt: "Create Next.js frontend in frontend/ folder. Set up App Router structure, create contract upload page following Task 4.1, and implement API client from Task 4.2."
+```
+
+**Step 7: Deploy**
+
+```
+Prompt: "Create Dockerfile and deploy.sh script following Tasks 5.1 and 5.2. Configure for Google Cloud Run deployment."
+```
+
+---
+
+## 📊 Success Metrics
+
+After implementation, you should achieve:
+
+- ✅ Contract parsing: 60-90 seconds per contract
+- ✅ PII detection: 85-90% accuracy
+- ✅ Clause extraction: 90-95% accuracy
+- ✅ Cost: ~$0.80-1.30 per contract
+- ✅ Zero PII exposure to external services
+- ✅ Complete audit trail
+
+---
+
+## 🔗 Additional Resources
+
+**Documentation Created:**
+
+1. `CONTRACT_PARSING_RESEARCH.md` - Tool comparison and recommendations
+2. `DATA_PRIVACY_SECURITY_GUIDE.md` - Privacy best practices
+3. `CUSTOM_TRAINING_PII_ANALYSIS.md` - Training options and PII tools
+4. `PYTHON_VS_JAVASCRIPT_ANALYSIS.md` - Architecture decision rationale
+5. `DATABASE_MANAGEMENT_GUIDE.md` - Database workflows
+6. `FILE_ORGANIZATION_PLAN.md` - Repository structure
+
+**Key Decisions:**
+
+- ✅ Use Presidio for PII (no JavaScript alternative)
+- ✅ Run PII detection LOCAL before external APIs
+- ✅ Python backend for processing, JS frontend for UI
+- ✅ No custom model training needed (Claude 3.5 Sonnet sufficient)
+- ✅ Hybrid architecture (not all JavaScript)
+
+---
+
+## 💡 Tips for Working with Claude Code
+
+1. **Reference this guide:** When asking Claude Code to implement features, reference specific task numbers (e.g., "Implement Task 1.2")
+
+2. **Provide context:** Include the relevant section of this guide in your prompt
+
+3. **Iterate:** Start with one service at a time, test, then move to next
+
+4. **Use the pipeline:** Always emphasize the PII-first pipeline order
+
+5. **Ask for tests:** Request pytest tests for each service
+
+6. **Request docs:** Ask for docstrings and OpenAPI documentation
+
+---
+
+**This guide provides everything Claude Code needs to implement the complete contract digitization workflow. Share it as context for any implementation tasks.** 🚀

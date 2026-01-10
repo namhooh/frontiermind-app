@@ -1,0 +1,71 @@
+project_context: |
+  Energy Contract Compliance & Invoicing System
+
+  CURRENT STATE (Phase 1 - Authentication & Infrastructure):
+  - Frontend: Next.js 16.0.8 + React + TypeScript
+  - Backend: Next.js API Routes (TypeScript)
+  - Database: Supabase PostgreSQL with 50+ tables for contract compliance
+  - Auth: Supabase Auth with role-based access (admin/staff)
+  - Deployment: Vercel (production)
+
+  PLANNED STATE (Phase 2 - Contract Digitization):
+  - Add Python FastAPI microservice for:
+    * PII Detection (Microsoft Presidio - runs locally)
+    * Document Parsing (LlamaParse API)
+    * Clause Extraction (Claude API - receives anonymized text only)
+  - Keep Next.js for UI and business logic
+  - Python services called from Next.js API routes
+
+  Contract Parsing Pipeline (CRITICAL ORDER):
+  1. Document Upload (Next.js UI)
+  2. PII Detection (Python/Presidio - BEFORE any external APIs)
+  3. PII Anonymization (Python/Presidio - local processing)
+  4. Document Parsing (LlamaParse API - anonymized text)
+  5. Clause Extraction (Claude API - anonymized text)
+  6. Database Storage (PostgreSQL)
+
+  Database Status:
+  ✅ Core tables exist: contract, clause, clause_type, default_event, rule_output
+  ✅ clause.normalized_payload JSONB ready for AI-extracted data
+  ❌ Missing: contract_pii_mapping, parsing status fields, clause enhancements
+
+  Key Requirements:
+  - Privacy-first: NO PII sent to external services
+  - Python for ML/data processing (Presidio, pandas)
+  - TypeScript for all UI and business logic
+  - Cost target: ~$1 per contract processing
+
+important_files:
+  # Current Implementation (Phase 1)
+  - lib/auth/helpers.ts
+  - lib/supabase/client.ts
+  - lib/supabase/server.ts
+  - middleware.ts
+  - app/login/page.tsx
+  - database/schema/00_initial_schema.sql
+  - database/migrations/001_migrate_role_to_auth.sql
+
+  # Planning Documents
+  - contract_digitization_implementation_guide.md  # Phase 2 detailed plan
+  - .clinerules  # This file - project guidance
+
+  # Future Implementation (Phase 2 - Not yet created)
+  - backend/services/pii_detector.py
+  - backend/services/contract_parser.py
+  - backend/api/contracts.py
+  - database/migrations/002_add_contract_pii_mapping.sql
+  - database/migrations/003_add_contract_parsing_fields.sql
+
+next_steps: |
+  Phase 2 - Contract Digitization (when ready):
+  1. Update implementation guide with existing table status
+  2. Create database migrations (002-005) as per plan
+  3. Run priority migrations (contract_pii_mapping, parsing fields)
+  4. Initialize Python backend (FastAPI setup)
+  5. Implement PII detection (Presidio)
+  6. Implement contract parsing pipeline
+
+  Future Phase - Authentication Enhancement:
+  - Separate implementation plan for advanced auth features
+  - User management dashboard
+  - Role-based permissions refinement
