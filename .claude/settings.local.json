@@ -18,7 +18,8 @@
       "Bash(jq:*)",
       "Bash(git restore:*)",
       "Bash(source venv/bin/activate)",
-      "Bash(pip install:*)"
+      "Bash(pip install:*)",
+      "Bash(grep:*)"
     ]
   }
 }
