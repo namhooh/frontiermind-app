@@ -12,7 +12,13 @@
       "Bash(cat:*)",
       "Bash(git pull:*)",
       "Bash(npm run build:*)",
-      "Bash(npm run dev:*)"
+      "Bash(npm run dev:*)",
+      "Bash(curl:*)",
+      "Bash(git push:*)",
+      "Bash(jq:*)",
+      "Bash(git restore:*)",
+      "Bash(source venv/bin/activate)",
+      "Bash(pip install:*)"
     ]
   }
 }

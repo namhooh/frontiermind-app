@@ -50,9 +50,9 @@ important_files:
   - .clinerules  # This file - project guidance
 
   # Future Implementation (Phase 2 - Not yet created)
-  - backend/services/pii_detector.py
-  - backend/services/contract_parser.py
-  - backend/api/contracts.py
+  - python-backend/services/pii_detector.py
+  - python-backend/services/contract_parser.py
+  - python-backend/api/contracts.py
   - database/migrations/002_add_contract_pii_mapping.sql
   - database/migrations/003_add_contract_parsing_fields.sql
 

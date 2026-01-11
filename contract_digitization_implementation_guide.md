@@ -172,7 +172,7 @@ energy-compliance-system/
 │   ├── tsconfig.json
 │   └── next.config.js
 │
-├── backend/                           # Python FastAPI application
+├── python-backend/                           # Python FastAPI application
 │   ├── main.py                       # FastAPI app entry point
 │   ├── requirements.txt              # Python dependencies
 │   ├── Dockerfile                    # For Cloud Run deployment
@@ -234,7 +234,7 @@ energy-compliance-system/
 Create a FastAPI backend for energy contract compliance system.
 
 Requirements:
-1. Create backend/ folder with FastAPI structure
+1. Create python-backend/ folder with FastAPI structure
 2. Set up main.py with CORS for Vercel frontend
 3. Create requirements.txt with:
    - fastapi
@@ -266,7 +266,7 @@ Use Python 3.11+ with type hints and async where appropriate.
 ```
 Implement PII detection service using Microsoft Presidio.
 
-File: backend/services/pii_detector.py
+File: python-backend/services/pii_detector.py
 
 Requirements:
 1. Class: PIIDetector with methods:
@@ -306,7 +306,7 @@ Use spaCy en_core_web_lg model.
 ```
 Implement contract parsing service with privacy-first design.
 
-File: backend/services/contract_parser.py
+File: python-backend/services/contract_parser.py
 
 Requirements:
 1. Class: ContractParser with method:
@@ -358,7 +358,7 @@ Use Pydantic models for all data structures.
 ```
 Create API endpoints for contract processing.
 
-File: backend/api/contracts.py
+File: python-backend/api/contracts.py
 
 Endpoints:
 1. POST /api/contracts/parse
@@ -436,7 +436,7 @@ Use pgcrypto extension for encryption.
 ```
 Implement database service for contract storage.
 
-File: backend/db/contract_repository.py
+File: python-backend/db/contract_repository.py
 
 Requirements:
 1. Class: ContractRepository with methods:
@@ -467,7 +467,7 @@ Use prepared statements to prevent SQL injection.
 ```
 Implement native Python rules engine for contract compliance.
 
-File: backend/services/rules_engine.py
+File: python-backend/services/rules_engine.py
 
 Requirements:
 1. Class: RulesEngine with method:
@@ -519,7 +519,7 @@ Add unit tests for each rule type.
 ```
 Create API endpoints for rules engine.
 
-File: backend/api/rules.py
+File: python-backend/api/rules.py
 
 Endpoints:
 1. POST /api/rules/evaluate
@@ -626,7 +626,7 @@ Add JSDoc comments for each method.
 ```
 Create Dockerfile for deploying Python backend to Google Cloud Run.
 
-File: backend/Dockerfile
+File: python-backend/Dockerfile
 
 Requirements:
 1. Use python:3.11-slim base image
@@ -654,7 +654,7 @@ Optimize for:
 ```
 Create deployment script for Google Cloud Run.
 
-File: backend/deploy.sh
+File: python-backend/deploy.sh
 
 Requirements:
 1. Build Docker image
@@ -695,7 +695,7 @@ DO NOT send PII to external services.
 ### **Data Models (Pydantic)**
 
 ```python
-# backend/models/contract.py
+# python-backend/models/contract.py
 
 from pydantic import BaseModel, Field
 from typing import List, Dict, Optional
@@ -776,7 +776,7 @@ NEXT_PUBLIC_PYTHON_BACKEND_URL=https://backend.run.app
 ### **Testing Strategy**
 
 ```python
-# backend/tests/test_contract_parser.py
+# python-backend/tests/test_contract_parser.py
 
 import pytest
 from services.contract_parser import ContractParser
@@ -853,25 +853,25 @@ Prompt: "Following the structure in IMPLEMENTATION_GUIDE.md, create the Python b
 **Step 2: Implement PII Detection**
 
 ```
-Prompt: "Implement backend/services/pii_detector.py following Task 1.2 in the guide. Include Presidio integration, custom recognizers for energy contracts, and comprehensive error handling."
+Prompt: "Implement python-backend/services/pii_detector.py following Task 1.2 in the guide. Include Presidio integration, custom recognizers for energy contracts, and comprehensive error handling."
 ```
 
 **Step 3: Implement Contract Parser**
 
 ```
-Prompt: "Implement backend/services/contract_parser.py following Task 1.3. CRITICAL: PII detection must happen BEFORE any external API calls. Follow the exact pipeline order specified."
+Prompt: "Implement python-backend/services/contract_parser.py following Task 1.3. CRITICAL: PII detection must happen BEFORE any external API calls. Follow the exact pipeline order specified."
 ```
 
 **Step 4: Create API Endpoints**
 
 ```
-Prompt: "Create backend/api/contracts.py with endpoints specified in Task 1.4. Include Pydantic models for request/response, OpenAPI docs, and error handling."
+Prompt: "Create python-backend/api/contracts.py with endpoints specified in Task 1.4. Include Pydantic models for request/response, OpenAPI docs, and error handling."
 ```
 
 **Step 5: Test Locally**
 
 ```bash
-cd backend
+cd python-backend
 pip install -r requirements.txt
 python -m spacy download en_core_web_lg
 uvicorn main:app --reload

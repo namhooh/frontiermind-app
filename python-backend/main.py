@@ -1,0 +1,90 @@
+"""
+Energy Contract Compliance System - FastAPI Backend
+
+This is the main entry point for the Python backend that handles:
+- Contract parsing and PII detection
+- Clause extraction using AI
+- Rules engine for compliance monitoring
+- Liquidated damages calculations
+"""
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
+from typing import Dict
+import os
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv()
+
+# Initialize FastAPI application
+app = FastAPI(
+    title="Energy Contract Compliance API",
+    description="Backend API for energy contract parsing, compliance monitoring, and liquidated damages calculation",
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc",
+)
+
+# Configure CORS for Vercel frontend
+origins = [
+    "http://localhost:3000",  # Next.js development server
+    "http://localhost:3001",
+    "https://*.vercel.app",  # Vercel production deployments
+    "https://vercel.app",
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+)
+
+
+@app.get("/", response_model=Dict[str, str])
+async def root() -> Dict[str, str]:
+    """
+    Root endpoint with API information.
+
+    Returns:
+        Dict containing API name, version, and documentation links
+    """
+    return {
+        "service": "Energy Contract Compliance API",
+        "version": "1.0.0",
+        "docs": "/docs",
+        "health": "/health",
+        "status": "running",
+    }
+
+
+@app.get("/health", response_model=Dict[str, str])
+async def health_check() -> Dict[str, str]:
+    """
+    Health check endpoint for monitoring and load balancers.
+
+    Returns:
+        Dict with health status and service information
+    """
+    return {
+        "status": "healthy",
+        "service": "energy-contract-compliance-backend",
+        "version": "1.0.0",
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+
+    # Run with: python main.py
+    # Or use: uvicorn main:app --reload --port 8000
+    uvicorn.run(
+        "main:app",
+        host="0.0.0.0",
+        port=8000,
+        reload=True,
+        log_level="info",
+    )
