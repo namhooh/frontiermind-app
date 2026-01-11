@@ -15,6 +15,9 @@ from typing import Dict
 import os
 from dotenv import load_dotenv
 
+# Import API routers
+from api.contracts import router as contracts_router
+
 # Load environment variables
 load_dotenv()
 
@@ -42,6 +45,9 @@ app.add_middleware(
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
+
+# Register API routers
+app.include_router(contracts_router)
 
 
 @app.get("/", response_model=Dict[str, str])

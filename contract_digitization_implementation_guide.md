@@ -35,24 +35,29 @@
 │     • Receive PDF/DOCX file from frontend                   │
 │     • Save temporarily for processing                        │
 │                                                              │
-│  Step 2: PII Detection (LOCAL - Presidio) ⭐                │
-│     • Detect PII BEFORE any external API calls              │
-│     • Find: emails, SSNs, phone numbers, names              │
-│     • Privacy-first approach                                │
-│                                                              │
-│  Step 3: PII Anonymization (LOCAL - Presidio)               │
-│     • Replace PII with placeholders                         │
-│     • Store encrypted PII mapping for later                 │
-│     • Create anonymized version of contract                 │
-│                                                              │
-│  Step 4: Document Parsing (LlamaParse API)                  │
-│     • Send anonymized document to LlamaParse                │
-│     • Extract structured text from PDF                      │
+│  Step 2: Document Parsing (LlamaParse API)                  │
+│     • Extract text from PDF/DOCX (supports scanned docs)    │
+│     • Use do_not_cache=True for immediate deletion          │
+│     • Technical necessity: OCR required before PII detect   │
+│     • LlamaParse sees original document for accurate OCR    │
 │     • Preserve tables, headers, section numbers             │
 │     • Cost: $0.30 per 100 pages                            │
 │                                                              │
+│  Step 3: PII Detection (LOCAL - Presidio) ⭐                │
+│     • Detect PII in extracted text (LOCAL processing)       │
+│     • Find: emails, SSNs, phone numbers, names              │
+│     • No external API calls for PII detection               │
+│     • Privacy-first: runs BEFORE Claude API call            │
+│                                                              │
+│  Step 4: PII Anonymization (LOCAL - Presidio)               │
+│     • Replace PII with placeholders (LOCAL processing)      │
+│     • Store encrypted PII mapping for later                 │
+│     • Create anonymized version of text                     │
+│                                                              │
 │  Step 5: Clause Extraction (Claude API)                     │
-│     • Send parsed text to Claude 3.5 Sonnet                 │
+│     • Send ONLY anonymized text to Claude 3.5 Sonnet        │
+│     • Claude NEVER sees original PII                        │
+│     • Privacy boundary: Claude sees only redacted text      │
 │     • Extract key clauses:                                  │
 │       - Availability guarantees (95% uptime, etc.)          │
 │       - Liquidated damages (LD) formulas                    │
@@ -60,6 +65,12 @@
 │       - Payment terms                                       │
 │     • Normalize to standard JSON schema                     │
 │     • Cost: $0.50-1.00 per contract                        │
+│                                                              │
+│  OPTIONAL ENHANCEMENT (Choice C-Hybrid):                    │
+│     • Before Step 2, try PyPDF2 for local text extraction   │
+│     • If successful (text-based PDF), skip LlamaParse       │
+│     • If fails (scanned PDF), fall back to LlamaParse       │
+│     • Reduces external API calls for text-based PDFs        │
 │                                                              │
 │  Step 6: Database Storage (Supabase/PostgreSQL)             │
 │     • Store contract metadata                               │
@@ -679,18 +690,103 @@ Add options for dev/staging/prod environments.
 ### **Critical Privacy Point:**
 
 ```
-IMPORTANT: PII Detection MUST happen BEFORE any external API calls.
+IMPORTANT: Privacy-First Pipeline with Pragmatic OCR Handling
 
-Pipeline order is CRITICAL:
-1. ✅ Upload document
-2. ✅ Detect PII with Presidio (LOCAL)
-3. ✅ Anonymize PII (LOCAL)
-4. ✅ THEN send to LlamaParse (sees anonymized document only)
-5. ✅ THEN send to Claude API (sees anonymized text only)
-6. ✅ Store in database (anonymized + encrypted mapping)
+Pipeline order (B-Simple Approach):
+1. ✅ Upload document (PDF/DOCX file)
 
-DO NOT send PII to external services.
+2. ✅ Document Parsing - LlamaParse OCR
+   • Technical Reality: Scanned PDFs require OCR to extract text
+   • LlamaParse sees original document (necessary for accurate OCR)
+   • Security: Use do_not_cache=True for immediate deletion
+   • Enterprise option: Self-hosted LlamaParse for full data control
+
+3. ✅ PII Detection - Presidio (LOCAL, no external APIs)
+   • Runs after text extraction, before Claude API
+   • Detects emails, SSNs, phone numbers, names
+
+4. ✅ PII Anonymization - Presidio (LOCAL, no external APIs)
+   • Replaces PII with placeholders
+   • Stores encrypted mapping separately
+
+5. ✅ Clause Extraction - Claude API
+   • CRITICAL: Claude receives ONLY anonymized text
+   • Claude NEVER sees original PII
+   • Privacy boundary maintained: AI service sees redacted text only
+
+6. ✅ Store in database (anonymized + encrypted PII mapping)
+
+PRIVACY GUARANTEE:
+- ✅ Claude AI (external service) sees ONLY anonymized text
+- ✅ PII detection/anonymization happens BEFORE Claude API call
+- ✅ LlamaParse OCR is a preprocessing step, not the privacy boundary
+- ✅ Privacy boundary = Claude never sees PII
+
+OPTIONAL ENHANCEMENT (Choice C-Hybrid):
+• Step 1.5: Try PyPDF2 local extraction first
+• If successful (text-based PDF), skip LlamaParse entirely
+• If fails (scanned/image PDF), fall back to LlamaParse
+• Reduces external API dependency for text-based documents
 ```
+
+### **LlamaParse Security Configuration**
+
+**OCR Service Data Handling:**
+
+LlamaParse is used for document OCR (text extraction from PDFs). While it processes the original document, the following security measures are recommended:
+
+**Security Options:**
+
+1. **`do_not_cache=True`** - Request immediate deletion after processing
+   ```python
+   self.llama_parser = LlamaParse(
+       api_key=llama_api_key,
+       result_type="text",
+       do_not_cache=True,  # Immediate deletion
+       parsing_instruction="Extract all text..."
+   )
+   ```
+
+2. **Default retention:** 48-hour cache policy (if do_not_cache not set)
+
+3. **Enterprise option:** Self-hosted LlamaParse deployment for complete data control
+   - Contact LlamaIndex for enterprise licensing
+   - Host OCR service on your own infrastructure
+   - Full control over data retention and processing
+
+**Trade-offs:**
+- LlamaParse sees original documents (OCR necessity for scanned PDFs)
+- Claude sees ONLY anonymized text (privacy boundary maintained)
+- For maximum privacy with text-based PDFs, use Choice C-Hybrid approach
+
+**Choice C-Hybrid Enhancement (Optional):**
+
+Add local PDF text extraction before falling back to LlamaParse:
+
+```python
+def _extract_text_local(self, file_bytes: bytes) -> Optional[str]:
+    """Try local PDF text extraction first (avoids external APIs)."""
+    try:
+        import PyPDF2
+        import io
+
+        pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_bytes))
+        text = "\n".join([page.extract_text() for page in pdf_reader.pages])
+
+        if text and len(text.strip()) > 100:  # Meaningful text found
+            logger.info("Successfully extracted text locally with PyPDF2")
+            return text
+
+        logger.info("Local extraction failed, falling back to LlamaParse")
+        return None  # Fall back to LlamaParse
+    except Exception as e:
+        logger.warning(f"PyPDF2 extraction failed: {e}, falling back to LlamaParse")
+        return None  # Fall back to LlamaParse for scanned PDFs
+```
+
+This optional enhancement attempts local extraction for text-based PDFs before resorting to LlamaParse OCR for scanned documents.
+
+---
 
 ### **Data Models (Pydantic)**
 
