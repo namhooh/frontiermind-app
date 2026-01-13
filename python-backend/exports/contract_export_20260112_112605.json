@@ -1,0 +1,97 @@
+{
+  "export_metadata": {
+    "exported_at": "2026-01-12T11:26:05.458231",
+    "source_file": "City Fort Collins_Power_Purchase_AgreementPPA).pdf",
+    "export_version": "1.0",
+    "includes_pii_data": false
+  },
+  "contract": {
+    "contract_id": 0,
+    "filename": "City Fort Collins_Power_Purchase_AgreementPPA).pdf",
+    "processing_time_seconds": 30.771706104278564,
+    "status": "success",
+    "pii_summary": {
+      "pii_detected": 13,
+      "pii_anonymized": 13
+    },
+    "clause_count": 5
+  },
+  "clauses": [
+    {
+      "clause_name": "Availability Guarantee",
+      "section_reference": "3.3.1(b)",
+      "clause_type": "availability",
+      "clause_category": "availability",
+      "raw_text": "The System has operated continuously for a period of at least seventy two (72) hours without experiencing any abnormal operating conditions, and has generated continuously for a period of not less than six (6) hours while synchronized to the Network at a net output of at least ninety percent (90%) of solar resource adjusted net capacity without experiencing abnormal operating conditions",
+      "summary": "System must operate continuously for 72 hours and generate at 90% capacity for 6 hours without abnormal conditions",
+      "responsible_party": "Owner",
+      "beneficiary_party": "Utilities",
+      "normalized_payload": {
+        "threshold": 90.0,
+        "metric": "availability",
+        "period": "continuous"
+      },
+      "confidence_score": 0.95
+    },
+    {
+      "clause_name": "Force Majeure Definition",
+      "section_reference": "7.1",
+      "clause_type": "force_majeure",
+      "clause_category": "general",
+      "raw_text": "An act or event is a 'Force Majeure Event' if such act or event is beyond the reasonable control, and not the result of the fault or negligence, of the affected Party and such Party had been unable to overcome such act or event with the exercise of due diligence.",
+      "summary": "Defines force majeure as events beyond reasonable control that could not be overcome with due diligence",
+      "responsible_party": "Both",
+      "beneficiary_party": null,
+      "normalized_payload": null,
+      "confidence_score": 0.9
+    },
+    {
+      "clause_name": "Pricing Structure",
+      "section_reference": "5.1",
+      "clause_type": "pricing",
+      "clause_category": "pricing",
+      "raw_text": "Energy production shall be metered and verifiable by Utilities' personnel. While the Energy and Environmental Attributes are calculated and billed on a per kWh basis (the 'kWh Rate') as set forth in Exhibit C, they represent a package of services as described in the definitions herein.",
+      "summary": "Energy and Environmental Attributes priced per kWh as detailed in Exhibit C",
+      "responsible_party": "Utilities",
+      "beneficiary_party": "Owner",
+      "normalized_payload": {
+        "base_price": null,
+        "escalation": null
+      },
+      "confidence_score": 0.85
+    },
+    {
+      "clause_name": "Payment Terms",
+      "section_reference": "6.2",
+      "clause_type": "payment_terms",
+      "clause_category": "compliance",
+      "raw_text": "Utilities shall pay to Owner for each Monthly Period during the Term within thirty (30) business days after close of the month for the Energy delivered by the System during each such Monthly Period equal to the product of (a) Monthly Production for the System for the relevant month multiplied by (b) the relevant kWh Rate for Energy and Environmental Attributes relating to the System as set forth on Exhibit C",
+      "summary": "Payment made within 30 business days based on monthly production multiplied by kWh rate",
+      "responsible_party": "Utilities",
+      "beneficiary_party": "Owner",
+      "normalized_payload": {
+        "payment_period": 30,
+        "payment_basis": "monthly production"
+      },
+      "confidence_score": 0.95
+    },
+    {
+      "clause_name": "Termination Rights",
+      "section_reference": "8.3",
+      "clause_type": "termination",
+      "clause_category": "general",
+      "raw_text": "Prior to the Commercial Operation Date, Owner may terminate this Agreement at any time upon written notice to Utilities, which termination shall be effective thirty (30) days after Utilities receipt of such notice, subject to Utilities' right to recover from Owner any Replacement Costs. After the Commercial Operation Date, Owner may terminate this Agreement at any time following the fifth year of the Term by giving Utilities thirty (30) days prior written notice of Owner's intention to terminate, subject to Utilities' right to recover from Owner any Replacement Costs.",
+      "summary": "Owner can terminate before or after Commercial Operation Date with 30 days notice, subject to Replacement Costs",
+      "responsible_party": "Owner",
+      "beneficiary_party": "Utilities",
+      "normalized_payload": {
+        "notice_period": 30,
+        "termination_conditions": [
+          "pre-commercial operation",
+          "after 5 years"
+        ]
+      },
+      "confidence_score": 0.9
+    }
+  ]
+}

@@ -5,7 +5,7 @@ These models define the data structures used throughout the contract
 digitization pipeline.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 from decimal import Decimal
@@ -30,8 +30,8 @@ class PIIEntity(BaseModel):
     )
     text: str = Field(..., description="The actual PII text detected")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "entity_type": "EMAIL_ADDRESS",
                 "start": 42,
@@ -40,6 +40,7 @@ class PIIEntity(BaseModel):
                 "text": "john.smith@example.com",
             }
         }
+    )
 
 
 class AnonymizedResult(BaseModel):
@@ -63,8 +64,8 @@ class AnonymizedResult(BaseModel):
         description="Mapping of placeholders to original PII values (for authorized re-identification)"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "anonymized_text": "Contact <EMAIL_REDACTED> at <PHONE_REDACTED>",
                 "pii_count": 2,
@@ -83,6 +84,7 @@ class AnonymizedResult(BaseModel):
                 },
             }
         }
+    )
 
 
 class ExtractedClause(BaseModel):
@@ -104,15 +106,15 @@ class ExtractedClause(BaseModel):
     summary: str = Field(..., description="Brief summary of the clause")
     responsible_party: str = Field(..., description="Party responsible for this clause")
     beneficiary_party: Optional[str] = Field(None, description="Beneficiary party, if applicable")
-    normalized_payload: Dict[str, Any] = Field(
-        ..., description="Structured data for rules engine (thresholds, formulas, etc.)"
+    normalized_payload: Optional[Dict[str, Any]] = Field(
+        default_factory=dict, description="Structured data for rules engine (thresholds, formulas, etc.)"
     )
     confidence_score: float = Field(
         ..., description="AI extraction confidence (0.0-1.0)", ge=0.0, le=1.0
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "clause_name": "Availability Guarantee",
                 "section_reference": "4.1",
@@ -130,6 +132,7 @@ class ExtractedClause(BaseModel):
                 "confidence_score": 0.92,
             }
         }
+    )
 
 
 class ContractParseResult(BaseModel):
@@ -150,8 +153,8 @@ class ContractParseResult(BaseModel):
     )
     status: str = Field(..., description="Processing status (success, failed, partial)")
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "contract_id": 1234,
                 "clauses": [],
@@ -161,6 +164,7 @@ class ContractParseResult(BaseModel):
                 "status": "success",
             }
         }
+    )
 
 
 class RuleResult(BaseModel):
@@ -192,8 +196,8 @@ class RuleResult(BaseModel):
         default_factory=dict, description="Additional calculation details and context"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "breach": True,
                 "rule_type": "AvailabilityRule",
@@ -209,6 +213,7 @@ class RuleResult(BaseModel):
                 },
             }
         }
+    )
 
 
 class RuleEvaluationResult(BaseModel):
@@ -233,8 +238,8 @@ class RuleEvaluationResult(BaseModel):
         description="Notes about calculation process (excused events, data gaps, etc.)"
     )
 
-    class Config:
-        json_schema_extra = {
+    model_config = ConfigDict(
+        json_schema_extra={
             "example": {
                 "contract_id": 1234,
                 "period_start": "2024-01-01T00:00:00Z",
@@ -247,3 +252,4 @@ class RuleEvaluationResult(BaseModel):
                 ],
             }
         }
+    )

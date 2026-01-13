@@ -98,11 +98,23 @@
 │              DATABASE (Supabase/PostgreSQL)                  │
 │                                                              │
 │  EXISTING TABLES (ALREADY IMPLEMENTED):                     │
-│  ✅ contract - Contract master table                       │
-│  ✅ clause - Individual contract clauses with              │
-│              normalized_payload JSONB                       │
-│  ✅ clause_type, clause_category - Clause classification   │
-│  ✅ clause_tariff - Tariff-specific clause data            │
+│  ✅ contract - Contract master table with parsing fields   │
+│       • parsing_status, parsing_started_at, parsing_error  │
+│       • pii_detected_count, clauses_extracted_count        │
+│       • processing_time_seconds                            │
+│  ✅ clause - Individual contract clauses with:             │
+│       • normalized_payload JSONB                           │
+│       • summary, beneficiary_party, confidence_score       │
+│       • section_ref, all FK relationships                  │
+│  ✅ clause_type - High-level classification (5 types)      │
+│       • COMMERCIAL, LEGAL, FINANCIAL, OPERATIONAL,         │
+│         REGULATORY                                          │
+│  ✅ clause_category - Specific categories (10 types)       │
+│       • AVAILABILITY, PERF_GUARANTEE, LIQ_DAMAGES,         │
+│         PRICING, PAYMENT, FORCE_MAJEURE, TERMINATION,      │
+│         SLA, COMPLIANCE, GENERAL                            │
+│  ✅ clause_responsibleparty - Party information            │
+│  ✅ contract_pii_mapping - Encrypted PII storage (RLS)     │
 │  ✅ default_event - Contract breach events                 │
 │  ✅ rule_output - LD calculation results                   │
 │  ✅ meter_reading, meter_aggregate - Metering data         │
@@ -113,13 +125,7 @@
 │  Row-Level Security (RLS) enabled                           │
 │  Multi-tenant isolation via organization_id                 │
 │                                                              │
-│  TABLES TO BE ADDED (Phase 2):                             │
-│  ❌ contract_pii_mapping - Encrypted PII storage (P0)      │
-│  ❌ contract parsing status fields in contract table (P1)  │
-│  ❌ clause enhancements: summary, beneficiary_party,       │
-│      confidence_score (P2)                                  │
-│                                                              │
-│  See database/migrations/002-005 for migration details.    │
+│  See database/migrations/002-004 for migration details.    │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -138,18 +144,64 @@
 - ✅ **Next.js Frontend:** Authentication system (Supabase Auth), test queries dashboard
 - ✅ **Deployment:** Vercel (production-ready)
 
-**PLANNED STATE (Phase 2 - Contract Digitization):**
-- ❌ **Python Backend:** Not yet implemented (Tasks 1.1-1.4 below)
-- ❌ **PII Detection:** Presidio integration pending (Task 1.2)
-- ❌ **Contract Parser:** LlamaParse + Claude API integration pending (Task 1.3)
-- ❌ **Database Migrations:** Need to add contract_pii_mapping table and parsing status fields (see database/migrations/002-005)
-- ❌ **Rules Engine:** LD calculation automation pending (Phase 2)
+**PHASE 2 - Contract Digitization (In Progress):**
+
+✅ **Completed (January 2026):**
+- ✅ **Python Backend (Task 1.1):** FastAPI initialized with CORS, health check, environment setup
+- ✅ **PII Detection (Task 1.2):** Presidio integration with local PII detection (no external APIs)
+- ✅ **Contract Parser (Task 1.3):** Complete pipeline implemented
+  - LlamaParse OCR integration (with `do_not_cache=True`)
+  - PII detection → anonymization → Claude API clause extraction
+  - Privacy-first: Claude only sees anonymized text
+- ✅ **Database Migrations:**
+  - `002_add_contract_pii_mapping.sql` - Encrypted PII storage with RLS
+  - `003_add_contract_parsing_fields.sql` - Parsing status tracking
+  - `004_enhance_clause_table.sql` - AI fields (summary, beneficiary_party, confidence_score)
+- ✅ **Database Service (Task 2.2):** ContractRepository with comprehensive storage methods
+- ✅ **API Endpoints (Task 1.4):** Contract parsing REST API with OpenAPI docs
+- ✅ **Foreign Key Resolution (NEW):** Lookup service for automatic FK mapping
+  - `clause_type_id` - High-level classification (commercial, legal, financial, operational, regulatory)
+  - `clause_category_id` - Specific categories (availability, pricing, liquidated_damages, etc.)
+  - `clause_responsibleparty_id` - Dynamic party creation
+  - `section_ref` - Section references stored
+  - `normalized_payload` - JSONB structured data stored
+- ✅ **Lookup Tables Populated:**
+  - 5 clause types (COMMERCIAL, LEGAL, FINANCIAL, OPERATIONAL, REGULATORY)
+  - 10 clause categories (AVAILABILITY, PERF_GUARANTEE, LIQ_DAMAGES, PRICING, PAYMENT, FORCE_MAJEURE, TERMINATION, SLA, COMPLIANCE, GENERAL)
+
+✅ **Rules Engine & Frontend (January 2026):**
+- ✅ **Rules Engine (Task 3.1):** Native Python rules engine implemented
+  - `AvailabilityRule` - Calculates availability vs threshold, computes LD
+  - `CapacityFactorRule` - Calculates capacity factor vs guarantee
+  - Event detection from meter data (outages, curtailments, degradation)
+  - Breach detection with LD calculations using Decimal precision
+  - Results stored in `default_event` and `rule_output` tables
+- ✅ **Rules API (Task 3.2):** REST endpoints implemented
+  - `POST /api/rules/evaluate` - Evaluate contract for a period
+  - `GET /api/rules/defaults` - Query default events with filters/pagination
+  - `POST /api/rules/defaults/{id}/cure` - Mark default as cured
+- ✅ **Frontend API Client (Task 4.2):** TypeScript client with enterprise features
+  - `APIClient` class with configurable retry logic (3 attempts, exponential backoff)
+  - Request/response logging in development mode
+  - Authentication token injection via callback
+  - Upload progress tracking with stage callbacks
+  - Typed error handling with `ContractsAPIError`
+  - Methods: `uploadContract()`, `getContract()`, `getClauses()`, `evaluateRules()`, `getDefaults()`, `cureDefault()`
+- ✅ **Frontend Upload UI (Task 4.1):** React component implemented
+  - Drag-and-drop file upload with validation
+  - Real-time processing stage indicators
+  - Progress callback integration with APIClient
+  - Results display with extracted clauses
+  - Error handling with user-friendly messages
+
+❌ **Pending:**
+- ❌ **Deployment (Task 5.1-5.2):** Docker and Cloud Run deployment pending
 
 **Next Steps:**
-1. Create database migrations for PII mapping and parsing status fields
-2. Initialize Python FastAPI backend
-3. Implement contract parsing pipeline (PII detection → parsing → clause extraction)
-4. Build rules engine for automated LD calculations
+1. Test end-to-end flow: Upload contract → Parse → Evaluate rules → View defaults
+2. Deploy Python backend to Cloud Run (Tasks 5.1-5.2)
+3. Add authentication integration (pass Supabase token to APIClient)
+4. Build dashboard for viewing defaults and LD summaries
 
 ---
 
@@ -344,9 +396,16 @@ Requirements:
       - Extract: availability, LD, pricing, payment terms
       - Return structured JSON with normalized_payload
 
-   e. Store in database
-      - Save contract metadata
-      - Save clauses with normalized data
+   e. Resolve Foreign Keys (NEW - Added Jan 2026)
+      - Use LookupService to map string codes to database IDs
+      - clause_type: "availability" → clause_type_id: 4 (OPERATIONAL)
+      - clause_category: "availability" → clause_category_id: 1 (AVAILABILITY)
+      - responsible_party: "Owner" → clause_responsibleparty_id (create if missing)
+      - Log FK resolution statistics
+
+   f. Store in database
+      - Save contract metadata (with optional project_id, organization_id)
+      - Save clauses with ALL fields: section_ref, normalized_payload, FKs
       - Save encrypted PII mapping (separate table)
 
 3. Return ContractParseResult with:
@@ -814,14 +873,16 @@ class AnonymizedResult(BaseModel):
 class ExtractedClause(BaseModel):
     clause_name: str
     section_reference: str
-    clause_type: str  # "availability", "liquidated_damages", etc.
-    clause_category: str  # "availability", "pricing", etc.
+    clause_type: str  # Claude extracts: "availability", "liquidated_damages", etc.
+                      # Maps to high-level: COMMERCIAL, LEGAL, FINANCIAL, OPERATIONAL, REGULATORY
+    clause_category: str  # Claude extracts: "availability", "pricing", etc.
+                          # Maps to specific: AVAILABILITY, PRICING, LIQ_DAMAGES, etc.
     raw_text: str
     summary: str
-    responsible_party: str
+    responsible_party: str  # Maps to clause_responsibleparty_id (created if missing)
     beneficiary_party: Optional[str]
-    normalized_payload: Dict[str, any]  # Structured data for rules
-    confidence_score: float
+    normalized_payload: Dict[str, any]  # Structured data for rules (stored as JSONB)
+    confidence_score: float  # AI confidence (0.0-1.0), < 0.7 flags for review
 
 class ContractParseResult(BaseModel):
     contract_id: int
@@ -850,6 +911,113 @@ class RuleEvaluationResult(BaseModel):
     notifications_generated: int
     processing_notes: List[str]
 ```
+
+---
+
+### **Foreign Key Resolution & Lookup Tables**
+
+**IMPORTANT: Clause Type vs Category Distinction**
+
+The system uses TWO levels of clause classification:
+
+1. **`clause_type`** - High-level classification (5 types):
+   - `COMMERCIAL` - Commercial and business terms
+   - `LEGAL` - Legal terms and conditions
+   - `FINANCIAL` - Financial and payment terms
+   - `OPERATIONAL` - Operational and performance terms
+   - `REGULATORY` - Regulatory and compliance terms
+
+2. **`clause_category`** - Specific clause categories (10 categories):
+   - `AVAILABILITY` - Plant availability requirements
+   - `PERF_GUARANTEE` - Performance guarantees and SLAs
+   - `LIQ_DAMAGES` - Liquidated damages clauses
+   - `PRICING` - Energy pricing and tariff terms
+   - `PAYMENT` - Payment schedules and invoicing
+   - `FORCE_MAJEURE` - Force majeure events
+   - `TERMINATION` - Contract termination conditions
+   - `SLA` - Service level agreements
+   - `COMPLIANCE` - Regulatory compliance requirements
+   - `GENERAL` - General contract terms
+
+**Automatic FK Resolution:**
+
+The `LookupService` class (`python-backend/db/lookup_service.py`) automatically maps Claude's extracted string values to database IDs:
+
+```python
+# Example: Claude extracts a clause with these fields
+extracted_clause = {
+    "clause_type": "availability",      # String from Claude
+    "clause_category": "availability"   # String from Claude
+}
+
+# LookupService automatically resolves to database FKs:
+stored_clause = {
+    "clause_type_id": 4,        # OPERATIONAL (high-level)
+    "clause_category_id": 1,    # AVAILABILITY (specific)
+}
+```
+
+**Mapping Logic:**
+
+```python
+# clause_type mappings (Claude output → High-level classification)
+{
+    "availability": "OPERATIONAL",
+    "liquidated_damages": "FINANCIAL",
+    "pricing": "COMMERCIAL",
+    "payment_terms": "FINANCIAL",
+    "force_majeure": "LEGAL",
+    "termination": "LEGAL",
+    "sla": "OPERATIONAL",
+    "general": "LEGAL"
+}
+
+# clause_category mappings (Claude output → Specific category)
+{
+    "availability": "AVAILABILITY",
+    "liquidated_damages": "LIQ_DAMAGES",
+    "pricing": "PRICING",
+    "payment_terms": "PAYMENT",
+    "force_majeure": "FORCE_MAJEURE",
+    "termination": "TERMINATION",
+    "sla": "SLA",
+    "compliance": "COMPLIANCE",
+    "general": "GENERAL"
+}
+```
+
+**Additional FK Resolution:**
+
+- **`clause_responsibleparty_id`**: Dynamically created from party names (e.g., "Owner", "Utilities")
+- **`project_id`**: Inherited from contract when provided via API
+- **`section_ref`**: Stored directly from `section_reference` field
+- **`normalized_payload`**: JSONB structured data stored from parser
+
+**Database Seed File:**
+
+Run `database/seed/fixtures/06_lookup_tables.sql` to populate lookup tables with correct codes.
+
+**Verification Query:**
+
+After parsing a contract, verify FK population:
+
+```sql
+SELECT
+    c.name AS clause_name,
+    ct.name AS high_level_type,
+    cc.name AS specific_category,
+    c.section_ref,
+    cp.name AS responsible_party,
+    c.normalized_payload IS NOT NULL AS has_payload
+FROM clause c
+LEFT JOIN clause_type ct ON ct.id = c.clause_type_id
+LEFT JOIN clause_category cc ON cc.id = c.clause_category_id
+LEFT JOIN clause_responsibleparty cp ON cp.id = c.clause_responsibleparty_id
+WHERE c.contract_id = <your_contract_id>
+ORDER BY c.id;
+```
+
+---
 
 ### **Environment Variables**
 
@@ -1038,4 +1206,225 @@ After implementation, you should achieve:
 
 ---
 
-**This guide provides everything Claude Code needs to implement the complete contract digitization workflow. Share it as context for any implementation tasks.** 🚀
+## 🆕 Recent Updates (January 2026)
+
+### Foreign Key Resolution & Lookup Tables
+
+**Issue Fixed:** Contract digitization outputs were not linking properly to lookup tables via foreign keys.
+
+**Solution Implemented:**
+
+1. **Created `LookupService` class** (`python-backend/db/lookup_service.py`):
+   - Automatic FK resolution with in-memory caching
+   - Maps Claude's string outputs to database IDs
+   - Handles dynamic party creation
+   - Thread-safe design
+
+2. **Corrected clause_type vs clause_category distinction**:
+   - **clause_type**: High-level classification (5 types)
+     - COMMERCIAL, LEGAL, FINANCIAL, OPERATIONAL, REGULATORY
+   - **clause_category**: Specific categories (10 types)
+     - AVAILABILITY, PERF_GUARANTEE, LIQ_DAMAGES, PRICING, PAYMENT, FORCE_MAJEURE, TERMINATION, SLA, COMPLIANCE, GENERAL
+
+3. **Enhanced contract parser** (`python-backend/services/contract_parser.py`):
+   - Added FK resolution step before database storage
+   - Logs resolution statistics for monitoring
+   - Handles missing lookups gracefully
+
+4. **Expanded repository** (`python-backend/db/contract_repository.py`):
+   - `store_clauses()` now accepts all fields: section_ref, normalized_payload, all FKs
+   - Project ID inheritance from contract
+   - JSONB handling for structured data
+
+5. **Updated API** (`python-backend/api/contracts.py`):
+   - Accepts optional contract metadata (project_id, organization_id, counterparty_id)
+   - Passes metadata through parsing pipeline
+
+6. **Populated lookup tables** (`database/seed/fixtures/06_lookup_tables.sql`):
+   - 5 clause types with proper high-level classifications
+   - 10 clause categories with specific codes
+   - Ready for FK resolution
+
+**Files Modified:**
+- ✅ `python-backend/db/lookup_service.py` - NEW
+- ✅ `python-backend/services/contract_parser.py` - MODIFIED
+- ✅ `python-backend/db/contract_repository.py` - MODIFIED
+- ✅ `python-backend/api/contracts.py` - MODIFIED
+- ✅ `database/seed/fixtures/06_lookup_tables.sql` - NEW
+
+**Verification:** All newly parsed contracts will have complete FK relationships. Run the verification query in the "Foreign Key Resolution & Lookup Tables" section to confirm.
+
+---
+
+### Rules Engine Implementation (Task 3.1-3.2)
+
+**Completed:** Full rules engine for detecting contract breaches and calculating liquidated damages.
+
+**Architecture:**
+
+```
+python-backend/services/
+├── rules_engine.py          # Main orchestrator
+├── rules/
+│   ├── base_rule.py         # Abstract base class
+│   ├── availability_rule.py # Availability guarantee evaluation
+│   └── capacity_factor_rule.py # Capacity factor evaluation
+├── event_detector.py        # Detects operational events from meter data
+└── meter_aggregator.py      # Aggregates hourly meter readings
+```
+
+**Key Features:**
+- **Event Detection:** Identifies outages, curtailments, and degradation from meter data
+- **Availability Rule:** Compares actual vs threshold, calculates LD using formula from clause
+- **Capacity Factor Rule:** Evaluates generation performance
+- **Decimal Precision:** All financial calculations use Python `Decimal` type
+- **Excused Events:** Handles force majeure and grid outages
+- **Database Persistence:** Stores results in `default_event` and `rule_output` tables
+- **Notifications:** Generates alerts for stakeholders
+
+**API Endpoints (`python-backend/api/rules.py`):**
+```
+POST /api/rules/evaluate     # Run rules for contract/period
+GET  /api/rules/defaults     # Query breaches with filters
+POST /api/rules/defaults/{id}/cure  # Mark breach as cured
+```
+
+**Files Created:**
+- `python-backend/services/rules_engine.py`
+- `python-backend/services/rules/*.py`
+- `python-backend/services/event_detector.py`
+- `python-backend/services/meter_aggregator.py`
+- `python-backend/api/rules.py`
+- `python-backend/db/rules_repository.py`
+- `python-backend/db/event_repository.py`
+
+---
+
+### Frontend API Client (Task 4.2)
+
+**Completed:** Enterprise-grade TypeScript API client for Python backend.
+
+**File:** `lib/api/contractsClient.ts`
+
+**Features:**
+| Feature | Implementation |
+|---------|---------------|
+| Retry Logic | 3 attempts with exponential backoff |
+| Error Handling | Typed `ContractsAPIError` with friendly messages |
+| Auth Support | `getAuthToken` callback for token injection |
+| Progress Tracking | `onProgress` callback during uploads |
+| Logging | Auto-enabled in development mode |
+
+**APIClient Methods:**
+```typescript
+// Contract operations
+uploadContract(options)     // Parse contract with progress tracking
+getContract(id)             // Get contract metadata
+getClauses(contractId)      // Get extracted clauses
+
+// Rules operations
+evaluateRules(contractId, start, end)  // Run rules engine
+getDefaults(filters?)       // Query default events
+cureDefault(id)             // Mark default as cured
+```
+
+**Usage Example:**
+```typescript
+import { APIClient } from '@/lib/api'
+
+const client = new APIClient({
+  getAuthToken: async () => session?.access_token,
+})
+
+const result = await client.uploadContract({
+  file: pdfFile,
+  project_id: 1,
+  onProgress: (p) => setStage(p.stage)
+})
+```
+
+**Files Created:**
+- `lib/api/contractsClient.ts` - Main API client
+- `lib/api/index.ts` - Re-exports for clean imports
+
+---
+
+### Frontend Upload Component (Task 4.1)
+
+**Completed:** React component for contract upload with real-time progress.
+
+**File:** `app/components/ContractUpload.tsx`
+
+**Features:**
+- Drag-and-drop file selection
+- Client-side validation (PDF/DOCX, 10MB limit)
+- Real-time processing stage indicators
+- Progress callback integration with APIClient
+- Results display showing extracted clauses
+- User-friendly error messages
+
+**Supporting Components:**
+- `app/components/StatCard.tsx` - Display statistics
+- `app/components/ClausesList.tsx` - Expandable clause details
+
+**Files Created/Modified:**
+- `app/components/ContractUpload.tsx` - MODIFIED to use APIClient
+- `app/components/ClausesList.tsx` - MODIFIED to use shared types
+- `app/components/StatCard.tsx` - NEW
+- `app/contracts/upload/page.tsx` - NEW
+
+---
+
+### Summary of All Phase 2 Changes
+
+**Python Backend (59 files, 10,333 lines added):**
+```
+python-backend/
+├── api/
+│   ├── contracts.py      # Contract parsing endpoints
+│   └── rules.py          # Rules engine endpoints (NEW)
+├── services/
+│   ├── contract_parser.py
+│   ├── pii_detector.py
+│   ├── rules_engine.py   # (NEW)
+│   ├── event_detector.py # (NEW)
+│   ├── meter_aggregator.py # (NEW)
+│   └── rules/            # (NEW directory)
+├── db/
+│   ├── contract_repository.py
+│   ├── rules_repository.py # (NEW)
+│   ├── event_repository.py # (NEW)
+│   ├── lookup_service.py
+│   └── encryption.py
+└── models/
+    ├── contract.py
+    └── event.py          # (NEW)
+```
+
+**Frontend (TypeScript):**
+```
+lib/api/
+├── contractsClient.ts    # APIClient with all methods
+└── index.ts              # Clean exports
+
+app/components/
+├── ContractUpload.tsx    # Upload UI with progress
+├── ClausesList.tsx       # Clause display
+└── StatCard.tsx          # Statistics card
+
+app/contracts/upload/
+└── page.tsx              # Upload page
+```
+
+**Database Migrations:**
+```
+database/migrations/
+├── 002_add_contract_pii_mapping.sql
+├── 003_add_contract_parsing_fields.sql
+├── 004_enhance_clause_table.sql
+└── 06_lookup_tables.sql (seed)
+```
+
+---
+
+**This guide provides everything Claude Code needs to implement the complete contract digitization workflow. Share it as context for any implementation tasks.**

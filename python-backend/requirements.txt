@@ -22,8 +22,8 @@ psycopg2-binary>=2.9.9
 python-dotenv>=1.0.0
 pydantic>=2.6.0
 
-# Additional Dependencies (will be needed in later phases)
-# pytest>=7.4.0              # For testing
-# httpx>=0.26.0              # For async HTTP requests
-# cryptography>=42.0.0       # For PII encryption
-# python-multipart>=0.0.6    # For file uploads
+# Additional Dependencies
+pytest>=7.4.0              # For testing
+httpx>=0.26.0              # For async HTTP requests
+cryptography>=42.0.0       # For PII encryption (Phase 2)
+python-multipart>=0.0.6    # For file uploads

@@ -8,18 +8,21 @@ This is the main entry point for the Python backend that handles:
 - Liquidated damages calculations
 """
 
+from dotenv import load_dotenv
+
+# Load environment variables FIRST - before importing modules that need them
+load_dotenv()
+
+# Now import modules that depend on environment variables
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from typing import Dict
 import os
-from dotenv import load_dotenv
 
-# Import API routers
+# Import API routers (these can now access DATABASE_URL)
 from api.contracts import router as contracts_router
-
-# Load environment variables
-load_dotenv()
+from api.rules import router as rules_router
 
 # Initialize FastAPI application
 app = FastAPI(
@@ -48,6 +51,7 @@ app.add_middleware(
 
 # Register API routers
 app.include_router(contracts_router)
+app.include_router(rules_router)
 
 
 @app.get("/", response_model=Dict[str, str])

@@ -40,26 +40,54 @@ This document tracks major schema versions and their associated changes.
 
 ---
 
-### v2.0 - TBD (Phase 2 - Contract Parsing)
+### v2.0 - 2026-01-11 (Phase 2 - Contract Parsing)
 
-**Description:** Added contract parsing infrastructure with PII protection.
+**Description:** Added contract parsing infrastructure with PII protection and AI extraction tracking.
 
-**Schema File:** `database/versions/v2.0_phase2_parsing.sql` (not yet created)
+**Schema File:** `database/versions/v2.0_phase2_parsing.sql`
 
 **Migrations:**
-- `database/migrations/002_add_contract_pii_mapping.sql` - Encrypted PII storage
-- `database/migrations/003_add_contract_parsing_fields.sql` - Contract parsing status tracking
-- `database/migrations/004_enhance_clause_table.sql` - AI extraction fields
-- `database/migrations/005_add_audit_trails.sql` - Audit logging
+- ✅ `database/migrations/002_add_contract_pii_mapping.sql` - Encrypted PII storage
+- ✅ `database/migrations/003_add_contract_parsing_fields.sql` - Contract parsing status tracking
+- ✅ `database/migrations/004_enhance_clause_table.sql` - AI extraction fields
+- ⏳ `database/migrations/005_add_audit_trails.sql` - Audit logging (future)
 
-**Planned Changes:**
-- New table: contract_pii_mapping
-- contract table: parsing_status, pii_detected_count, clauses_extracted_count
-- clause table: summary, beneficiary_party, confidence_score
-- Enhanced audit trails for contract processing
+**Implemented Changes:**
+
+**New Table: contract_pii_mapping**
+- `id` - BIGSERIAL PRIMARY KEY
+- `contract_id` - BIGINT REFERENCES contract(id)
+- `encrypted_mapping` - BYTEA (AES-256-GCM encrypted JSON)
+- `pii_entities_count` - INTEGER
+- `encryption_method` - VARCHAR(50)
+- `created_at`, `created_by`, `accessed_at`, `accessed_by`, `access_count`
+- Row Level Security (RLS) enabled - admin-only access
+- Helper functions: `log_pii_access()`, `get_contract_pii_count()`
+
+**Enhanced contract table:**
+- `parsing_status` - VARCHAR(50) [pending, processing, completed, failed]
+- `parsing_started_at` - TIMESTAMPTZ
+- `parsing_completed_at` - TIMESTAMPTZ
+- `parsing_error` - TEXT
+- `pii_detected_count` - INTEGER
+- `clauses_extracted_count` - INTEGER
+- `processing_time_seconds` - NUMERIC(10,2)
+- Helper functions: `update_contract_parsing_status()`, `get_parsing_statistics()`
+
+**Enhanced clause table:**
+- `summary` - TEXT (AI-generated clause summary)
+- `beneficiary_party` - VARCHAR(255) (who benefits from clause)
+- `confidence_score` - NUMERIC(4,3) (AI confidence 0.0-1.0)
+- Helper functions: `get_clauses_needing_review()`, `get_contract_clause_stats()`
+
+**Security Features:**
+- PII encrypted using application-level keys (not stored in DB)
+- Row Level Security on PII mappings (admin-only)
+- Access logging for PII decryption
+- pgcrypto extension enabled
 
 **Diagrams:**
 - `database/diagrams/entity_diagram_v2.0.drawio` (to be created)
-- `database/diagrams/schema.mermaid.md` (auto-updated)
+- `database/diagrams/schema.mermaid.md` (to be updated)
 
 ---
