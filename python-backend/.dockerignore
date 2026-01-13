@@ -1,0 +1,69 @@
+# Virtual environments
+venv/
+.venv/
+env/
+.env/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+
+# Test files (excluded from production image)
+tests/
+test_data/
+scripts/
+*_test.py
+test_*.py
+conftest.py
+pytest.ini
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Environment files (secrets passed via Cloud Run)
+.env
+.env.*
+!.env.example
+
+# IDE and editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# Exports and temporary files
+exports/
+*.pdf
+*.log
+*.tmp
+
+# Documentation (not needed in runtime)
+*.md
+docs/
+
+# Build artifacts
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Jupyter notebooks
+*.ipynb
+.ipynb_checkpoints/
+
+# macOS
+.DS_Store
+
+# Docker
+Dockerfile
+.dockerignore
+docker-compose*.yml
