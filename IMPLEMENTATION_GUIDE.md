@@ -1699,7 +1699,7 @@ gcloud run services list
 
 | File | Purpose |
 |------|---------|
-| `contract_digitization_implementation_guide.md` | This guide - system overview |
+| `IMPLEMENTATION_GUIDE.md` | This guide - system overview |
 | `python-backend/main.py` | API entry point |
 | `python-backend/services/contract_parser.py` | Core parsing pipeline |
 | `python-backend/services/rules_engine.py` | Compliance rule evaluation |

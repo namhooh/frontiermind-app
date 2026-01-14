@@ -1102,7 +1102,7 @@ git commit -m "snapshot(db): v2.0 Phase 2 Contract Parsing Complete"
 
 ### Project Files
 - [SCHEMA_CHANGES.md](database/SCHEMA_CHANGES.md) - Version changelog
-- [Contract Digitization Guide](contract_digitization_implementation_guide.md) - Phase 2 plan
+- [Contract Digitization Guide](IMPLEMENTATION_GUIDE.md) - Phase 2 plan
 - [Database Seed README](database/seed/README.md) - Data loading guide
 - [Database SQL README](database/sql/README.md) - Query organization
 

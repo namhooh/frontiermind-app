@@ -46,7 +46,7 @@ important_files:
   - database/migrations/001_migrate_role_to_auth.sql
 
   # Planning Documents
-  - contract_digitization_implementation_guide.md  # Phase 2 detailed plan
+  - IMPLEMENTATION_GUIDE.md  # Phase 2 detailed plan
   - .clinerules  # This file - project guidance
 
   # Future Implementation (Phase 2 - Not yet created)
