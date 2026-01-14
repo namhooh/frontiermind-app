@@ -1427,4 +1427,339 @@ database/migrations/
 
 ---
 
+## 🚀 Production Deployment & Operations
+
+### Production Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                         PRODUCTION ARCHITECTURE                              │
+└─────────────────────────────────────────────────────────────────────────────┘
+
+    ┌─────────────┐         ┌──────────────────┐         ┌─────────────────┐
+    │   Browser   │         │     Vercel       │         │  Google Cloud   │
+    │   (User)    │────────▶│   (Next.js)      │────────▶│    Run          │
+    │             │         │                  │         │  (Python API)   │
+    └─────────────┘         └──────────────────┘         └────────┬────────┘
+                                                                  │
+                            ┌──────────────────┐                  │
+                            │    Supabase      │◀─────────────────┘
+                            │  (PostgreSQL)    │
+                            │  (Auth)          │
+                            └──────────────────┘
+
+    URLS:
+    ├── Frontend:  https://frontiermind-app.vercel.app
+    ├── Backend:   https://frontiermind-backend-gp2lbvl7gq-uc.a.run.app
+    └── Database:  Supabase PostgreSQL (connection pooler port 6543)
+```
+
+### Why This Architecture?
+
+| Component | Platform | Reason |
+|-----------|----------|--------|
+| **Frontend** | Vercel | Optimized for Next.js, auto-deploy from Git, global CDN |
+| **Backend** | Cloud Run | Python support, 300s timeout for contract parsing, 2GB memory for ML models |
+| **Database** | Supabase | Managed PostgreSQL, built-in Auth, Row-Level Security |
+
+**Why not all on Vercel?**
+- Vercel serverless functions have 60s max timeout (we need 90s+)
+- Limited to 1GB memory (we need 2GB+ for Presidio/spaCy)
+- Not optimized for Python ML workloads
+
+---
+
+### Deployment Workflows
+
+#### Frontend Deployment (Automatic)
+
+```bash
+# Just push to GitHub - Vercel auto-deploys
+git add .
+git commit -m "feat: your changes"
+git push origin main
+# ✅ Vercel automatically builds and deploys
+```
+
+#### Backend Deployment (Manual)
+
+```bash
+cd python-backend
+./deploy.sh
+
+# This will:
+# 1. Build Docker image with Cloud Build (~2-5 min)
+# 2. Deploy to Cloud Run
+# 3. Output the service URL
+```
+
+**When to redeploy backend:**
+- Changes to `python-backend/**` files
+- New API endpoints
+- Updated dependencies in `requirements.txt`
+- Bug fixes in parsing/rules logic
+
+---
+
+### Environment Configuration
+
+#### Local Development
+
+```bash
+# Terminal 1: Python backend
+cd python-backend
+source venv/bin/activate
+uvicorn main:app --reload --port 8000
+
+# Terminal 2: Next.js frontend
+npm run dev
+```
+
+Frontend automatically uses `localhost:8000` when `NEXT_PUBLIC_PYTHON_BACKEND_URL` is not set.
+
+#### Production Environment Variables
+
+**Vercel (Frontend):**
+| Variable | Value |
+|----------|-------|
+| `NEXT_PUBLIC_PYTHON_BACKEND_URL` | `https://frontiermind-backend-gp2lbvl7gq-uc.a.run.app` |
+| `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Your Supabase anon key |
+
+**Cloud Run (Backend) - via Google Secret Manager:**
+| Secret Name | Description |
+|-------------|-------------|
+| `anthropic-api-key` | Claude API key for clause extraction |
+| `llama-api-key` | LlamaParse API key for document OCR |
+| `database-url` | Supabase PostgreSQL connection string |
+| `encryption-key` | AES-256 key for PII encryption |
+
+---
+
+### Monitoring & Logs
+
+#### View Backend Logs
+
+```bash
+# Recent logs
+gcloud run services logs read frontiermind-backend --region=us-central1
+
+# Follow logs in real-time
+gcloud run services logs tail frontiermind-backend --region=us-central1
+
+# Filter by severity
+gcloud run services logs read frontiermind-backend --region=us-central1 --log-filter="severity>=ERROR"
+```
+
+#### Health Checks
+
+```bash
+# Backend health
+curl https://frontiermind-backend-gp2lbvl7gq-uc.a.run.app/health
+
+# API documentation
+open https://frontiermind-backend-gp2lbvl7gq-uc.a.run.app/docs
+```
+
+#### Cloud Console Dashboards
+
+- **Cloud Run Metrics:** https://console.cloud.google.com/run
+  - Request count, latency, error rate
+  - Instance count, CPU/memory usage
+
+- **Billing:** https://console.cloud.google.com/billing
+  - Cost breakdown by service
+
+- **Logs Explorer:** https://console.cloud.google.com/logs
+  - Advanced log filtering and analysis
+
+---
+
+### Cost Overview
+
+#### Google Cloud Run (Python Backend)
+
+| Resource | Pricing | Estimated Monthly |
+|----------|---------|-------------------|
+| CPU | $0.000024/vCPU-second | ~$5-10 |
+| Memory | $0.0000025/GiB-second | ~$2-5 |
+| Requests | $0.40/million | ~$1 |
+| **Total** | | **~$10-20/month** (low traffic) |
+
+**Free Tier Includes:**
+- 2 million requests/month
+- 360,000 vCPU-seconds/month
+- 180,000 GiB-seconds/month
+
+#### Vercel (Frontend)
+
+- **Hobby (Free):** Sufficient for development/testing
+- **Pro ($20/month):** For production with custom domains
+
+#### Supabase (Database)
+
+- **Free Tier:** 500MB database, 50,000 monthly active users
+- **Pro ($25/month):** 8GB database, unlimited users
+
+#### External APIs
+
+| API | Pricing | Typical Cost |
+|-----|---------|--------------|
+| LlamaParse | $0.30/100 pages | ~$3/100 contracts |
+| Anthropic Claude | $3/1M input tokens | ~$0.50-1/contract |
+
+**Total Estimated Cost:** ~$30-50/month for low-moderate usage
+
+---
+
+### Cold Starts
+
+Cloud Run scales to zero when idle to save costs. The first request after idle takes longer:
+
+| Scenario | Response Time |
+|----------|---------------|
+| Warm instance | 200-500ms |
+| Cold start | 5-15 seconds |
+
+**To minimize cold starts:**
+```bash
+# Keep one instance always running (~$20-30/month extra)
+# Edit deploy.sh and change:
+--min-instances 0  →  --min-instances 1
+```
+
+---
+
+### Troubleshooting
+
+#### Common Issues
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| 503 Service Unavailable | Cold start or crash | Wait 10s, retry. Check logs for errors |
+| 500 Internal Server Error | Code bug or missing env var | Check `gcloud run services logs read` |
+| Timeout (504) | Processing > 300s | Optimize code or increase timeout |
+| Database connection failed | Wrong connection string | Verify `database-url` secret |
+
+#### Debug Commands
+
+```bash
+# Check service status
+gcloud run services describe frontiermind-backend --region=us-central1
+
+# Check recent deployments
+gcloud run revisions list --service=frontiermind-backend --region=us-central1
+
+# Re-deploy with fresh image
+./deploy.sh
+```
+
+---
+
+### New Engineer Onboarding Checklist
+
+#### 1. Access Setup
+- [ ] GitHub repository access
+- [ ] Vercel team invitation
+- [ ] Google Cloud project access (`frontiermind-app`)
+- [ ] Supabase project access
+
+#### 2. Local Development Setup
+```bash
+# Clone repository
+git clone https://github.com/namhooh/frontiermind-app.git
+cd frontiermind-app
+
+# Frontend setup
+npm install
+
+# Backend setup
+cd python-backend
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Copy environment file
+cp .env.example .env
+# Fill in API keys (get from team lead)
+```
+
+#### 3. Install Tools
+```bash
+# Google Cloud CLI
+brew install google-cloud-sdk
+gcloud auth login
+gcloud config set project frontiermind-app
+
+# Verify access
+gcloud run services list
+```
+
+#### 4. Key Files to Understand
+
+| File | Purpose |
+|------|---------|
+| `contract_digitization_implementation_guide.md` | This guide - system overview |
+| `python-backend/main.py` | API entry point |
+| `python-backend/services/contract_parser.py` | Core parsing pipeline |
+| `python-backend/services/rules_engine.py` | Compliance rule evaluation |
+| `lib/api/contractsClient.ts` | Frontend API client |
+| `app/components/ContractUpload.tsx` | Upload UI component |
+
+#### 5. Test the System
+```bash
+# Start backend locally
+cd python-backend
+uvicorn main:app --reload --port 8000
+
+# In another terminal, start frontend
+npm run dev
+
+# Open http://localhost:3000/contracts/upload
+# Upload a test PDF and verify parsing works
+```
+
+---
+
+### Security Considerations
+
+#### Secrets Management
+- **Never commit** `.env` files or API keys to Git
+- Production secrets stored in **Google Secret Manager**
+- Access controlled via IAM roles
+
+#### PII Protection
+- PII detected and anonymized **before** sending to Claude API
+- Encrypted PII mapping stored separately in database
+- Claude only sees redacted text: `<EMAIL_REDACTED>`, `<PHONE_REDACTED>`
+
+#### Database Security
+- Row-Level Security (RLS) enabled on all tables
+- Multi-tenant isolation via `organization_id`
+- Connection via Supabase connection pooler (port 6543)
+
+---
+
+### Quick Reference Commands
+
+```bash
+# === LOCAL DEVELOPMENT ===
+cd python-backend && uvicorn main:app --reload --port 8000  # Start backend
+npm run dev                                                   # Start frontend
+
+# === DEPLOYMENT ===
+git push origin main                    # Deploy frontend (auto)
+cd python-backend && ./deploy.sh        # Deploy backend
+
+# === MONITORING ===
+gcloud run services logs read frontiermind-backend --region=us-central1
+curl https://frontiermind-backend-gp2lbvl7gq-uc.a.run.app/health
+
+# === SECRETS ===
+gcloud secrets list                                          # List secrets
+gcloud secrets versions access latest --secret=anthropic-api-key  # View secret
+```
+
+---
+
 **This guide provides everything Claude Code needs to implement the complete contract digitization workflow. Share it as context for any implementation tasks.**
