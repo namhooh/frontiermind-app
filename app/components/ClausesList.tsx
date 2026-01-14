@@ -7,8 +7,8 @@ interface ClausesListProps {
 export default function ClausesList({ clauses }: ClausesListProps) {
   if (clauses.length === 0) {
     return (
-      <div className="border-2 border-stone-900 rounded-lg p-6 bg-stone-50">
-        <p className="text-stone-600 text-center">
+      <div className="border border-slate-200 rounded-lg p-6 bg-slate-50">
+        <p className="text-slate-500 text-center">
           No clauses extracted from this contract.
         </p>
       </div>
@@ -17,75 +17,72 @@ export default function ClausesList({ clauses }: ClausesListProps) {
 
   return (
     <div className="space-y-4">
-      <h3 className="text-xl font-bold text-stone-900">
+      <h3 className="text-lg font-semibold text-slate-900">
         Extracted Clauses ({clauses.length})
       </h3>
 
       {clauses.map((clause, idx) => (
         <details
           key={idx}
-          className="border-2 border-stone-900 rounded-lg p-4 bg-stone-50 group"
+          className="border border-slate-200 rounded-lg p-4 bg-white group"
         >
-          <summary className="cursor-pointer font-bold text-stone-900 list-none flex items-center justify-between">
+          <summary className="cursor-pointer font-medium text-slate-900 list-none flex items-center justify-between">
             <span>
               {clause.section_reference && `${clause.section_reference} - `}
               {clause.clause_name}
-              <span className="ml-2 text-sm text-stone-600" style={{ fontFamily: 'Space Mono, monospace' }}>
+              <span className="ml-2 text-sm text-slate-500">
                 ({Math.round(clause.confidence_score * 100)}% confidence)
               </span>
             </span>
-            <span className="text-stone-600 group-open:rotate-180 transition-transform duration-300">
+            <span className="text-slate-400 group-open:rotate-180 transition-transform duration-200">
               ▼
             </span>
           </summary>
 
-          <div className="mt-4 space-y-4 pt-4 border-t-2 border-stone-300">
+          <div className="mt-4 space-y-4 pt-4 border-t border-slate-200">
             <div>
-              <h4 className="text-sm font-bold text-stone-900 mb-1" style={{ fontFamily: 'Space Mono, monospace' }}>
-                Summary:
+              <h4 className="text-sm font-medium text-slate-700 mb-1">
+                Summary
               </h4>
-              <p className="text-stone-700">{clause.summary}</p>
+              <p className="text-slate-600">{clause.summary}</p>
             </div>
 
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
-                <span className="font-mono text-stone-600">Type:</span>
-                <span className="ml-2 text-stone-900">{clause.clause_type}</span>
+                <span className="text-slate-500">Type:</span>
+                <span className="ml-2 text-slate-900">{clause.clause_type}</span>
               </div>
               <div>
-                <span className="font-mono text-stone-600">Category:</span>
-                <span className="ml-2 text-stone-900">{clause.clause_category}</span>
+                <span className="text-slate-500">Category:</span>
+                <span className="ml-2 text-slate-900">{clause.clause_category}</span>
               </div>
               <div>
-                <span className="font-mono text-stone-600">Responsible Party:</span>
-                <span className="ml-2 text-stone-900">{clause.responsible_party}</span>
+                <span className="text-slate-500">Responsible Party:</span>
+                <span className="ml-2 text-slate-900">{clause.responsible_party}</span>
               </div>
               {clause.beneficiary_party && (
                 <div>
-                  <span className="font-mono text-stone-600">Beneficiary:</span>
-                  <span className="ml-2 text-stone-900">{clause.beneficiary_party}</span>
+                  <span className="text-slate-500">Beneficiary:</span>
+                  <span className="ml-2 text-slate-900">{clause.beneficiary_party}</span>
                 </div>
               )}
             </div>
 
             {clause.raw_text && (
               <div>
-                <h4 className="text-sm font-bold text-stone-900 mb-1" style={{ fontFamily: 'Space Mono, monospace' }}>
-                  Raw Text:
+                <h4 className="text-sm font-medium text-slate-700 mb-1">
+                  Raw Text
                 </h4>
-                <p className="text-sm text-stone-600 italic">{clause.raw_text}</p>
+                <p className="text-sm text-slate-500 italic">{clause.raw_text}</p>
               </div>
             )}
 
             {Object.keys(clause.normalized_payload).length > 0 && (
               <div>
-                <h4 className="text-sm font-bold text-stone-900 mb-1" style={{ fontFamily: 'Space Mono, monospace' }}>
-                  Structured Data:
+                <h4 className="text-sm font-medium text-slate-700 mb-1">
+                  Structured Data
                 </h4>
-                <pre
-                  className="mt-1 p-3 bg-stone-100 rounded text-xs overflow-x-auto border border-stone-300"
-                  style={{ fontFamily: 'Space Mono, monospace' }}
-                >
+                <pre className="mt-1 p-3 bg-slate-50 rounded-lg text-xs overflow-x-auto border border-slate-200 font-mono">
                   {JSON.stringify(clause.normalized_payload, null, 2)}
                 </pre>
               </div>

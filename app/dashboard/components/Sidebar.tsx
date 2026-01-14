@@ -6,9 +6,11 @@ import {
   FileText,
   Calendar,
   Settings,
-  Sparkles
+  Sparkles,
+  LogOut
 } from "lucide-react"
 import { Button } from "@/app/components/ui/button"
+import { createClient } from "@/lib/supabase/client"
 
 interface SidebarProps {
   activeSection: string
@@ -16,6 +18,13 @@ interface SidebarProps {
 }
 
 export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
+  const supabase = createClient()
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut()
+    window.location.href = '/login'
+  }
+
   const menuItems = [
     { id: "overview", label: "Overview", icon: LayoutDashboard },
     { id: "integration-status", label: "Integration Status", icon: Link2 },
@@ -81,6 +90,13 @@ export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
             <p className="text-sm text-slate-900">Namho Oh</p>
             <p className="text-xs text-slate-500">Admin</p>
           </div>
+          <button
+            onClick={handleLogout}
+            className="p-2 text-slate-400 hover:text-slate-600 hover:bg-slate-100 rounded-lg transition-colors"
+            title="Sign out"
+          >
+            <LogOut className="w-4 h-4" />
+          </button>
         </div>
       </div>
     </div>
