@@ -26,15 +26,22 @@ export async function updateSession(request: NextRequest) {
   // Refresh session
   const { data: { user } } = await supabase.auth.getUser()
 
+  const pathname = request.nextUrl.pathname
+
+  // Redirect authenticated users away from login page
+  if (pathname === '/login' && user) {
+    return NextResponse.redirect(new URL('/', request.url))
+  }
+
   // Protect PAGE routes only (not API routes - they handle their own auth)
-  const protectedPaths = ['/', '/test-queries']
+  const protectedPaths = ['/', '/test-queries', '/dashboard']
   const isProtected = protectedPaths.some(path =>
-    request.nextUrl.pathname === path ||
-    request.nextUrl.pathname.startsWith(path + '/')
+    pathname === path ||
+    pathname.startsWith(path + '/')
   )
 
   // Only redirect pages to login, not API routes
-  if (isProtected && !user && !request.nextUrl.pathname.startsWith('/api')) {
+  if (isProtected && !user && !pathname.startsWith('/api')) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
 

@@ -226,8 +226,8 @@ export default function ContractUpload() {
               border-2 border-dashed rounded-lg p-12 text-center cursor-pointer
               transition-all duration-300
               ${isDragActive
-                ? 'border-emerald-500 bg-emerald-50'
-                : 'border-stone-900 bg-white hover:border-emerald-500'
+                ? 'border-blue-500 bg-blue-50'
+                : 'border-slate-300 bg-white hover:border-blue-500'
               }
             `}
           >
@@ -240,26 +240,26 @@ export default function ContractUpload() {
             />
 
             <div className="text-6xl mb-4">📄</div>
-            <h3 className="text-xl font-bold text-stone-900 mb-2">
+            <h3 className="text-xl font-bold text-slate-900 mb-2">
               {isDragActive ? 'Drop file here' : 'Upload Contract'}
             </h3>
-            <p className="text-stone-600 mb-4">
+            <p className="text-slate-600 mb-4">
               Drag and drop a file here, or click to browse
             </p>
-            <p className="text-sm text-stone-500" style={{ fontFamily: 'Space Mono, monospace' }}>
+            <p className="text-sm text-slate-500" style={{ fontFamily: 'Space Mono, monospace' }}>
               Supported formats: PDF, DOCX (max 10MB)
             </p>
           </div>
 
           {/* Selected File Preview */}
           {file && stage === 'idle' && (
-            <div className="mt-6 border-2 border-stone-900 rounded-lg p-6 bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
+            <div className="mt-6 border-2 border-slate-200 rounded-lg p-6 bg-white shadow-md">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
                   <div className="text-4xl">📄</div>
                   <div>
-                    <div className="font-bold text-stone-900">{file.name}</div>
-                    <div className="text-sm text-stone-600" style={{ fontFamily: 'Space Mono, monospace' }}>
+                    <div className="font-bold text-slate-900">{file.name}</div>
+                    <div className="text-sm text-slate-600" style={{ fontFamily: 'Space Mono, monospace' }}>
                       {formatFileSize(file.size)}
                     </div>
                   </div>
@@ -271,7 +271,7 @@ export default function ContractUpload() {
                       e.stopPropagation()
                       handleReset()
                     }}
-                    className="px-4 py-2 border-2 border-stone-900 bg-white text-stone-900 rounded-lg hover:bg-stone-50 transition-all duration-300"
+                    className="px-4 py-2 border-2 border-slate-200 bg-white text-slate-900 rounded-lg hover:bg-slate-50 transition-all duration-300"
                   >
                     Remove
                   </button>
@@ -280,7 +280,7 @@ export default function ContractUpload() {
                       e.stopPropagation()
                       handleUpload()
                     }}
-                    className="px-6 py-2 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-all duration-300"
+                    className="px-6 py-2 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all duration-300"
                   >
                     Start Parsing
                   </button>
@@ -301,7 +301,7 @@ export default function ContractUpload() {
                   <p className="text-red-700 mb-4">{error}</p>
                   <button
                     onClick={handleReset}
-                    className="px-6 py-2 border-2 border-stone-900 bg-white text-stone-900 rounded-lg hover:bg-stone-50 transition-all duration-300"
+                    className="px-6 py-2 border-2 border-slate-200 bg-white text-slate-900 rounded-lg hover:bg-slate-50 transition-all duration-300"
                   >
                     Try Again
                   </button>
@@ -314,8 +314,8 @@ export default function ContractUpload() {
 
       {/* Processing Status */}
       {stage !== 'idle' && stage !== 'error' && stage !== 'complete' && (
-        <div className="border-2 border-stone-900 rounded-lg p-8 bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-          <h2 className="text-2xl font-bold text-stone-900 mb-6">Processing Contract</h2>
+        <div className="border-2 border-slate-200 rounded-lg p-8 bg-white shadow-md">
+          <h2 className="text-2xl font-bold text-slate-900 mb-6">Processing Contract</h2>
 
           <div className="space-y-4">
             {stages.map((stageConfig, idx) => {
@@ -329,16 +329,16 @@ export default function ContractUpload() {
                   <div
                     className={`
                       flex items-center justify-center w-10 h-10 rounded-full border-2
-                      ${isComplete ? 'bg-emerald-500 border-emerald-500' : ''}
-                      ${isCurrent ? 'bg-stone-900 border-stone-900' : ''}
-                      ${isPending ? 'bg-stone-200 border-stone-300' : ''}
+                      ${isComplete ? 'bg-blue-500 border-blue-500' : ''}
+                      ${isCurrent ? 'bg-slate-900 border-slate-200' : ''}
+                      ${isPending ? 'bg-slate-200 border-slate-300' : ''}
                     `}
                   >
                     {isComplete && <span className="text-white text-xl">✓</span>}
                     {isCurrent && (
-                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-stone-200 border-t-white" />
+                      <div className="animate-spin rounded-full h-5 w-5 border-2 border-slate-200 border-t-white" />
                     )}
-                    {isPending && <span className="text-stone-400">{idx + 1}</span>}
+                    {isPending && <span className="text-slate-400">{idx + 1}</span>}
                   </div>
 
                   {/* Stage Label */}
@@ -346,9 +346,9 @@ export default function ContractUpload() {
                     <div
                       className={`
                         font-bold
-                        ${isComplete ? 'text-emerald-600' : ''}
-                        ${isCurrent ? 'text-stone-900' : ''}
-                        ${isPending ? 'text-stone-400' : ''}
+                        ${isComplete ? 'text-blue-600' : ''}
+                        ${isCurrent ? 'text-slate-900' : ''}
+                        ${isPending ? 'text-slate-400' : ''}
                       `}
                     >
                       {stageConfig.label}
@@ -364,8 +364,8 @@ export default function ContractUpload() {
 
       {/* Results Display */}
       {stage === 'complete' && result && (
-        <div className="border-2 border-stone-900 rounded-lg p-6 bg-white shadow-[8px_8px_0px_0px_rgba(0,0,0,1)]">
-          <h2 className="text-2xl font-bold text-stone-900 mb-6">
+        <div className="border-2 border-slate-200 rounded-lg p-6 bg-white shadow-md">
+          <h2 className="text-2xl font-bold text-slate-900 mb-6">
             ✅ Parsing Complete
           </h2>
 
@@ -382,14 +382,14 @@ export default function ContractUpload() {
             {result.contract_id > 0 && (
               <button
                 onClick={() => router.push(`/contracts/${result.contract_id}`)}
-                className="px-6 py-3 bg-emerald-500 text-white rounded-lg hover:bg-emerald-600 transition-all duration-300"
+                className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all duration-300"
               >
                 View Contract Details →
               </button>
             )}
             <button
               onClick={handleReset}
-              className="px-6 py-3 border-2 border-stone-900 bg-white text-stone-900 rounded-lg hover:bg-stone-50 transition-all duration-300"
+              className="px-6 py-3 border-2 border-slate-200 bg-white text-slate-900 rounded-lg hover:bg-slate-50 transition-all duration-300"
             >
               Upload Another Contract
             </button>

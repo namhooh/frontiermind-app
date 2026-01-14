@@ -29,30 +29,36 @@ export default function RootLayout({
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
-          href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@700;900&family=Space+Mono:wght@400;700&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
           rel="stylesheet"
         />
       </head>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-white min-h-screen`}
       >
-        <nav className="border-b-2 border-stone-900 p-4 bg-white">
+        <nav className="border-b border-slate-200 p-4 bg-white">
           <div className="max-w-6xl mx-auto flex gap-6">
             <Link
               href="/"
-              className="text-stone-900 hover:text-emerald-500 transition-colors duration-300"
+              className="text-slate-700 hover:text-cyan-600 transition-colors duration-300"
+            >
+              Home
+            </Link>
+            <Link
+              href="/dashboard"
+              className="text-slate-700 hover:text-cyan-600 transition-colors duration-300"
             >
               Dashboard
             </Link>
             <Link
               href="/contracts/upload"
-              className="text-stone-900 hover:text-emerald-500 transition-colors duration-300"
+              className="text-slate-700 hover:text-cyan-600 transition-colors duration-300"
             >
               Upload Contract
             </Link>
             <Link
               href="/test-queries"
-              className="text-stone-900 hover:text-emerald-500 transition-colors duration-300"
+              className="text-slate-700 hover:text-cyan-600 transition-colors duration-300"
             >
               Test Queries
             </Link>
