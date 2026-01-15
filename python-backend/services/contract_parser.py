@@ -24,10 +24,12 @@ from llama_parse import LlamaParse
 from anthropic import Anthropic
 
 from services.pii_detector import PIIDetector, PIIDetectionError
+from services.prompts import build_extraction_prompt
 from models.contract import (
     PIIEntity,
     AnonymizedResult,
     ExtractedClause,
+    ExtractionSummary,
     ContractParseResult,
 )
 from db.contract_repository import ContractRepository
@@ -176,8 +178,8 @@ class ContractParser:
             logger.info(f"PII anonymized: {anonymized_result.pii_count} entities redacted")
 
             # Step 4: Extract clauses with Claude API (ANONYMIZED text only)
-            logger.info("Step 4: Extracting clauses with Claude API")
-            clauses = self._extract_clauses(anonymized_result.anonymized_text)
+            logger.info("Step 4: Extracting clauses with Claude API (13-category structure)")
+            clauses, extraction_summary = self._extract_clauses(anonymized_result.anonymized_text)
             logger.info(f"Clause extraction complete: {len(clauses)} clauses extracted")
 
             # Step 5: Return results (no database storage - deferred to Phase 2)
@@ -186,6 +188,7 @@ class ContractParser:
             result = ContractParseResult(
                 contract_id=0,  # No DB storage yet (Phase 2)
                 clauses=clauses,
+                extraction_summary=extraction_summary,
                 pii_detected=len(pii_entities),
                 pii_anonymized=anonymized_result.pii_count,
                 processing_time=processing_time,
@@ -276,76 +279,89 @@ class ContractParser:
             self.repository.store_pii_mapping(contract_id, pii_mapping, user_id)
 
             # Step 5: Extract clauses with Claude API (anonymized text only)
-            logger.info("Step 5: Extracting clauses with Claude API")
-            clauses = self._extract_clauses(anonymized_result.anonymized_text)
-            logger.info(f"Clause extraction: {len(clauses)} clauses")
+            logger.info("Step 5: Extracting clauses with Claude API (13-category structure)")
+            clauses, extraction_summary = self._extract_clauses(anonymized_result.anonymized_text)
+            logger.info(f"Clause extraction: {len(clauses)} clauses, {extraction_summary.unidentified_count} unidentified")
 
             # Step 6: Store clauses in database with FK resolution
             logger.info("Step 6: Resolving foreign keys and storing clauses")
 
             # Transform clauses with FK resolution
             clause_dicts = []
-            fk_stats = {'type_resolved': 0, 'category_resolved': 0, 'party_resolved': 0}
+            fk_stats = {'category_resolved': 0, 'party_resolved': 0, 'category_unmatched': 0}
 
             for clause in clauses:
+                # Start with existing normalized_payload
+                payload = dict(clause.normalized_payload) if clause.normalized_payload else {}
+
+                # Add UNIDENTIFIED metadata to payload if applicable
+                if clause.category == 'UNIDENTIFIED':
+                    payload['_unidentified'] = True
+                    payload['_suggested_category'] = clause.suggested_category
+                    payload['_category_confidence'] = clause.category_confidence
+
                 # Resolve foreign keys using lookup service
+                # NOTE: clause_type_id is DEPRECATED (always NULL for new extractions)
                 clause_type_id = None
                 clause_category_id = None
                 responsible_party_id = None
 
                 if self.lookup_service:
-                    clause_type_id = self.lookup_service.get_clause_type_id(clause.clause_type)
-                    clause_category_id = self.lookup_service.get_clause_category_id(clause.clause_category)
+                    # Use new 'category' field (falls back to deprecated 'clause_category')
+                    category_code = clause.category or clause.clause_category
+                    if category_code and category_code != 'UNIDENTIFIED':
+                        clause_category_id = self.lookup_service.get_clause_category_id(category_code)
+
                     responsible_party_id = self.lookup_service.get_responsible_party_id(
                         clause.responsible_party,
                         create_if_missing=True
                     )
 
                     # Track statistics
-                    if clause_type_id:
-                        fk_stats['type_resolved'] += 1
                     if clause_category_id:
                         fk_stats['category_resolved'] += 1
+                    elif category_code and category_code != 'UNIDENTIFIED':
+                        # Preserve unmatched clause_category in normalized_payload
+                        payload['_unmatched_clause_category'] = category_code
+                        fk_stats['category_unmatched'] += 1
+                        logger.warning(
+                            f"Unmatched clause_category '{category_code}' for clause '{clause.clause_name}' "
+                            f"stored in normalized_payload"
+                        )
+
                     if responsible_party_id:
                         fk_stats['party_resolved'] += 1
+                    else:
+                        logger.warning(
+                            f"FK resolution failed for clause '{clause.clause_name}': "
+                            f"responsible_party='{clause.responsible_party}' could not be created"
+                        )
 
                 # Build clause dict with ALL fields
+                # Use new field names, with fallback to deprecated fields
+                confidence = clause.extraction_confidence or clause.confidence_score or 0.0
+                summary = clause.summary or clause.notes
+
                 clause_dict = {
                     "name": clause.clause_name,
-                    "section_ref": clause.section_reference,  # FIX: was missing
+                    "section_ref": clause.section_reference,
                     "raw_text": clause.raw_text,
-                    "summary": clause.summary,
+                    "summary": summary,
                     "beneficiary_party": clause.beneficiary_party,
-                    "confidence_score": clause.confidence_score,
-                    "normalized_payload": clause.normalized_payload,  # FIX: was missing
-                    "clause_type_id": clause_type_id,  # FIX: was NULL
-                    "clause_category_id": clause_category_id,  # FIX: was NULL
-                    "clause_responsibleparty_id": responsible_party_id,  # FIX: was missing
+                    "confidence_score": confidence,
+                    "normalized_payload": payload,  # Contains _unmatched_* or _unidentified if needed
+                    "clause_type_id": clause_type_id,  # DEPRECATED: Always NULL for new extractions
+                    "clause_category_id": clause_category_id,  # NULL for UNIDENTIFIED
+                    "clause_responsibleparty_id": responsible_party_id,
                 }
-
-                # Log warnings for missing FKs (flag for human review)
-                if clause_type_id is None:
-                    logger.warning(
-                        f"FK resolution failed for clause '{clause.clause_name}': "
-                        f"clause_type='{clause.clause_type}' not found"
-                    )
-                if clause_category_id is None:
-                    logger.warning(
-                        f"FK resolution failed for clause '{clause.clause_name}': "
-                        f"clause_category='{clause.clause_category}' not found"
-                    )
-                if responsible_party_id is None:
-                    logger.warning(
-                        f"FK resolution failed for clause '{clause.clause_name}': "
-                        f"responsible_party='{clause.responsible_party}' could not be created"
-                    )
 
                 clause_dicts.append(clause_dict)
 
-            # Log FK resolution summary
+            # Log FK resolution summary (clause_type deprecated, not counted)
+            unidentified_count = extraction_summary.unidentified_count
             logger.info(
-                f"FK resolution: types={fk_stats['type_resolved']}/{len(clauses)}, "
-                f"categories={fk_stats['category_resolved']}/{len(clauses)}, "
+                f"FK resolution: categories={fk_stats['category_resolved']}/{len(clauses)} "
+                f"(unmatched: {fk_stats['category_unmatched']}, unidentified: {unidentified_count}), "
                 f"parties={fk_stats['party_resolved']}/{len(clauses)}"
             )
 
@@ -372,6 +388,7 @@ class ContractParser:
             result = ContractParseResult(
                 contract_id=contract_id,
                 clauses=clauses,
+                extraction_summary=extraction_summary,
                 pii_detected=len(pii_entities),
                 pii_anonymized=anonymized_result.pii_count,
                 processing_time=processing_time,
@@ -380,7 +397,8 @@ class ContractParser:
 
             logger.info(
                 f"Contract parsing with database storage complete in {processing_time:.2f}s: "
-                f"contract_id={contract_id}, {len(clauses)} clauses, "
+                f"contract_id={contract_id}, {len(clauses)} clauses "
+                f"({extraction_summary.unidentified_count} unidentified), "
                 f"{anonymized_result.pii_count} PII redacted"
             )
 
@@ -451,33 +469,44 @@ class ContractParser:
             logger.error(f"LlamaParse document parsing failed: {str(e)}")
             raise DocumentParsingError(f"Failed to parse document: {str(e)}") from e
 
-    def _extract_clauses(self, anonymized_text: str) -> List[ExtractedClause]:
+    def _extract_clauses(self, anonymized_text: str) -> tuple[List[ExtractedClause], ExtractionSummary]:
         """
         Extract structured clauses using Claude API.
+
+        Updated January 2026: Uses new 13-category prompt structure.
 
         Args:
             anonymized_text: Contract text with PII redacted
 
         Returns:
-            List of extracted clauses with structured data
+            Tuple of (list of extracted clauses, extraction summary)
 
         Raises:
             ClauseExtractionError: If extraction fails
         """
         try:
-            # Prepare prompt for Claude
-            prompt = self._build_clause_extraction_prompt(anonymized_text)
+            # Get valid categories from database for prompt hints
+            valid_categories = None
+            if self.lookup_service:
+                valid_categories = self.lookup_service.get_valid_clause_categories()
 
-            # Call Claude API
-            logger.debug("Calling Claude API for clause extraction")
+            # Build prompt using new 13-category structure
+            prompts = build_extraction_prompt(
+                contract_text=anonymized_text,
+                valid_categories=valid_categories
+            )
+
+            # Call Claude API with system + user messages
+            logger.debug("Calling Claude API for clause extraction (13-category structure)")
             response = self.claude.messages.create(
                 model="claude-3-5-haiku-20241022",  # Claude Haiku 3.5 for cost efficiency
-                max_tokens=8000,
+                max_tokens=16000,  # Increased for comprehensive extraction
                 temperature=0.0,  # Deterministic extraction
+                system=prompts['system'],
                 messages=[
                     {
                         "role": "user",
-                        "content": prompt,
+                        "content": prompts['user'],
                     }
                 ],
             )
@@ -497,13 +526,40 @@ class ContractParser:
 
             clauses_data = json.loads(response_text)
 
-            # Convert to Pydantic models
-            clauses = [ExtractedClause(**clause) for clause in clauses_data.get("clauses", [])]
+            # Convert to Pydantic models with backward compatibility
+            clauses = []
+            for clause_dict in clauses_data.get("clauses", []):
+                # Map new fields to deprecated fields for backward compatibility
+                if 'category' in clause_dict and 'clause_category' not in clause_dict:
+                    clause_dict['clause_category'] = clause_dict.get('category')
+                if 'extraction_confidence' in clause_dict and 'confidence_score' not in clause_dict:
+                    clause_dict['confidence_score'] = clause_dict.get('extraction_confidence')
+
+                clauses.append(ExtractedClause(**clause_dict))
+
+            # Parse extraction summary
+            summary_data = clauses_data.get("extraction_summary", {})
+            extraction_summary = ExtractionSummary(
+                contract_type_detected=summary_data.get("contract_type_detected"),
+                total_clauses_extracted=summary_data.get("total_clauses_extracted", len(clauses)),
+                clauses_by_category=summary_data.get("clauses_by_category", {}),
+                unidentified_count=summary_data.get("unidentified_count", 0),
+                average_confidence=summary_data.get("average_confidence"),
+                extraction_warnings=summary_data.get("extraction_warnings", []),
+                is_template=summary_data.get("is_template", False),
+            )
 
             if not clauses:
                 logger.warning("No clauses extracted from contract")
+            else:
+                logger.info(
+                    f"Extracted {len(clauses)} clauses: "
+                    f"{extraction_summary.unidentified_count} unidentified, "
+                    f"avg confidence {extraction_summary.average_confidence:.2f}"
+                    if extraction_summary.average_confidence else f"Extracted {len(clauses)} clauses"
+                )
 
-            return clauses
+            return clauses, extraction_summary
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse Claude response as JSON: {str(e)}")
@@ -516,19 +572,35 @@ class ContractParser:
         """
         Build the prompt for Claude to extract clauses.
 
+        Includes valid clause types and categories from database when available,
+        guiding Claude to use existing codes for better FK resolution.
+
         Args:
             text: Anonymized contract text
 
         Returns:
             Formatted prompt for Claude API
         """
+        # Get valid codes from database if lookup service is available
+        valid_types_hint = ""
+        valid_categories_hint = ""
+
+        if self.lookup_service:
+            valid_types = self.lookup_service.get_valid_clause_types()
+            valid_categories = self.lookup_service.get_valid_clause_categories()
+
+            if valid_types:
+                valid_types_hint = f"\n   PREFERRED values (map to database): {', '.join(valid_types)}"
+            if valid_categories:
+                valid_categories_hint = f"\n   PREFERRED values (map to database): {', '.join(valid_categories)}"
+
         return f"""You are an expert at analyzing energy contracts. Extract all key clauses from the contract below.
 
 For each clause, identify:
 - clause_name: The name/title of the clause
 - section_reference: Section number (e.g., "4.1", "5.2")
-- clause_type: One of: availability, liquidated_damages, pricing, payment_terms, force_majeure, termination, general
-- clause_category: One of: availability, pricing, compliance, general
+- clause_type: Classification of the clause (availability, liquidated_damages, pricing, payment_terms, force_majeure, termination, general){valid_types_hint}
+- clause_category: Specific category (availability, pricing, compliance, general){valid_categories_hint}
 - raw_text: The exact text of the clause
 - summary: A brief 1-2 sentence summary
 - responsible_party: Who must fulfill this clause (Seller/Buyer/Both)

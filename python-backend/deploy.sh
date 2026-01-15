@@ -75,7 +75,7 @@ gcloud run deploy ${SERVICE_NAME} \
     --image ${IMAGE_NAME} \
     --platform managed \
     --region ${REGION} \
-    --memory 2Gi \
+    --memory 4Gi \
     --cpu 2 \
     --timeout 300s \
     --concurrency 80 \

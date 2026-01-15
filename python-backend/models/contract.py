@@ -92,46 +92,128 @@ class ExtractedClause(BaseModel):
     Represents a clause extracted from a contract.
 
     Used in contract parsing (Task 1.3) to store structured clause information.
+
+    Updated January 2026: New fields for 13-category flat structure.
+    - category/category_code replaces clause_type/clause_category
+    - category_confidence and extraction_confidence added
+    - suggested_category for UNIDENTIFIED clauses
+    - notes field for extraction context
     """
 
+    # New primary fields (January 2026)
+    clause_id: Optional[str] = Field(None, description="Sequential ID (clause_001, clause_002)")
     clause_name: str = Field(..., description="Name/title of the clause")
     section_reference: str = Field(..., description="Section number or reference (e.g., '4.1')")
-    clause_type: str = Field(
-        ..., description="Type of clause (availability, liquidated_damages, pricing, payment_terms)"
+
+    # Category fields (new flat structure)
+    category: Optional[str] = Field(
+        None,
+        description="Category code (AVAILABILITY, LIQUIDATED_DAMAGES, etc.) or UNIDENTIFIED"
     )
-    clause_category: str = Field(
-        ..., description="Category (availability, pricing, compliance, general)"
+    category_code: Optional[str] = Field(
+        None,
+        description="Category code for database FK (null for UNIDENTIFIED)"
     )
+    category_confidence: Optional[float] = Field(
+        None,
+        description="Confidence in category assignment (0.0-1.0)",
+        ge=0.0,
+        le=1.0
+    )
+    suggested_category: Optional[str] = Field(
+        None,
+        description="For UNIDENTIFIED clauses, the AI's best guess category"
+    )
+
+    # Content fields
     raw_text: str = Field(..., description="Original clause text")
-    summary: str = Field(..., description="Brief summary of the clause")
+    summary: Optional[str] = Field(None, description="Brief summary of the clause")
     responsible_party: str = Field(..., description="Party responsible for this clause")
     beneficiary_party: Optional[str] = Field(None, description="Beneficiary party, if applicable")
     normalized_payload: Optional[Dict[str, Any]] = Field(
-        default_factory=dict, description="Structured data for rules engine (thresholds, formulas, etc.)"
+        default_factory=dict,
+        description="Structured data for rules engine (thresholds, formulas, etc.)"
     )
-    confidence_score: float = Field(
-        ..., description="AI extraction confidence (0.0-1.0)", ge=0.0, le=1.0
+
+    # Confidence and notes
+    extraction_confidence: Optional[float] = Field(
+        None,
+        description="Confidence in extracted values (0.0-1.0)",
+        ge=0.0,
+        le=1.0
+    )
+    notes: Optional[str] = Field(None, description="Additional extraction notes")
+
+    # DEPRECATED fields (kept for backward compatibility)
+    clause_type: Optional[str] = Field(
+        None,
+        description="DEPRECATED: Use category instead. High-level type classification."
+    )
+    clause_category: Optional[str] = Field(
+        None,
+        description="DEPRECATED: Use category instead. Specific category."
+    )
+    confidence_score: Optional[float] = Field(
+        None,
+        description="DEPRECATED: Use extraction_confidence instead.",
+        ge=0.0,
+        le=1.0
     )
 
     model_config = ConfigDict(
         json_schema_extra={
             "example": {
+                "clause_id": "clause_001",
                 "clause_name": "Availability Guarantee",
                 "section_reference": "4.1",
-                "clause_type": "availability",
-                "clause_category": "availability",
+                "category": "AVAILABILITY",
+                "category_code": "AVAILABILITY",
+                "category_confidence": 0.95,
                 "raw_text": "Seller shall ensure the Facility achieves a minimum annual Availability of 95%.",
                 "summary": "Requires 95% annual availability",
                 "responsible_party": "Seller",
                 "beneficiary_party": "Buyer",
                 "normalized_payload": {
-                    "threshold": 95.0,
-                    "metric": "availability",
-                    "period": "annual",
+                    "threshold_percent": 95.0,
+                    "measurement_period": "annual",
+                    "excused_events": ["force_majeure", "grid_curtailment"],
                 },
-                "confidence_score": 0.92,
+                "extraction_confidence": 0.92,
+                "notes": "Standard availability clause with annual measurement",
             }
         }
+    )
+
+
+class ExtractionSummary(BaseModel):
+    """
+    Summary of clause extraction results.
+
+    Added January 2026: Provides metadata about the extraction process.
+    """
+
+    contract_type_detected: Optional[str] = Field(
+        None, description="Detected contract type (PPA, O&M, EPC)"
+    )
+    total_clauses_extracted: int = Field(
+        0, description="Total number of clauses extracted", ge=0
+    )
+    clauses_by_category: Dict[str, int] = Field(
+        default_factory=dict,
+        description="Count of clauses per category"
+    )
+    unidentified_count: int = Field(
+        0, description="Number of UNIDENTIFIED clauses", ge=0
+    )
+    average_confidence: Optional[float] = Field(
+        None, description="Average extraction confidence (0.0-1.0)"
+    )
+    extraction_warnings: List[str] = Field(
+        default_factory=list,
+        description="Warnings about missing clauses or potential issues"
+    )
+    is_template: bool = Field(
+        False, description="Whether contract appears to be a template (placeholder values)"
     )
 
 
@@ -140,11 +222,16 @@ class ContractParseResult(BaseModel):
     Complete result of contract parsing pipeline.
 
     Returned by ContractParser.process_contract() (Task 1.3).
+
+    Updated January 2026: Added extraction_summary field.
     """
 
     contract_id: int = Field(..., description="Database ID of stored contract")
     clauses: List[ExtractedClause] = Field(
         default_factory=list, description="List of extracted clauses"
+    )
+    extraction_summary: Optional[ExtractionSummary] = Field(
+        None, description="Summary of extraction results (January 2026)"
     )
     pii_detected: int = Field(..., description="Number of PII entities detected", ge=0)
     pii_anonymized: int = Field(..., description="Number of PII entities anonymized", ge=0)
@@ -158,6 +245,12 @@ class ContractParseResult(BaseModel):
             "example": {
                 "contract_id": 1234,
                 "clauses": [],
+                "extraction_summary": {
+                    "contract_type_detected": "PPA",
+                    "total_clauses_extracted": 12,
+                    "unidentified_count": 1,
+                    "average_confidence": 0.85,
+                },
                 "pii_detected": 5,
                 "pii_anonymized": 5,
                 "processing_time": 12.34,

@@ -33,17 +33,15 @@ app = FastAPI(
     redoc_url="/redoc",
 )
 
-# Configure CORS for Vercel frontend
-origins = [
-    "http://localhost:3000",  # Next.js development server
-    "http://localhost:3001",
-    "https://*.vercel.app",  # Vercel production deployments
-    "https://vercel.app",
-]
-
+# Configure CORS for Vercel frontend and local development
+# Note: allow_origins doesn't support wildcards, so we use allow_origin_regex for Vercel
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,
+    allow_origins=[
+        "http://localhost:3000",  # Next.js development server
+        "http://localhost:3001",
+    ],
+    allow_origin_regex=r"https://.*\.vercel\.app",  # Matches all Vercel deployments
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],

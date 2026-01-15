@@ -25,7 +25,9 @@
       "Bash(ls:*)",
       "Bash(find:*)",
       "Bash(npm install:*)",
-      "Bash(kill:*)"
+      "Bash(kill:*)",
+      "Bash(./deploy.sh:*)",
+      "Bash(bash:*)"
     ]
   }
 }

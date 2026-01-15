@@ -58,6 +58,7 @@
 │     • Send ONLY anonymized text to Claude 3.5 Sonnet        │
 │     • Claude NEVER sees original PII                        │
 │     • Privacy boundary: Claude sees only redacted text      │
+│     • Prompt includes PREFERRED codes from database         │
 │     • Extract key clauses:                                  │
 │       - Availability guarantees (95% uptime, etc.)          │
 │       - Liquidated damages (LD) formulas                    │
@@ -65,6 +66,15 @@
 │       - Payment terms                                       │
 │     • Normalize to standard JSON schema                     │
 │     • Cost: $0.50-1.00 per contract                        │
+│                                                              │
+│  Step 5.5: Cross-Verification (NEW)                        │
+│     • Validate clause_type against DB lookup table          │
+│     • Validate clause_category against DB lookup table      │
+│     • If code NOT in DB:                                    │
+│       - Store in normalized_payload as _unmatched_*         │
+│       - Set FK to NULL                                      │
+│       - Log warning for review                              │
+│     • If code IN DB: resolve FK normally                    │
 │                                                              │
 │  OPTIONAL ENHANCEMENT (Choice C-Hybrid):                    │
 │     • Before Step 2, try PyPDF2 for local text extraction   │
@@ -168,6 +178,10 @@
 - ✅ **Lookup Tables Populated:**
   - 5 clause types (COMMERCIAL, LEGAL, FINANCIAL, OPERATIONAL, REGULATORY)
   - 10 clause categories (AVAILABILITY, PERF_GUARANTEE, LIQ_DAMAGES, PRICING, PAYMENT, FORCE_MAJEURE, TERMINATION, SLA, COMPLIANCE, GENERAL)
+- ✅ **Cross-Verification Workflow (NEW):**
+  - Prompt includes valid DB codes as PREFERRED values
+  - Unmatched codes preserved in `normalized_payload` JSONB
+  - LookupService validation methods: `get_valid_clause_types()`, `is_valid_clause_type()`, etc.
 
 ✅ **Rules Engine & Frontend (January 2026):**
 - ✅ **Rules Engine (Task 3.1):** Native Python rules engine implemented
@@ -396,12 +410,15 @@ Requirements:
       - Extract: availability, LD, pricing, payment terms
       - Return structured JSON with normalized_payload
 
-   e. Resolve Foreign Keys (NEW - Added Jan 2026)
+   e. Resolve Foreign Keys with Cross-Verification (Updated Jan 2026)
       - Use LookupService to map string codes to database IDs
       - clause_type: "availability" → clause_type_id: 4 (OPERATIONAL)
       - clause_category: "availability" → clause_category_id: 1 (AVAILABILITY)
       - responsible_party: "Owner" → clause_responsibleparty_id (create if missing)
-      - Log FK resolution statistics
+      - **NEW: If code NOT in DB:**
+        - Store original in normalized_payload as `_unmatched_clause_type` or `_unmatched_clause_category`
+        - Set FK to NULL (preserves data for future migration)
+      - Log FK resolution statistics (including unmatched counts)
 
    f. Store in database
       - Save contract metadata (with optional project_id, organization_id)
@@ -1253,6 +1270,76 @@ After implementation, you should achieve:
 - ✅ `database/seed/fixtures/06_lookup_tables.sql` - NEW
 
 **Verification:** All newly parsed contracts will have complete FK relationships. Run the verification query in the "Foreign Key Resolution & Lookup Tables" section to confirm.
+
+---
+
+### Cross-Verification Workflow & Unmatched Code Preservation (January 2026)
+
+**Issue:** When Claude extracts clause types/categories that don't exist in the database lookup tables, the FK resolution fails silently and data is lost.
+
+**Solution Implemented:** Cross-verify extractions against database codes and preserve unmatched values in JSONB.
+
+**New Workflow:**
+
+```
+1. Load valid codes from DB at startup (cached in LookupService)
+2. Provide valid codes to Claude prompt as PREFERRED values
+3. Claude extracts clauses (guided toward existing codes)
+4. Validate extraction against cached codes
+5. If code NOT in DB:
+   - Store original value in normalized_payload as _unmatched_*
+   - Set FK to NULL
+   - Log warning
+6. If code IN DB:
+   - Resolve FK normally
+7. Store clause with verified FKs or NULL + preserved data
+```
+
+**Files Modified:**
+
+1. **`python-backend/db/lookup_service.py`** - Added validation methods:
+   ```python
+   get_valid_clause_types() -> List[str]      # Returns DB codes
+   get_valid_clause_categories() -> List[str]  # Returns DB codes
+   is_valid_clause_type(code) -> bool          # Validates against DB
+   is_valid_clause_category(code) -> bool      # Validates against DB
+   ```
+
+2. **`python-backend/services/contract_parser.py`** - Updated prompt & storage:
+   - `_build_clause_extraction_prompt()` now includes valid codes from DB
+   - Clause storage preserves unmatched codes in `normalized_payload`
+
+**Data Preservation Format:**
+
+When a clause has unmatched codes, `normalized_payload` contains:
+
+```json
+{
+  "threshold": 95.0,
+  "metric": "availability",
+  "_unmatched_clause_type": "availability",
+  "_unmatched_clause_category": "force_majeure"
+}
+```
+
+**Query Unmatched Clauses:**
+
+```sql
+-- Find clauses with unmatched codes preserved in payload
+SELECT
+    c.name,
+    c.normalized_payload->>'_unmatched_clause_type' AS unmatched_type,
+    c.normalized_payload->>'_unmatched_clause_category' AS unmatched_category
+FROM clause c
+WHERE c.normalized_payload ? '_unmatched_clause_type'
+   OR c.normalized_payload ? '_unmatched_clause_category';
+```
+
+**Benefits:**
+- No schema changes required - works with existing DB
+- Data preserved - unmatched values not lost
+- Future-proof - can later migrate unmatched data to new lookup entries
+- Visibility - easy to query which clauses need attention
 
 ---
 
