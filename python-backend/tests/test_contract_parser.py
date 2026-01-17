@@ -77,11 +77,24 @@ def test_contract_parser_initialization(mock_env_vars):
     with patch("services.contract_parser.LlamaParse"), \
          patch("services.contract_parser.Anthropic"):
 
-        parser = ContractParser()
+        parser = ContractParser(extraction_mode="single_pass")
 
         assert parser.pii_detector is not None
         assert parser.llama_parser is not None
         assert parser.claude is not None
+        assert parser.extraction_mode == "single_pass"
+
+
+def test_contract_parser_initialization_two_pass(mock_env_vars):
+    """Test ContractParser initializes with two_pass mode (default)."""
+    with patch("services.contract_parser.LlamaParse"), \
+         patch("services.contract_parser.Anthropic"):
+
+        parser = ContractParser()  # Default is now two_pass
+
+        assert parser.extraction_mode == "two_pass"
+        assert parser.enable_validation == True
+        assert parser.enable_targeted == True
 
 
 def test_contract_parser_missing_llama_key():
@@ -100,11 +113,13 @@ def test_contract_parser_missing_anthropic_key(monkeypatch):
             ContractParser()
 
 
+@patch("services.chunking.token_estimator.TokenEstimator.estimate_tokens", return_value=500)
 @patch("services.contract_parser.LlamaParse")
 @patch("services.contract_parser.Anthropic")
 def test_process_contract_success(
     mock_anthropic,
     mock_llama,
+    mock_estimator,
     mock_env_vars,
     sample_pdf_bytes,
     sample_contract_text,
@@ -121,8 +136,8 @@ def test_process_contract_success(
     mock_response.content = [Mock(text=f"```json\n{json.dumps(sample_claude_response)}\n```")]
     mock_anthropic.return_value.messages.create.return_value = mock_response
 
-    # Create parser and process
-    parser = ContractParser()
+    # Create parser and process (use single_pass to match mock setup)
+    parser = ContractParser(extraction_mode="single_pass", enable_targeted=False, enable_validation=False)
     result = parser.process_contract(sample_pdf_bytes, "test.pdf")
 
     # Verify result
@@ -135,11 +150,13 @@ def test_process_contract_success(
     assert result.contract_id == 0  # No DB storage yet
 
 
+@patch("services.chunking.token_estimator.TokenEstimator.estimate_tokens", return_value=500)
 @patch("services.contract_parser.LlamaParse")
 @patch("services.contract_parser.Anthropic")
 def test_pii_detection_before_claude_call(
     mock_anthropic,
     mock_llama,
+    mock_estimator,
     mock_env_vars,
     sample_pdf_bytes,
     sample_contract_text,
@@ -166,8 +183,8 @@ def test_pii_detection_before_claude_call(
     mock_llama.return_value.load_data.side_effect = track_llama_call
     mock_anthropic.return_value.messages.create.side_effect = track_claude_call
 
-    # Process contract
-    parser = ContractParser()
+    # Process contract (use single_pass to match mock setup)
+    parser = ContractParser(extraction_mode="single_pass", enable_targeted=False, enable_validation=False)
 
     with patch.object(parser.pii_detector, 'detect', wraps=parser.pii_detector.detect) as mock_detect:
         result = parser.process_contract(sample_pdf_bytes, "test.pdf")
@@ -236,18 +253,20 @@ def test_claude_api_failure(
     # Mock Claude to raise an exception
     mock_anthropic.return_value.messages.create.side_effect = Exception("Claude API error")
 
-    parser = ContractParser()
+    parser = ContractParser(extraction_mode="single_pass", enable_targeted=False, enable_validation=False)
 
     # Should raise ClauseExtractionError
     with pytest.raises(ClauseExtractionError, match="Failed to extract clauses"):
         parser.process_contract(sample_pdf_bytes, "test.pdf")
 
 
+@patch("services.chunking.token_estimator.TokenEstimator.estimate_tokens", return_value=500)
 @patch("services.contract_parser.LlamaParse")
 @patch("services.contract_parser.Anthropic")
 def test_invalid_json_response(
     mock_anthropic,
     mock_llama,
+    mock_estimator,
     mock_env_vars,
     sample_pdf_bytes,
     sample_contract_text,
@@ -263,18 +282,20 @@ def test_invalid_json_response(
     mock_response.content = [Mock(text="This is not valid JSON")]
     mock_anthropic.return_value.messages.create.return_value = mock_response
 
-    parser = ContractParser()
+    parser = ContractParser(extraction_mode="single_pass", enable_targeted=False, enable_validation=False)
 
     # Should raise ClauseExtractionError
     with pytest.raises(ClauseExtractionError, match="Invalid JSON response"):
         parser.process_contract(sample_pdf_bytes, "test.pdf")
 
 
+@patch("services.chunking.token_estimator.TokenEstimator.estimate_tokens", return_value=500)
 @patch("services.contract_parser.LlamaParse")
 @patch("services.contract_parser.Anthropic")
 def test_no_clauses_extracted(
     mock_anthropic,
     mock_llama,
+    mock_estimator,
     mock_env_vars,
     sample_pdf_bytes,
     sample_contract_text,
@@ -290,7 +311,7 @@ def test_no_clauses_extracted(
     mock_response.content = [Mock(text='{"clauses": []}')]
     mock_anthropic.return_value.messages.create.return_value = mock_response
 
-    parser = ContractParser()
+    parser = ContractParser(extraction_mode="single_pass", enable_targeted=False, enable_validation=False)
     result = parser.process_contract(sample_pdf_bytes, "test.pdf")
 
     # Should succeed but have no clauses
@@ -298,11 +319,13 @@ def test_no_clauses_extracted(
     assert len(result.clauses) == 0
 
 
+@patch("services.chunking.token_estimator.TokenEstimator.estimate_tokens", return_value=500)
 @patch("services.contract_parser.LlamaParse")
 @patch("services.contract_parser.Anthropic")
 def test_multiple_clauses_extraction(
     mock_anthropic,
     mock_llama,
+    mock_estimator,
     mock_env_vars,
     sample_pdf_bytes,
     sample_contract_text,
@@ -347,7 +370,7 @@ def test_multiple_clauses_extraction(
     mock_response.content = [Mock(text=json.dumps(multiple_clauses))]
     mock_anthropic.return_value.messages.create.return_value = mock_response
 
-    parser = ContractParser()
+    parser = ContractParser(extraction_mode="single_pass", enable_targeted=False, enable_validation=False)
     result = parser.process_contract(sample_pdf_bytes, "test.pdf")
 
     # Verify multiple clauses extracted

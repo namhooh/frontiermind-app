@@ -21,7 +21,14 @@ IMPORTANT RULES:
 4. Preserve section references for audit trails
 5. Map each clause to the predefined categories when possible
 6. If a clause doesn't fit predefined categories, set category to "UNIDENTIFIED" and include your suggested category
-7. Extract ALL clauses found in the contract - every clause must be recorded"""
+7. Extract ALL clauses found in the contract - every clause must be recorded
+8. IMPORTANT: Extract MULTIPLE clauses per category when applicable:
+   - Multiple LIQUIDATED_DAMAGES clauses (availability LD, delay LD, performance LD)
+   - Multiple DEFAULT events (seller defaults, buyer defaults)
+   - Multiple TERMINATION triggers (early termination, expiration, default termination)
+   - Multiple PRICING provisions (base rate, escalation, adjustments)
+   - Multiple COMPLIANCE requirements (permits, reporting, environmental)
+9. Aim to extract 20-30 clauses from a typical PPA contract"""
 
 
 CLAUSE_EXTRACTION_USER_PROMPT = """Extract clauses from this energy contract. For each clause found, provide BOTH the raw text AND a normalized structure.
@@ -336,10 +343,54 @@ Return a JSON object with the following structure:
 """
 
 
+def _build_examples_section() -> str:
+    """Build the few-shot examples section for the prompt."""
+    from .clause_examples import CLAUSE_EXAMPLES
+
+    examples_text = """
+
+---
+
+## FEW-SHOT EXAMPLES
+
+The following are gold-standard extraction examples. Use these as reference for how to extract and structure clauses:
+
+"""
+    # Add compact examples for high-priority categories
+    priority_categories = [
+        "LIQUIDATED_DAMAGES",
+        "AVAILABILITY",
+        "PERFORMANCE_GUARANTEE",
+        "PRICING",
+        "SECURITY_PACKAGE",
+        "DEFAULT"
+    ]
+
+    for cat_code in priority_categories:
+        example = CLAUSE_EXAMPLES.get(cat_code)
+        if example:
+            raw = example["example_raw_text"].strip()[:300]
+            ext = example["example_extraction"]
+            payload = ext["normalized_payload"]
+
+            # Get first 3 payload items
+            payload_preview = {k: v for k, v in list(payload.items())[:3] if v is not None}
+
+            examples_text += f"""
+### {cat_code} Example
+**Raw text:** "{raw}..."
+**Extracted:** clause_name="{ext['clause_name']}", normalized_payload includes: {payload_preview}
+
+"""
+
+    return examples_text
+
+
 def build_extraction_prompt(
     contract_text: str,
     contract_type_hint: Optional[str] = None,
-    valid_categories: Optional[list] = None
+    valid_categories: Optional[list] = None,
+    include_examples: bool = False  # Disabled: examples reduced clause count from 19→15
 ) -> dict:
     """
     Build the complete prompt for Claude API.
@@ -348,6 +399,7 @@ def build_extraction_prompt(
         contract_text: The anonymized contract text from LlamaParse
         contract_type_hint: Optional hint about contract type (PPA, O&M, EPC)
         valid_categories: Optional list of valid category codes from database
+        include_examples: Whether to include few-shot examples (default True)
 
     Returns:
         Dict with 'system' and 'user' prompts ready for Claude API
@@ -355,6 +407,15 @@ def build_extraction_prompt(
     user_prompt = CLAUSE_EXTRACTION_USER_PROMPT.format(
         contract_text=contract_text
     )
+
+    # Add few-shot examples section
+    if include_examples:
+        examples_section = _build_examples_section()
+        # Insert examples before the RESPONSE FORMAT section
+        user_prompt = user_prompt.replace(
+            "---\n\n## RESPONSE FORMAT",
+            examples_section + "---\n\n## RESPONSE FORMAT"
+        )
 
     if contract_type_hint:
         user_prompt = f"CONTRACT TYPE HINT: This appears to be a {contract_type_hint} agreement.\n\n" + user_prompt
@@ -365,5 +426,70 @@ def build_extraction_prompt(
 
     return {
         'system': CLAUSE_EXTRACTION_SYSTEM_PROMPT,
+        'user': user_prompt
+    }
+
+
+def build_chunk_extraction_prompt(
+    contract_text: str,
+    chunk_index: int,
+    total_chunks: int,
+    chunk_context: Optional[str] = None,
+    contract_type_hint: Optional[str] = None,
+    valid_categories: Optional[list] = None,
+    include_examples: bool = False  # Disabled: examples reduced clause count from 19→15
+) -> dict:
+    """
+    Build prompt for extracting clauses from a contract chunk.
+
+    This variant adds chunk awareness to help Claude understand it's processing
+    a portion of a larger document.
+
+    Args:
+        contract_text: The chunk text to extract from
+        chunk_index: Index of this chunk (0-based)
+        total_chunks: Total number of chunks
+        chunk_context: Optional context about what sections this chunk contains
+        contract_type_hint: Optional hint about contract type
+        valid_categories: Optional list of valid category codes
+        include_examples: Whether to include few-shot examples (default True)
+
+    Returns:
+        Dict with 'system' and 'user' prompts ready for Claude API
+    """
+    # Add chunk awareness to system prompt
+    chunk_system = CLAUSE_EXTRACTION_SYSTEM_PROMPT + f"""
+
+CHUNK CONTEXT:
+You are analyzing chunk {chunk_index + 1} of {total_chunks} from a longer contract.
+- Extract ALL clauses found in this chunk
+- Some clauses may be partial (text continues in next chunk) - extract what you can see
+- Do NOT skip clauses because they seem incomplete
+- Include section references for all clauses to enable deduplication across chunks"""
+
+    # Build user prompt with chunk prefix
+    chunk_prefix = ""
+    if chunk_context:
+        chunk_prefix += f"CHUNK SECTIONS: {chunk_context}\n\n"
+    if contract_type_hint:
+        chunk_prefix += f"CONTRACT TYPE: {contract_type_hint}\n\n"
+    if valid_categories:
+        chunk_prefix += f"VALID CATEGORIES: {', '.join(valid_categories)}\n\n"
+
+    user_prompt = chunk_prefix + CLAUSE_EXTRACTION_USER_PROMPT.format(
+        contract_text=contract_text
+    )
+
+    # Add few-shot examples section
+    if include_examples:
+        examples_section = _build_examples_section()
+        # Insert examples before the RESPONSE FORMAT section
+        user_prompt = user_prompt.replace(
+            "---\n\n## RESPONSE FORMAT",
+            examples_section + "---\n\n## RESPONSE FORMAT"
+        )
+
+    return {
+        'system': chunk_system,
         'user': user_prompt
     }

@@ -1849,4 +1849,57 @@ gcloud secrets versions access latest --secret=anthropic-api-key  # View secret
 
 ---
 
+## 📊 Data Ingestion Architecture
+
+For meter data lake-house architecture, multi-source ingestion, and inverter API integration, see:
+
+**`DATA_INGESTION_ARCHITECTURE.md`**
+
+**Key Components:**
+- S3-first ingestion pattern (raw → validated → database)
+- Multi-source support (SolarEdge, Enphase, SMA, GoodWe, Snowflake, Manual)
+- Validator Lambda for data quality
+- Partitioned `meter_reading` with canonical data model
+- Integration credential management
+
+**Architecture Overview:**
+```
+Data Sources (Inverters, Snowflake, Manual)
+         │
+         ▼
+┌─────────────────────────────────────────┐
+│         S3 BUCKET (Lake-House)          │
+│  raw/ → validated/ or quarantine/       │
+└────────────────┬────────────────────────┘
+                 │ S3 Event
+                 ▼
+┌─────────────────────────────────────────┐
+│         VALIDATOR LAMBDA                │
+│  • Schema validation                    │
+│  • Transform to canonical model         │
+│  • Load to Supabase PostgreSQL          │
+└────────────────┬────────────────────────┘
+                 │
+                 ▼
+┌─────────────────────────────────────────┐
+│        SUPABASE POSTGRESQL              │
+│  meter_reading (partitioned, 90-day)    │
+│  meter_aggregate (kept forever)         │
+│  integration_credential/site            │
+│  ingestion_log                          │
+└─────────────────────────────────────────┘
+```
+
+**Database Schema (v3.0):**
+- See `database/SCHEMA_CHANGES.md` for full details
+- Migrations: `database/migrations/006-011*.sql`
+
+**Implementation Status:**
+- ✅ Database migrations created
+- ⏳ AWS infrastructure setup pending
+- ⏳ Validator Lambda implementation pending
+- ⏳ Ingest API endpoints pending
+
+---
+
 **This guide provides everything Claude Code needs to implement the complete contract digitization workflow. Share it as context for any implementation tasks.**

@@ -23,6 +23,7 @@ import os
 # Import API routers (these can now access DATABASE_URL)
 from api.contracts import router as contracts_router
 from api.rules import router as rules_router
+from api.ingest import router as ingest_router
 
 # Initialize FastAPI application
 app = FastAPI(
@@ -50,6 +51,7 @@ app.add_middleware(
 # Register API routers
 app.include_router(contracts_router)
 app.include_router(rules_router)
+app.include_router(ingest_router)
 
 
 @app.get("/", response_model=Dict[str, str])

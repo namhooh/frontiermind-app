@@ -25,6 +25,21 @@ from anthropic import Anthropic
 
 from services.pii_detector import PIIDetector, PIIDetectionError
 from services.prompts import build_extraction_prompt
+from services.prompts.discovery_prompt import build_chunk_discovery_prompt
+from services.prompts.categorization_prompt import build_categorization_prompt
+from services.prompts.targeted_extraction_prompt import (
+    build_targeted_extraction_prompt,
+    get_missing_categories,
+    TARGETED_CATEGORIES,
+)
+from services.prompts.payload_enrichment_prompt import (
+    build_batch_enrichment_prompt,
+    get_enrichment_candidates,
+)
+from services.prompts.validation_prompt import (
+    build_validation_prompt,
+    parse_validation_response,
+)
 from models.contract import (
     PIIEntity,
     AnonymizedResult,
@@ -37,6 +52,23 @@ from db.database import init_connection_pool
 from db.lookup_service import LookupService
 
 logger = logging.getLogger(__name__)
+
+
+# =============================================================================
+# TOKEN BUDGET CONFIGURATION
+# =============================================================================
+# Increased token budgets to prevent response truncation and improve extraction
+# quality. Original values were: main=16000, discovery=16000, categorization=16000,
+# targeted=8000, enrichment=8000
+
+TOKEN_BUDGETS = {
+    "main_extraction": 32000,      # Single-pass extraction (was 16000)
+    "discovery": 24000,            # Two-pass: discovery phase (was 16000)
+    "categorization": 32000,       # Two-pass: categorization phase (was 16000)
+    "targeted": 16000,             # Targeted extraction per category (was 8000)
+    "enrichment": 12000,           # Payload enrichment (was 8000)
+    "validation": 16000,           # Validation pass (new)
+}
 
 
 class ContractParserError(Exception):
@@ -73,17 +105,38 @@ class ContractParser:
         # result.pii_detected shows how many PII entities were found
     """
 
-    def __init__(self, use_database: bool = False):
+    def __init__(
+        self,
+        use_database: bool = False,
+        extraction_mode: str = "two_pass",
+        enable_validation: bool = True,
+        enable_targeted: bool = True
+    ):
         """
         Initialize parser with external API clients.
 
         Args:
-            use_database: If True, initialize database repository for storing results (Phase 2)
+            use_database: If True, initialize database repository for storing results
+            extraction_mode: Extraction strategy to use:
+                - "single_pass": Original single-pass extraction (faster, less thorough)
+                - "two_pass": Discovery → Categorization (more thorough, recommended)
+                - "hybrid": Both methods merged for maximum recall (most API calls)
+            enable_validation: If True, run validation pass to catch missed clauses
+            enable_targeted: If True, run targeted extraction for missing categories
 
         Raises:
             ContractParserError: If API keys are missing or initialization fails
         """
-        logger.info("Initializing ContractParser")
+        logger.info(f"Initializing ContractParser (mode={extraction_mode})")
+
+        # Validate extraction_mode
+        valid_modes = ["single_pass", "two_pass", "hybrid"]
+        if extraction_mode not in valid_modes:
+            raise ContractParserError(f"Invalid extraction_mode: {extraction_mode}. Must be one of {valid_modes}")
+
+        self.extraction_mode = extraction_mode
+        self.enable_validation = enable_validation
+        self.enable_targeted = enable_targeted
 
         try:
             # Initialize PII detector (local)
@@ -471,9 +524,32 @@ class ContractParser:
 
     def _extract_clauses(self, anonymized_text: str) -> tuple[List[ExtractedClause], ExtractionSummary]:
         """
-        Extract structured clauses using Claude API.
+        Route to appropriate extraction method based on extraction_mode.
 
-        Updated January 2026: Uses new 13-category prompt structure.
+        Args:
+            anonymized_text: Contract text with PII redacted
+
+        Returns:
+            Tuple of (list of extracted clauses, extraction summary)
+        """
+        logger.info(f"Starting clause extraction (mode={self.extraction_mode})")
+
+        if self.extraction_mode == "single_pass":
+            return self._extract_clauses_single_pass(anonymized_text)
+        elif self.extraction_mode == "two_pass":
+            return self._extract_clauses_two_pass(anonymized_text)
+        elif self.extraction_mode == "hybrid":
+            return self._extract_clauses_hybrid(anonymized_text)
+        else:
+            # Fallback to two_pass (shouldn't happen due to validation in __init__)
+            return self._extract_clauses_two_pass(anonymized_text)
+
+    def _extract_clauses_single_pass(self, anonymized_text: str) -> tuple[List[ExtractedClause], ExtractionSummary]:
+        """
+        Single-pass extraction using Claude API with chunking support.
+
+        This is the original extraction method - faster but may miss clauses.
+        Uses 13-category prompt structure with chunking for long contracts.
 
         Args:
             anonymized_text: Contract text with PII redacted
@@ -484,80 +560,103 @@ class ContractParser:
         Raises:
             ClauseExtractionError: If extraction fails
         """
+        from services.chunking import ContractChunker, TokenEstimator, ResultAggregator
+        from services.prompts import build_chunk_extraction_prompt
+
         try:
+            # Initialize chunking components
+            estimator = TokenEstimator(self.claude)
+            chunker = ContractChunker(estimator)
+            aggregator = ResultAggregator()
+
             # Get valid categories from database for prompt hints
             valid_categories = None
             if self.lookup_service:
                 valid_categories = self.lookup_service.get_valid_clause_categories()
 
-            # Build prompt using new 13-category structure
-            prompts = build_extraction_prompt(
-                contract_text=anonymized_text,
-                valid_categories=valid_categories
-            )
+            # Chunk the contract
+            chunks = chunker.chunk_contract(anonymized_text)
+            logger.info(f"Processing contract in {len(chunks)} chunk(s)")
 
-            # Call Claude API with system + user messages
-            logger.debug("Calling Claude API for clause extraction (13-category structure)")
-            response = self.claude.messages.create(
-                model="claude-3-5-haiku-20241022",  # Claude Haiku 3.5 for cost efficiency
-                max_tokens=16000,  # Increased for comprehensive extraction
-                temperature=0.0,  # Deterministic extraction
-                system=prompts['system'],
-                messages=[
-                    {
-                        "role": "user",
-                        "content": prompts['user'],
-                    }
-                ],
-            )
+            # Process each chunk
+            chunk_results = []
+            for chunk in chunks:
+                logger.debug(
+                    f"Processing chunk {chunk.metadata.chunk_index + 1}/{chunk.metadata.total_chunks} "
+                    f"({chunk.metadata.estimated_tokens} tokens)"
+                )
 
-            # Parse Claude's response (JSON format)
-            response_text = response.content[0].text
+                # Build chunk-specific prompt
+                chunk_context = None
+                if chunk.metadata.start_section and chunk.metadata.end_section:
+                    chunk_context = f"Sections {chunk.metadata.start_section} to {chunk.metadata.end_section}"
+                elif chunk.metadata.start_section:
+                    chunk_context = f"Starting from {chunk.metadata.start_section}"
 
-            # Extract JSON from response (Claude may wrap it in markdown)
-            if "```json" in response_text:
-                json_start = response_text.find("```json") + 7
-                json_end = response_text.find("```", json_start)
-                response_text = response_text[json_start:json_end].strip()
-            elif "```" in response_text:
-                json_start = response_text.find("```") + 3
-                json_end = response_text.find("```", json_start)
-                response_text = response_text[json_start:json_end].strip()
+                prompts = build_chunk_extraction_prompt(
+                    contract_text=chunk.text,
+                    chunk_index=chunk.metadata.chunk_index,
+                    total_chunks=chunk.metadata.total_chunks,
+                    chunk_context=chunk_context,
+                    valid_categories=valid_categories
+                )
 
-            clauses_data = json.loads(response_text)
+                # Call Claude API
+                response = self.claude.messages.create(
+                    model="claude-sonnet-4-20250514",  # TEMP: Testing Sonnet
+                    max_tokens=TOKEN_BUDGETS["main_extraction"],
+                    temperature=0.0,
+                    system=prompts['system'],
+                    messages=[{"role": "user", "content": prompts['user']}],
+                )
 
-            # Convert to Pydantic models with backward compatibility
-            clauses = []
-            for clause_dict in clauses_data.get("clauses", []):
-                # Map new fields to deprecated fields for backward compatibility
-                if 'category' in clause_dict and 'clause_category' not in clause_dict:
-                    clause_dict['clause_category'] = clause_dict.get('category')
-                if 'extraction_confidence' in clause_dict and 'confidence_score' not in clause_dict:
-                    clause_dict['confidence_score'] = clause_dict.get('extraction_confidence')
+                # Parse response
+                clauses, summary = self._parse_extraction_response(response)
+                chunk_results.append((clauses, summary))
+                logger.debug(f"Chunk {chunk.metadata.chunk_index + 1}: extracted {len(clauses)} clauses")
 
-                clauses.append(ExtractedClause(**clause_dict))
-
-            # Parse extraction summary
-            summary_data = clauses_data.get("extraction_summary", {})
-            extraction_summary = ExtractionSummary(
-                contract_type_detected=summary_data.get("contract_type_detected"),
-                total_clauses_extracted=summary_data.get("total_clauses_extracted", len(clauses)),
-                clauses_by_category=summary_data.get("clauses_by_category", {}),
-                unidentified_count=summary_data.get("unidentified_count", 0),
-                average_confidence=summary_data.get("average_confidence"),
-                extraction_warnings=summary_data.get("extraction_warnings", []),
-                is_template=summary_data.get("is_template", False),
-            )
+            # Aggregate results if multiple chunks
+            if len(chunk_results) == 1:
+                clauses, extraction_summary = chunk_results[0]
+            else:
+                chunk_metadata = [c.metadata.__dict__ for c in chunks]
+                clauses, extraction_summary = aggregator.aggregate_results(chunk_results, chunk_metadata)
 
             if not clauses:
                 logger.warning("No clauses extracted from contract")
             else:
                 logger.info(
-                    f"Extracted {len(clauses)} clauses: "
+                    f"Extracted {len(clauses)} clauses from {len(chunks)} chunk(s): "
                     f"{extraction_summary.unidentified_count} unidentified, "
                     f"avg confidence {extraction_summary.average_confidence:.2f}"
-                    if extraction_summary.average_confidence else f"Extracted {len(clauses)} clauses"
+                    if extraction_summary.average_confidence else
+                    f"Extracted {len(clauses)} clauses from {len(chunks)} chunk(s)"
                 )
+
+            # ===== POST-PROCESSING: TARGETED EXTRACTION + PAYLOAD ENRICHMENT + VALIDATION =====
+            if clauses:
+                clauses, post_stats = self._post_process_clauses(
+                    clauses=clauses,
+                    anonymized_text=anonymized_text,
+                    enable_targeted_extraction=self.enable_targeted,
+                    enable_payload_enrichment=True,
+                    enable_validation=self.enable_validation
+                )
+
+                # Update extraction summary with post-processing results
+                clauses_added = (
+                    post_stats['targeted_extraction']['clauses_added'] +
+                    post_stats['validation_pass']['clauses_added']
+                )
+                if clauses_added > 0:
+                    extraction_summary.total_clauses_extracted = len(clauses)
+                    # Rebuild category counts
+                    category_counts = {}
+                    for clause in clauses:
+                        cat = clause.category or clause.clause_category or "UNIDENTIFIED"
+                        category_counts[cat] = category_counts.get(cat, 0) + 1
+                    extraction_summary.clauses_by_category = category_counts
+                    extraction_summary.unidentified_count = category_counts.get("UNIDENTIFIED", 0)
 
             return clauses, extraction_summary
 
@@ -567,6 +666,390 @@ class ContractParser:
         except Exception as e:
             logger.error(f"Claude API clause extraction failed: {str(e)}")
             raise ClauseExtractionError(f"Failed to extract clauses: {str(e)}") from e
+
+    def _parse_extraction_response(self, response) -> tuple[List[ExtractedClause], ExtractionSummary]:
+        """
+        Parse Claude API response into clause objects.
+
+        Args:
+            response: Claude API response object
+
+        Returns:
+            Tuple of (list of extracted clauses, extraction summary)
+        """
+        response_text = response.content[0].text
+
+        # Extract JSON from response (Claude may wrap it in markdown)
+        if "```json" in response_text:
+            json_start = response_text.find("```json") + 7
+            json_end = response_text.find("```", json_start)
+            response_text = response_text[json_start:json_end].strip()
+        elif "```" in response_text:
+            json_start = response_text.find("```") + 3
+            json_end = response_text.find("```", json_start)
+            response_text = response_text[json_start:json_end].strip()
+
+        clauses_data = json.loads(response_text)
+
+        # Convert to Pydantic models with backward compatibility
+        clauses = []
+        for clause_dict in clauses_data.get("clauses", []):
+            # Map new fields to deprecated fields for backward compatibility
+            if 'category' in clause_dict and 'clause_category' not in clause_dict:
+                clause_dict['clause_category'] = clause_dict.get('category')
+            if 'extraction_confidence' in clause_dict and 'confidence_score' not in clause_dict:
+                clause_dict['confidence_score'] = clause_dict.get('extraction_confidence')
+
+            clauses.append(ExtractedClause(**clause_dict))
+
+        # Parse extraction summary
+        summary_data = clauses_data.get("extraction_summary", {})
+        extraction_summary = ExtractionSummary(
+            contract_type_detected=summary_data.get("contract_type_detected"),
+            total_clauses_extracted=summary_data.get("total_clauses_extracted", len(clauses)),
+            clauses_by_category=summary_data.get("clauses_by_category", {}),
+            unidentified_count=summary_data.get("unidentified_count", 0),
+            average_confidence=summary_data.get("average_confidence"),
+            extraction_warnings=summary_data.get("extraction_warnings", []),
+            is_template=summary_data.get("is_template", False),
+        )
+
+        return clauses, extraction_summary
+
+    def _extract_clauses_two_pass(self, anonymized_text: str) -> tuple[List[ExtractedClause], ExtractionSummary]:
+        """
+        Two-pass clause extraction for maximum coverage and quality.
+
+        Pass 1 (Discovery): Extract ALL clauses without category constraints
+        Pass 2 (Categorization): Categorize and normalize using examples
+
+        This approach separates clause discovery from classification, resulting in:
+        - More clauses found (not limited by category thinking)
+        - Better normalized_payload using gold-standard examples
+        - Clauses that don't fit categories marked as UNIDENTIFIED
+
+        Args:
+            anonymized_text: Contract text with PII redacted
+
+        Returns:
+            Tuple of (list of extracted clauses, extraction summary)
+        """
+        from services.chunking import ContractChunker, TokenEstimator, ResultAggregator
+
+        try:
+            # Initialize chunking components
+            estimator = TokenEstimator(self.claude)
+            chunker = ContractChunker(estimator)
+
+            # Chunk the contract
+            chunks = chunker.chunk_contract(anonymized_text)
+            logger.info(f"Two-pass extraction: Processing {len(chunks)} chunk(s)")
+
+            # ===== PASS 1: DISCOVERY =====
+            logger.info("Pass 1: Clause Discovery")
+            all_discovered_clauses = []
+
+            for chunk in chunks:
+                logger.debug(
+                    f"Discovery chunk {chunk.metadata.chunk_index + 1}/{chunk.metadata.total_chunks}"
+                )
+
+                prompts = build_chunk_discovery_prompt(
+                    contract_text=chunk.text,
+                    chunk_index=chunk.metadata.chunk_index,
+                    total_chunks=chunk.metadata.total_chunks,
+                    contract_type_hint="PPA"  # Could be detected from content
+                )
+
+                response = self.claude.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=TOKEN_BUDGETS["discovery"],
+                    temperature=0.0,
+                    system=prompts['system'],
+                    messages=[{"role": "user", "content": prompts['user']}],
+                )
+
+                discovered = self._parse_discovery_response(response)
+                all_discovered_clauses.extend(discovered)
+                logger.debug(f"Discovered {len(discovered)} clauses in chunk")
+
+            logger.info(f"Pass 1 complete: {len(all_discovered_clauses)} clauses discovered")
+
+            if not all_discovered_clauses:
+                logger.warning("No clauses discovered in Pass 1")
+                return [], ExtractionSummary(
+                    total_clauses_extracted=0,
+                    clauses_by_category={},
+                    unidentified_count=0,
+                    extraction_warnings=["No clauses discovered"]
+                )
+
+            # Deduplicate discovered clauses (by section_reference)
+            seen_refs = set()
+            unique_clauses = []
+            for clause in all_discovered_clauses:
+                ref_key = (clause.get('section_reference', ''), clause.get('clause_name', ''))
+                if ref_key not in seen_refs:
+                    seen_refs.add(ref_key)
+                    unique_clauses.append(clause)
+
+            logger.info(f"After deduplication: {len(unique_clauses)} unique clauses")
+
+            # ===== PASS 2: CATEGORIZATION =====
+            logger.info("Pass 2: Clause Categorization with Examples")
+
+            # Batch if too many clauses (>20 clauses may exceed context)
+            BATCH_SIZE = 15
+            all_categorized = []
+
+            for batch_start in range(0, len(unique_clauses), BATCH_SIZE):
+                batch_clauses = unique_clauses[batch_start:batch_start + BATCH_SIZE]
+                batch_num = batch_start // BATCH_SIZE + 1
+                total_batches = (len(unique_clauses) + BATCH_SIZE - 1) // BATCH_SIZE
+
+                logger.debug(f"Categorizing batch {batch_num}/{total_batches} ({len(batch_clauses)} clauses)")
+
+                prompts = build_categorization_prompt(
+                    discovered_clauses=batch_clauses,
+                    include_examples=True
+                )
+
+                response = self.claude.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=TOKEN_BUDGETS["categorization"],
+                    temperature=0.0,
+                    system=prompts['system'],
+                    messages=[{"role": "user", "content": prompts['user']}],
+                )
+
+                batch_clauses_parsed, _ = self._parse_categorization_response(response)
+                all_categorized.extend(batch_clauses_parsed)
+
+            clauses = all_categorized
+
+            # Build summary from all categorized clauses
+            category_counts = {}
+            total_confidence = 0
+            for clause in clauses:
+                cat = clause.clause_category or "UNIDENTIFIED"
+                category_counts[cat] = category_counts.get(cat, 0) + 1
+                if clause.confidence_score:
+                    total_confidence += clause.confidence_score
+
+            summary = ExtractionSummary(
+                total_clauses_extracted=len(clauses),
+                clauses_by_category=category_counts,
+                unidentified_count=category_counts.get("UNIDENTIFIED", 0),
+                average_confidence=total_confidence / len(clauses) if clauses else 0,
+                extraction_warnings=[],
+                is_template=False,
+            )
+
+            logger.info(
+                f"Pass 2 complete: {len(clauses)} clauses categorized, "
+                f"{summary.unidentified_count} unidentified"
+            )
+
+            return clauses, summary
+
+        except Exception as e:
+            logger.error(f"Two-pass extraction failed: {str(e)}")
+            raise ClauseExtractionError(f"Two-pass extraction failed: {str(e)}") from e
+
+    def _extract_clauses_hybrid(self, anonymized_text: str) -> tuple[List[ExtractedClause], ExtractionSummary]:
+        """
+        Hybrid extraction: Run both single-pass and two-pass, then merge results.
+
+        This provides maximum recall at the cost of more API calls. Useful for
+        contracts where clause coverage is critical.
+
+        Args:
+            anonymized_text: Contract text with PII redacted
+
+        Returns:
+            Tuple of (merged/deduplicated clauses, merged summary)
+
+        Raises:
+            ClauseExtractionError: If extraction fails
+        """
+        from services.chunking import ResultAggregator
+
+        logger.info("Starting hybrid extraction (single-pass + two-pass)")
+
+        try:
+            # Run single-pass extraction
+            logger.info("Hybrid: Running single-pass extraction...")
+            single_clauses, single_summary = self._extract_clauses_single_pass(anonymized_text)
+            logger.info(f"Hybrid: Single-pass found {len(single_clauses)} clauses")
+
+            # Run two-pass extraction
+            logger.info("Hybrid: Running two-pass extraction...")
+            two_pass_clauses, two_pass_summary = self._extract_clauses_two_pass(anonymized_text)
+            logger.info(f"Hybrid: Two-pass found {len(two_pass_clauses)} clauses")
+
+            # Merge and deduplicate using ResultAggregator
+            aggregator = ResultAggregator()
+            all_clauses = single_clauses + two_pass_clauses
+
+            # Use the aggregator's deduplication logic
+            unique_clauses = aggregator._deduplicate_clauses(all_clauses)
+
+            # Renumber clause IDs
+            for i, clause in enumerate(unique_clauses):
+                clause.clause_id = f"clause_{i+1:03d}"
+
+            # Merge summaries
+            merged_summary = self._merge_extraction_summaries(
+                [single_summary, two_pass_summary],
+                unique_clauses
+            )
+
+            logger.info(
+                f"Hybrid extraction complete: {len(single_clauses)} + {len(two_pass_clauses)} "
+                f"-> {len(unique_clauses)} unique clauses"
+            )
+
+            return unique_clauses, merged_summary
+
+        except Exception as e:
+            logger.error(f"Hybrid extraction failed: {str(e)}")
+            raise ClauseExtractionError(f"Hybrid extraction failed: {str(e)}") from e
+
+    def _merge_extraction_summaries(
+        self,
+        summaries: List[ExtractionSummary],
+        unique_clauses: List[ExtractedClause]
+    ) -> ExtractionSummary:
+        """Merge multiple extraction summaries into one."""
+        from collections import defaultdict
+
+        # Recalculate from unique clauses
+        clauses_by_category = defaultdict(int)
+        unidentified_count = 0
+        confidence_sum = 0.0
+        confidence_count = 0
+
+        for clause in unique_clauses:
+            category = clause.category or clause.clause_category or "UNIDENTIFIED"
+            clauses_by_category[category] += 1
+            if category == "UNIDENTIFIED":
+                unidentified_count += 1
+            conf = clause.extraction_confidence or clause.confidence_score
+            if conf is not None:
+                confidence_sum += conf
+                confidence_count += 1
+
+        # Collect warnings from all summaries
+        all_warnings = []
+        seen = set()
+        for s in summaries:
+            if s and s.extraction_warnings:
+                for w in s.extraction_warnings:
+                    if w not in seen:
+                        all_warnings.append(w)
+                        seen.add(w)
+
+        # Use first detected contract type
+        contract_type = None
+        for s in summaries:
+            if s and s.contract_type_detected:
+                contract_type = s.contract_type_detected
+                break
+
+        return ExtractionSummary(
+            contract_type_detected=contract_type,
+            total_clauses_extracted=len(unique_clauses),
+            clauses_by_category=dict(clauses_by_category),
+            unidentified_count=unidentified_count,
+            average_confidence=confidence_sum / confidence_count if confidence_count > 0 else None,
+            extraction_warnings=all_warnings,
+            is_template=any(s.is_template for s in summaries if s),
+        )
+
+    def _parse_discovery_response(self, response) -> List[dict]:
+        """Parse Pass 1 discovery response into clause dicts."""
+        response_text = response.content[0].text
+
+        # Extract JSON from response
+        if "```json" in response_text:
+            json_start = response_text.find("```json") + 7
+            json_end = response_text.find("```", json_start)
+            response_text = response_text[json_start:json_end].strip()
+        elif "```" in response_text:
+            json_start = response_text.find("```") + 3
+            json_end = response_text.find("```", json_start)
+            response_text = response_text[json_start:json_end].strip()
+
+        data = json.loads(response_text)
+        return data.get("discovered_clauses", [])
+
+    def _parse_categorization_response(self, response) -> tuple[List[ExtractedClause], ExtractionSummary]:
+        """Parse Pass 2 categorization response into clause objects."""
+        response_text = response.content[0].text
+
+        # Extract JSON from response
+        if "```json" in response_text:
+            json_start = response_text.find("```json") + 7
+            json_end = response_text.find("```", json_start)
+            if json_end == -1:
+                # No closing ```, try to find where JSON ends
+                json_end = len(response_text)
+            response_text = response_text[json_start:json_end].strip()
+        elif "```" in response_text:
+            json_start = response_text.find("```") + 3
+            json_end = response_text.find("```", json_start)
+            if json_end == -1:
+                json_end = len(response_text)
+            response_text = response_text[json_start:json_end].strip()
+
+        # Try to repair truncated JSON
+        try:
+            data = json.loads(response_text)
+        except json.JSONDecodeError as e:
+            logger.warning(f"JSON parse error: {e}. Attempting repair...")
+            # Try to find the last complete clause
+            try:
+                # Find last complete object by looking for balanced braces
+                last_valid = response_text.rfind('},')
+                if last_valid > 0:
+                    repaired = response_text[:last_valid + 1] + ']}'
+                    # Try with categorized_clauses wrapper
+                    repaired = '{"categorized_clauses": [' + repaired.lstrip('{').lstrip('"categorized_clauses"').lstrip(':').lstrip('[')
+                    data = json.loads(repaired)
+                    logger.info(f"JSON repaired successfully")
+                else:
+                    raise e
+            except Exception:
+                logger.error(f"JSON repair failed. Response text (last 500 chars): {response_text[-500:]}")
+                raise
+
+        # Convert to ExtractedClause objects
+        clauses = []
+        for clause_dict in data.get("categorized_clauses", []):
+            # Map fields for compatibility
+            if 'category' in clause_dict and 'clause_category' not in clause_dict:
+                clause_dict['clause_category'] = clause_dict.get('category')
+            if 'extraction_confidence' in clause_dict and 'confidence_score' not in clause_dict:
+                clause_dict['confidence_score'] = clause_dict.get('extraction_confidence')
+
+            # Remove fields not in ExtractedClause model
+            clause_dict.pop('original_clause_id', None)
+
+            clauses.append(ExtractedClause(**clause_dict))
+
+        # Build summary
+        summary_data = data.get("categorization_summary", {})
+        summary = ExtractionSummary(
+            contract_type_detected=None,
+            total_clauses_extracted=summary_data.get("total_clauses_categorized", len(clauses)),
+            clauses_by_category=summary_data.get("clauses_by_category", {}),
+            unidentified_count=summary_data.get("clauses_by_category", {}).get("UNIDENTIFIED", 0),
+            average_confidence=summary_data.get("average_category_confidence"),
+            extraction_warnings=summary_data.get("low_confidence_clauses", []),
+            is_template=False,
+        )
+
+        return clauses, summary
 
     def _build_clause_extraction_prompt(self, text: str) -> str:
         """
@@ -630,3 +1113,268 @@ Contract text:
 {text}
 
 Remember: Return ONLY the JSON object, no additional text."""
+
+    def _post_process_clauses(
+        self,
+        clauses: List[ExtractedClause],
+        anonymized_text: str,
+        enable_targeted_extraction: bool = True,
+        enable_payload_enrichment: bool = True,
+        enable_validation: bool = True
+    ) -> tuple[List[ExtractedClause], dict]:
+        """
+        Post-process extracted clauses to improve coverage and quality.
+
+        Phase 1: Targeted extraction for missing categories (e.g., SECURITY_PACKAGE)
+        Phase 2: Payload enrichment using gold-standard examples
+        Phase 3: Validation pass to catch missed clauses
+
+        Args:
+            clauses: List of clauses from main extraction
+            anonymized_text: Original contract text for re-extraction
+            enable_targeted_extraction: If True, search for missing category clauses
+            enable_payload_enrichment: If True, enrich normalized_payload fields
+            enable_validation: If True, run validation pass to catch missed clauses
+
+        Returns:
+            Tuple of (enhanced clauses list, post-processing stats dict)
+        """
+        stats = {
+            'original_clause_count': len(clauses),
+            'targeted_extraction': {'enabled': enable_targeted_extraction, 'clauses_added': 0},
+            'payload_enrichment': {'enabled': enable_payload_enrichment, 'clauses_enriched': 0},
+            'validation_pass': {'enabled': enable_validation, 'clauses_added': 0},
+            'final_clause_count': len(clauses)
+        }
+
+        # Extract current categories
+        current_categories = set()
+        for clause in clauses:
+            cat = clause.category or clause.clause_category
+            if cat:
+                current_categories.add(cat)
+
+        logger.info(f"Post-processing: {len(clauses)} clauses, categories found: {sorted(current_categories)}")
+
+        # ===== PHASE 1: TARGETED EXTRACTION FOR MISSING CATEGORIES =====
+        if enable_targeted_extraction:
+            missing_categories = get_missing_categories(list(current_categories))
+
+            if missing_categories:
+                logger.info(f"Targeted extraction for missing categories: {missing_categories}")
+
+                for target_category in missing_categories:
+                    try:
+                        # Build targeted extraction prompt
+                        existing_clause_refs = [
+                            {'section_reference': c.section_reference, 'clause_name': c.clause_name}
+                            for c in clauses
+                        ]
+
+                        prompts = build_targeted_extraction_prompt(
+                            contract_text=anonymized_text,
+                            target_category=target_category,
+                            existing_clauses=existing_clause_refs
+                        )
+
+                        # Call Claude API
+                        response = self.claude.messages.create(
+                            model="claude-sonnet-4-20250514",
+                            max_tokens=TOKEN_BUDGETS["targeted"],
+                            temperature=0.0,
+                            system=prompts['system'],
+                            messages=[{"role": "user", "content": prompts['user']}],
+                        )
+
+                        # Parse response
+                        found_clauses = self._parse_targeted_extraction_response(response, target_category)
+
+                        if found_clauses:
+                            # Renumber clause_ids to avoid conflicts
+                            max_id = max([int(c.clause_id.split('_')[-1]) for c in clauses if c.clause_id], default=0)
+                            for i, clause in enumerate(found_clauses):
+                                clause.clause_id = f"clause_{max_id + i + 1:03d}"
+                                clauses.append(clause)
+
+                            stats['targeted_extraction']['clauses_added'] += len(found_clauses)
+                            current_categories.add(target_category)
+                            logger.info(f"Targeted extraction: Found {len(found_clauses)} {target_category} clause(s)")
+                        else:
+                            logger.info(f"Targeted extraction: No {target_category} clauses found")
+
+                    except Exception as e:
+                        logger.warning(f"Targeted extraction failed for {target_category}: {e}")
+            else:
+                logger.info("All targeted categories already present")
+
+        # ===== PHASE 2: PAYLOAD ENRICHMENT =====
+        if enable_payload_enrichment:
+            candidates = get_enrichment_candidates(
+                [c.model_dump() for c in clauses]
+            )
+
+            if candidates:
+                logger.info(f"Payload enrichment: {len(candidates)} candidates")
+
+                try:
+                    # Build batch enrichment prompt
+                    prompts = build_batch_enrichment_prompt(candidates)
+
+                    # Call Claude API
+                    response = self.claude.messages.create(
+                        model="claude-sonnet-4-20250514",
+                        max_tokens=TOKEN_BUDGETS["enrichment"],
+                        temperature=0.0,
+                        system=prompts['system'],
+                        messages=[{"role": "user", "content": prompts['user']}],
+                    )
+
+                    # Parse and merge enriched payloads
+                    enriched_payloads = self._parse_enrichment_response(response)
+
+                    # Merge enriched payloads back into clauses
+                    clause_lookup = {c.clause_id: c for c in clauses}
+                    for enriched in enriched_payloads:
+                        clause_id = enriched.get('clause_id')
+                        if clause_id and clause_id in clause_lookup:
+                            clause = clause_lookup[clause_id]
+                            new_payload = enriched.get('normalized_payload', {})
+                            if new_payload:
+                                # Merge new fields into existing payload
+                                existing_payload = clause.normalized_payload or {}
+                                existing_payload.update(new_payload)
+                                clause.normalized_payload = existing_payload
+                                stats['payload_enrichment']['clauses_enriched'] += 1
+
+                    logger.info(f"Payload enrichment: Enriched {stats['payload_enrichment']['clauses_enriched']} clauses")
+
+                except Exception as e:
+                    logger.warning(f"Payload enrichment failed: {e}")
+            else:
+                logger.info("No candidates for payload enrichment")
+
+        # ===== PHASE 3: VALIDATION PASS TO CATCH MISSED CLAUSES =====
+        if enable_validation:
+            logger.info("Running validation pass to catch missed clauses...")
+
+            try:
+                # Build validation prompt
+                clause_dicts = [c.model_dump() for c in clauses]
+                prompts = build_validation_prompt(
+                    contract_text=anonymized_text,
+                    extracted_clauses=clause_dicts
+                )
+
+                # Call Claude API
+                response = self.claude.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=TOKEN_BUDGETS["validation"],
+                    temperature=0.0,
+                    system=prompts['system'],
+                    messages=[{"role": "user", "content": prompts['user']}],
+                )
+
+                # Parse validation response
+                response_text = response.content[0].text
+                missed_clauses, validation_summary = parse_validation_response(response_text)
+
+                if missed_clauses:
+                    # Convert to ExtractedClause objects and add to list
+                    max_id = max([int(c.clause_id.split('_')[-1]) for c in clauses if c.clause_id], default=0)
+                    for i, clause_dict in enumerate(missed_clauses):
+                        clause_dict['clause_id'] = f"clause_{max_id + i + 1:03d}"
+                        try:
+                            new_clause = ExtractedClause(**clause_dict)
+                            clauses.append(new_clause)
+                            stats['validation_pass']['clauses_added'] += 1
+                        except Exception as e:
+                            logger.warning(f"Failed to create clause from validation: {e}")
+
+                    logger.info(
+                        f"Validation pass: Found {stats['validation_pass']['clauses_added']} additional clauses"
+                    )
+                else:
+                    logger.info("Validation pass: No additional clauses found")
+
+                # Log validation summary
+                if validation_summary.get('confidence_complete'):
+                    logger.info(
+                        f"Validation confidence: {validation_summary['confidence_complete']:.0%} complete"
+                    )
+
+            except Exception as e:
+                logger.warning(f"Validation pass failed: {e}")
+
+        stats['final_clause_count'] = len(clauses)
+        logger.info(
+            f"Post-processing complete: {stats['original_clause_count']} → {stats['final_clause_count']} clauses, "
+            f"targeted: +{stats['targeted_extraction']['clauses_added']}, "
+            f"enriched: {stats['payload_enrichment']['clauses_enriched']}, "
+            f"validated: +{stats['validation_pass']['clauses_added']}"
+        )
+
+        return clauses, stats
+
+    def _parse_targeted_extraction_response(
+        self,
+        response,
+        target_category: str
+    ) -> List[ExtractedClause]:
+        """Parse targeted extraction response into clause objects."""
+        response_text = response.content[0].text
+
+        # Extract JSON from response
+        if "```json" in response_text:
+            json_start = response_text.find("```json") + 7
+            json_end = response_text.find("```", json_start)
+            response_text = response_text[json_start:json_end].strip()
+        elif "```" in response_text:
+            json_start = response_text.find("```") + 3
+            json_end = response_text.find("```", json_start)
+            response_text = response_text[json_start:json_end].strip()
+
+        try:
+            data = json.loads(response_text)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse targeted extraction response: {e}")
+            return []
+
+        found_clauses = data.get("found_clauses", [])
+        clauses = []
+
+        for clause_dict in found_clauses:
+            # Ensure category fields are set correctly
+            clause_dict['category'] = target_category
+            clause_dict['clause_category'] = target_category
+
+            # Map fields for compatibility
+            if 'extraction_confidence' in clause_dict and 'confidence_score' not in clause_dict:
+                clause_dict['confidence_score'] = clause_dict.get('extraction_confidence')
+
+            try:
+                clauses.append(ExtractedClause(**clause_dict))
+            except Exception as e:
+                logger.warning(f"Failed to create ExtractedClause: {e}")
+
+        return clauses
+
+    def _parse_enrichment_response(self, response) -> List[dict]:
+        """Parse payload enrichment response."""
+        response_text = response.content[0].text
+
+        # Extract JSON from response
+        if "```json" in response_text:
+            json_start = response_text.find("```json") + 7
+            json_end = response_text.find("```", json_start)
+            response_text = response_text[json_start:json_end].strip()
+        elif "```" in response_text:
+            json_start = response_text.find("```") + 3
+            json_end = response_text.find("```", json_start)
+            response_text = response_text[json_start:json_end].strip()
+
+        try:
+            data = json.loads(response_text)
+            return data.get("enriched_clauses", [])
+        except json.JSONDecodeError as e:
+            logger.warning(f"Failed to parse enrichment response: {e}")
+            return []

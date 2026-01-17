@@ -3,6 +3,9 @@ Meter data aggregation service for rules engine.
 
 Loads meter readings and excused events from database into pandas DataFrames
 for efficient time-series analysis.
+
+Supports both legacy schema (single 'value' column via meter join) and
+new canonical schema (energy_wh, power_w, etc. with source_system).
 """
 
 from datetime import datetime
@@ -21,6 +24,10 @@ class MeterAggregator:
 
     Uses pandas DataFrames for efficient time-series operations needed by
     the rules engine.
+
+    Supports both:
+    - Legacy schema: meter_reading joined to meter/meter_type tables
+    - New canonical schema: partitioned meter_reading with source_system
     """
 
     def load_meter_readings(
@@ -28,7 +35,10 @@ class MeterAggregator:
         project_id: int,
         meter_type: str,
         period_start: datetime,
-        period_end: datetime
+        period_end: datetime,
+        source_systems: Optional[List[str]] = None,
+        include_quality: bool = False,
+        include_extended_metrics: bool = False
     ) -> pd.DataFrame:
         """
         Load meter readings for a project and period.
@@ -38,37 +48,83 @@ class MeterAggregator:
             meter_type: Meter type code (e.g., 'generation', 'availability')
             period_start: Start of period (inclusive)
             period_end: End of period (exclusive)
+            source_systems: Optional list of source systems to filter by
+                           (e.g., ['solaredge', 'enphase']). If None, includes all.
+            include_quality: If True, include 'quality' column in output
+            include_extended_metrics: If True, include power_w, irradiance_wm2,
+                                     temperature_c columns
 
         Returns:
             DataFrame with columns:
                 - reading_timestamp (datetime)
-                - value (float)
+                - value (float) - mapped from energy_wh for compatibility
                 - meter_id (int)
                 - unit_of_measure (str)
+                - source_system (str) - if source_systems filter used
+                - quality (str) - if include_quality=True
+                - power_w, irradiance_wm2, temperature_c - if include_extended_metrics=True
         """
-        query = """
+        # Build dynamic column selection
+        select_columns = [
+            "mr.reading_timestamp",
+            "COALESCE(mr.energy_wh, mr.value) as value",  # Backward compat
+            "mr.meter_id",
+            "COALESCE(m.unit, 'Wh') as unit_of_measure",
+            "COALESCE(mr.source_system, 'legacy') as source_system",
+        ]
+
+        if include_quality:
+            select_columns.append("COALESCE(mr.quality, 'measured') as quality")
+
+        if include_extended_metrics:
+            select_columns.extend([
+                "mr.power_w",
+                "mr.irradiance_wm2",
+                "mr.temperature_c",
+                "COALESCE(mr.reading_interval_seconds, 3600) as reading_interval_seconds",
+            ])
+
+        # Build WHERE conditions
+        where_conditions = [
+            "mr.reading_timestamp >= %s",
+            "mr.reading_timestamp < %s",
+        ]
+        params: List[Any] = [period_start, period_end]
+
+        # Handle project_id - check both direct column and meter join
+        where_conditions.append(
+            "(mr.project_id = %s OR m.project_id = %s)"
+        )
+        params.extend([project_id, project_id])
+
+        # Handle meter_type filter via meter join
+        where_conditions.append(
+            "(mt.code = %s OR mt.code IS NULL)"
+        )
+        params.append(meter_type)
+
+        # Handle source_systems filter
+        if source_systems:
+            placeholders = ','.join(['%s'] * len(source_systems))
+            where_conditions.append(
+                f"(mr.source_system IN ({placeholders}) OR mr.source_system IS NULL)"
+            )
+            params.extend(source_systems)
+
+        query = f"""
             SELECT
-                mr.reading_timestamp,
-                mr.value,
-                mr.meter_id,
-                m.unit as unit_of_measure
+                {', '.join(select_columns)}
             FROM meter_reading mr
-            JOIN meter m ON m.id = mr.meter_id
-            JOIN meter_type mt ON mt.id = m.meter_type_id
-            WHERE m.project_id = %s
-              AND mt.code = %s
-              AND mr.reading_timestamp >= %s
-              AND mr.reading_timestamp < %s
+            LEFT JOIN meter m ON m.id = mr.meter_id
+            LEFT JOIN meter_type mt ON mt.id = m.meter_type_id
+            WHERE {' AND '.join(where_conditions)}
             ORDER BY mr.reading_timestamp
         """
 
         try:
             with get_db_connection(dict_cursor=True) as conn:
                 with conn.cursor() as cursor:
-                    cursor.execute(
-                        query,
-                        (project_id, meter_type, period_start, period_end)
-                    )
+                    cursor.execute(query, tuple(params))
                     rows = cursor.fetchall()
 
             # Convert list of dicts to DataFrame
@@ -78,14 +134,25 @@ class MeterAggregator:
                 df['value'] = pd.to_numeric(df['value'], errors='coerce')
                 # Ensure timestamp column is datetime
                 df['reading_timestamp'] = pd.to_datetime(df['reading_timestamp'])
-            else:
-                df = pd.DataFrame(columns=[
-                    'reading_timestamp', 'value', 'meter_id', 'unit_of_measure'
-                ])
 
+                # Convert extended metrics if present
+                if include_extended_metrics:
+                    for col in ['power_w', 'irradiance_wm2', 'temperature_c']:
+                        if col in df.columns:
+                            df[col] = pd.to_numeric(df[col], errors='coerce')
+            else:
+                # Return empty DataFrame with expected columns
+                columns = ['reading_timestamp', 'value', 'meter_id', 'unit_of_measure', 'source_system']
+                if include_quality:
+                    columns.append('quality')
+                if include_extended_metrics:
+                    columns.extend(['power_w', 'irradiance_wm2', 'temperature_c', 'reading_interval_seconds'])
+                df = pd.DataFrame(columns=columns)
+
+            source_filter_msg = f", sources {source_systems}" if source_systems else ""
             logger.info(
                 f"Loaded {len(df)} meter readings for project {project_id}, "
-                f"type '{meter_type}', period {period_start} to {period_end}"
+                f"type '{meter_type}'{source_filter_msg}, period {period_start} to {period_end}"
             )
 
             return df
@@ -94,8 +161,114 @@ class MeterAggregator:
             logger.error(
                 f"Failed to load meter readings for project {project_id}: {e}"
             )
+            # Return empty DataFrame with expected columns
+            columns = ['reading_timestamp', 'value', 'meter_id', 'unit_of_measure', 'source_system']
+            if include_quality:
+                columns.append('quality')
+            if include_extended_metrics:
+                columns.extend(['power_w', 'irradiance_wm2', 'temperature_c', 'reading_interval_seconds'])
+            return pd.DataFrame(columns=columns)
+
+    def load_meter_readings_by_source(
+        self,
+        organization_id: int,
+        period_start: datetime,
+        period_end: datetime,
+        source_systems: Optional[List[str]] = None,
+        project_id: Optional[int] = None,
+        meter_id: Optional[int] = None
+    ) -> pd.DataFrame:
+        """
+        Load meter readings using the new canonical schema directly.
+
+        This method bypasses the legacy meter/meter_type joins and queries
+        the new partitioned meter_reading table directly.
+
+        Args:
+            organization_id: Organization ID
+            period_start: Start of period (inclusive)
+            period_end: End of period (exclusive)
+            source_systems: Optional list of source systems to filter by
+            project_id: Optional project ID filter
+            meter_id: Optional meter ID filter
+
+        Returns:
+            DataFrame with canonical columns:
+                - reading_timestamp, energy_wh, power_w, irradiance_wm2,
+                  temperature_c, source_system, quality, reading_interval_seconds
+        """
+        where_conditions = [
+            "organization_id = %s",
+            "reading_timestamp >= %s",
+            "reading_timestamp < %s",
+        ]
+        params: List[Any] = [organization_id, period_start, period_end]
+
+        if source_systems:
+            placeholders = ','.join(['%s'] * len(source_systems))
+            where_conditions.append(f"source_system IN ({placeholders})")
+            params.extend(source_systems)
+
+        if project_id:
+            where_conditions.append("project_id = %s")
+            params.append(project_id)
+
+        if meter_id:
+            where_conditions.append("meter_id = %s")
+            params.append(meter_id)
+
+        query = f"""
+            SELECT
+                reading_timestamp,
+                energy_wh,
+                power_w,
+                irradiance_wm2,
+                temperature_c,
+                source_system,
+                quality,
+                reading_interval_seconds,
+                project_id,
+                meter_id,
+                external_site_id,
+                external_device_id
+            FROM meter_reading
+            WHERE {' AND '.join(where_conditions)}
+            ORDER BY reading_timestamp
+        """
+
+        try:
+            with get_db_connection(dict_cursor=True) as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(query, tuple(params))
+                    rows = cursor.fetchall()
+
+            if rows:
+                df = pd.DataFrame(rows)
+                df['reading_timestamp'] = pd.to_datetime(df['reading_timestamp'])
+                for col in ['energy_wh', 'power_w', 'irradiance_wm2', 'temperature_c']:
+                    if col in df.columns:
+                        df[col] = pd.to_numeric(df[col], errors='coerce')
+                # Add 'value' alias for backward compatibility
+                df['value'] = df['energy_wh']
+            else:
+                df = pd.DataFrame(columns=[
+                    'reading_timestamp', 'energy_wh', 'power_w', 'irradiance_wm2',
+                    'temperature_c', 'source_system', 'quality', 'reading_interval_seconds',
+                    'project_id', 'meter_id', 'external_site_id', 'external_device_id', 'value'
+                ])
+
+            logger.info(
+                f"Loaded {len(df)} canonical readings for org {organization_id}, "
+                f"period {period_start} to {period_end}"
+            )
+            return df
+
+        except Exception as e:
+            logger.error(f"Failed to load canonical meter readings: {e}")
             return pd.DataFrame(columns=[
-                'reading_timestamp', 'value', 'meter_id', 'unit_of_measure'
+                'reading_timestamp', 'energy_wh', 'power_w', 'irradiance_wm2',
+                'temperature_c', 'source_system', 'quality', 'reading_interval_seconds',
+                'project_id', 'meter_id', 'external_site_id', 'external_device_id', 'value'
             ])
 
     def load_excused_events(

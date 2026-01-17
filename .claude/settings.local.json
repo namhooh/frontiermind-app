@@ -27,7 +27,11 @@
       "Bash(npm install:*)",
       "Bash(kill:*)",
       "Bash(./deploy.sh:*)",
-      "Bash(bash:*)"
+      "Bash(bash:*)",
+      "Bash(python3:*)",
+      "WebSearch",
+      "Bash(claude mcp list:*)",
+      "Bash(claude mcp remove:*)"
     ]
   }
 }

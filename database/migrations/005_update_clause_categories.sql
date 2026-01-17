@@ -120,7 +120,7 @@ DELETE FROM clause_category WHERE code = 'SLA';
 -- Step 5: Deprecate clause_type table
 -- =====================================================
 -- Add deprecation comment (keep table for historical data)
-COMMENT ON TABLE clause_type IS 'DEPRECATED as of migration 005: Use clause_category only for new extractions. Table kept for historical data compatibility.';
+-- COMMENT ON TABLE clause_type IS 'DEPRECATED as of migration 005: Use clause_category only for new extractions. Table kept for historical data compatibility.';
 
 -- =====================================================
 -- Verification
