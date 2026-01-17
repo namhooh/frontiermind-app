@@ -61,6 +61,16 @@ When updating designs:
 
 - See `IMPLEMENTATION_GUIDE.md` for the overall system design, workflow and implementation
 
+## Contract Digitization
+
+- See `contract-digitization/` for contract parsing documentation and examples
+- Implementation code lives in `python-backend/` (services, API, models)
+
+## Data Ingestion
+
+- See `data-ingestion/` for data ingestion components and documentation
+- Architecture guide: `data-ingestion/docs/IMPLEMENTATION_GUIDE_ARCHITECTURE.md`
+
 ## Conventions
 
 - Use Radix UI primitives for accessible components

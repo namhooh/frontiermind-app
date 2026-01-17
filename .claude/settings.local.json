@@ -31,7 +31,13 @@
       "Bash(python3:*)",
       "WebSearch",
       "Bash(claude mcp list:*)",
-      "Bash(claude mcp remove:*)"
+      "Bash(claude mcp remove:*)",
+      "Bash(git ls-files:*)",
+      "Bash(npx tsc:*)",
+      "Bash(git mv:*)",
+      "Bash(while read dir)",
+      "Bash(do echo \"$dir/\")",
+      "Bash(done)"
     ]
   }
 }

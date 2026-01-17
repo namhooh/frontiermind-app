@@ -11,7 +11,7 @@ This directory contains database schema diagrams in various formats.
 - `entity_diagram_v2.0.drawio` - Phase 2 (Contract Parsing) - to be created
 
 These diagrams are manually maintained using draw.io. To update:
-1. Run `./scripts/document-migration.sh <migration-file>` to see what changed
+1. Run `./database/scripts/document-migration.sh <migration-file>` to see what changed
 2. Open the appropriate version in draw.io
 3. Add/modify tables and relationships based on migration summary
 
@@ -33,7 +33,7 @@ To export from draw.io:
 
 ```bash
 # 1. Document migration changes
-./scripts/document-migration.sh database/migrations/002_add_contract_pii_mapping.sql
+./database/scripts/document-migration.sh database/migrations/002_add_contract_pii_mapping.sql
 
 # 2. Update draw.io diagram based on output
 # Open database/diagrams/entity_diagram_v2.0.drawio
@@ -46,7 +46,7 @@ psql $SUPABASE_DB_URL -f database/migrations/002_add_contract_pii_mapping.sql
 
 ```bash
 # 1. Create snapshot
-./scripts/create-phase-snapshot.sh v2.0 "Phase 2 - Contract Parsing"
+./database/scripts/create-phase-snapshot.sh v2.0 "Phase 2 - Contract Parsing"
 
 # 2. Export draw.io diagram (optional)
 # File → Export as → PNG → Save to exports/

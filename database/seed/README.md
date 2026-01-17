@@ -22,7 +22,7 @@ Test and development data - **development/testing only**
 
 **Load all data (reference + fixtures):**
 ```bash
-./scripts/load_test_data.sh
+./database/scripts/load_test_data.sh
 ```
 
 **Load only reference data (for production):**

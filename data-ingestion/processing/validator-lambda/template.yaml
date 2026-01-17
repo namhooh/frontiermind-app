@@ -1,0 +1,69 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: FrontierMind Meter Data Validator Lambda
+
+Parameters:
+  BucketName:
+    Type: String
+    Default: frontiermind-meter-data
+    Description: S3 bucket name for meter data (must already exist)
+
+  Environment:
+    Type: String
+    Default: production
+    AllowedValues:
+      - development
+      - staging
+      - production
+
+Globals:
+  Function:
+    Timeout: 300
+    MemorySize: 1024
+    Runtime: python3.11
+    Environment:
+      Variables:
+        BUCKET_NAME: !Ref BucketName
+        ENVIRONMENT: !Ref Environment
+
+Resources:
+  ValidatorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      FunctionName: !Sub frontiermind-validator-${Environment}
+      Handler: handler.handler
+      CodeUri: .
+      Description: Validates and loads meter data from S3 to PostgreSQL
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/frontiermind-validator-lambda-role
+      # S3 trigger will be added manually after deployment
+      # since the bucket already exists
+
+  # Permission for S3 to invoke the Lambda
+  S3InvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ValidatorFunction
+      Action: lambda:InvokeFunction
+      Principal: s3.amazonaws.com
+      SourceArn: !Sub arn:aws:s3:::${BucketName}
+
+  # CloudWatch Log Group with retention
+  ValidatorLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/frontiermind-validator-${Environment}
+      RetentionInDays: 30
+
+Outputs:
+  ValidatorFunctionArn:
+    Description: Validator Lambda ARN
+    Value: !GetAtt ValidatorFunction.Arn
+
+  ValidatorFunctionName:
+    Description: Validator Lambda Name
+    Value: !Ref ValidatorFunction
+
+  NextStep:
+    Description: Run this command to add S3 trigger
+    Value: !Sub |
+      aws s3api put-bucket-notification-configuration --bucket ${BucketName} --notification-configuration '{"LambdaFunctionConfigurations":[{"LambdaFunctionArn":"${ValidatorFunction.Arn}","Events":["s3:ObjectCreated:*"],"Filter":{"Key":{"FilterRules":[{"Name":"prefix","Value":"raw/"}]}}}]}'

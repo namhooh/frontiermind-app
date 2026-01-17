@@ -237,6 +237,62 @@ async def get_ingestion_status(
 
 
 @router.get(
+    "/status/by-hash/{file_hash}",
+    response_model=IngestionStatusResponse,
+    summary="Check ingestion status by file hash",
+    description="Check the processing status of an uploaded file by its SHA256 hash. Used by Snowflake COPY INTO clients.",
+)
+async def get_ingestion_status_by_hash(
+    file_hash: str,
+    organization_id: int = Query(..., description="Organization ID"),
+) -> IngestionStatusResponse:
+    """
+    Get the ingestion status for a file by its SHA256 hash.
+
+    This endpoint is designed for Snowflake COPY INTO clients who push files
+    directly to S3 without using the presigned URL flow. Since they don't
+    receive a file_id, they can query status using the file's SHA256 hash.
+
+    The file_hash should be the SHA256 hash of the uploaded file contents.
+    """
+    if not repository:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Database not available",
+        )
+
+    # Look up log by hash
+    matching_log = repository.get_ingestion_log_by_hash(
+        file_hash=file_hash,
+        organization_id=organization_id,
+    )
+
+    if not matching_log:
+        # File may not have been processed yet, or hash doesn't exist
+        return IngestionStatusResponse(
+            file_id=file_hash,
+            status=IngestionStatus.PROCESSING,
+            rows_loaded=None,
+            error_message=None,
+            validation_errors=None,
+            processing_time_ms=None,
+            created_at=datetime.now(timezone.utc),
+            completed_at=None,
+        )
+
+    return IngestionStatusResponse(
+        file_id=file_hash,
+        status=IngestionStatus(matching_log["status"]),
+        rows_loaded=matching_log.get("rows_loaded"),
+        error_message=matching_log.get("error_message"),
+        validation_errors=matching_log.get("validation_errors"),
+        processing_time_ms=matching_log.get("processing_time_ms"),
+        created_at=matching_log["created_at"],
+        completed_at=matching_log.get("processing_completed_at"),
+    )
+
+
+@router.get(
     "/history",
     response_model=IngestionHistoryResponse,
     summary="Get ingestion history",

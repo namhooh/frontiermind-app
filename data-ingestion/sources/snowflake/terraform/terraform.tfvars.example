@@ -1,0 +1,31 @@
+# =============================================================================
+# Example Terraform Variables for Snowflake Integration
+# =============================================================================
+#
+# Copy this file to terraform.tfvars and fill in the values for your client
+#
+# To deploy:
+#   terraform init
+#   terraform plan
+#   terraform apply
+#
+# =============================================================================
+
+# AWS region (default: us-east-1)
+aws_region = "us-east-1"
+
+# S3 bucket for meter data (default: frontiermind-meter-data)
+meter_data_bucket = "frontiermind-meter-data"
+
+# FrontierMind organization ID for this client
+org_id = 42
+
+# Snowflake IAM user ARN
+# Get this from: DESC STORAGE INTEGRATION frontiermind_integration;
+# Look for: STORAGE_AWS_IAM_USER_ARN
+snowflake_iam_user_arn = "arn:aws:iam::123456789012:user/xxxx-s-east1-prod-1234567890ab"
+
+# Snowflake external ID
+# Get this from: DESC STORAGE INTEGRATION frontiermind_integration;
+# Look for: STORAGE_AWS_EXTERNAL_ID
+snowflake_external_id = "ABC123XYZ_SFCRole=1_xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"

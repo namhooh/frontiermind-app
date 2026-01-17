@@ -773,6 +773,38 @@ class IntegrationRepository:
                 cursor.execute(sql, (file_hash, organization_id))
                 return cursor.fetchone() is not None
 
+    def get_ingestion_log_by_hash(
+        self,
+        file_hash: str,
+        organization_id: int
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get an ingestion log entry by file hash.
+
+        This is used by Snowflake COPY INTO clients who don't have a file_id
+        from the presigned URL flow, but know the SHA256 hash of their uploaded file.
+
+        Args:
+            file_hash: SHA256 hash of the file
+            organization_id: Organization ID (for RLS)
+
+        Returns:
+            Ingestion log dict or None if not found
+        """
+        sql = """
+            SELECT * FROM ingestion_log
+            WHERE file_hash = %s AND organization_id = %s
+            ORDER BY created_at DESC
+            LIMIT 1
+        """
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, (file_hash, organization_id))
+                result = cursor.fetchone()
+
+        return dict(result) if result else None
+
     def get_ingestion_log(
         self,
         log_id: int,

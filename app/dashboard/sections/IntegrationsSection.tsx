@@ -5,6 +5,9 @@ import { Badge } from "@/app/components/ui/badge"
 import { Button } from "@/app/components/ui/button"
 import Image from "next/image"
 import { Database, Calendar, RefreshCw, CheckCircle, XCircle, Clock } from "lucide-react"
+import snowflakeLogo from '@/app/assets/integrations/snowflake.png'
+import sapLogo from '@/app/assets/integrations/sap.png'
+import sageLogo from '@/app/assets/integrations/sage.png'
 
 export function IntegrationsSection() {
   const integrations = [
@@ -13,21 +16,21 @@ export function IntegrationsSection() {
       description: "Data warehouse for analytics",
       status: "connected",
       lastSync: "2 mins ago",
-      logo: "/images/integrations/c4d5e14da3b974a2b83b5efe76b0c8136de87322.png"
+      logo: snowflakeLogo
     },
     {
       name: "SAP",
       description: "Enterprise resource planning",
       status: "connected",
       lastSync: "5 mins ago",
-      logo: "/images/integrations/45abfef21c0003fd0fb9e3cb32f0d66205de889a.png"
+      logo: sapLogo
     },
     {
       name: "SAGE",
       description: "Accounting and finance",
       status: "connected",
       lastSync: "10 mins ago",
-      logo: "/images/integrations/e057346b5c69680c8ea6d15c6cbd188029f69caf.png"
+      logo: sageLogo
     },
   ]
 

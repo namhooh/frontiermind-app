@@ -38,7 +38,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install -r fetchers/requirements.txt
+          pip install -r data-ingestion/sources/inverter-api/requirements.txt
 
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -76,7 +76,7 @@ jobs:
             LOOKBACK="2"
           fi
 
-          python -m fetchers.goodwe_fetcher $DRY_RUN_FLAG --lookback $LOOKBACK --verbose
+          cd data-ingestion/sources/inverter-api && python -m goodwe.fetcher $DRY_RUN_FLAG --lookback $LOOKBACK --verbose
 
       - name: Report status
         if: always()

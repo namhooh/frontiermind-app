@@ -41,12 +41,8 @@ Complete database directory tree with inline explanations:
 
 ```
 database/
-├── versions/                              # Schema snapshots by version
-│   ├── v1.0_baseline.sql                  # Initial 50+ table schema
-│   ├── v1.1_phase1_auth.sql               # After authentication migration
-│   └── v2.0_phase2_parsing.sql            # After contract parsing (planned)
-│
-├── migrations/                            # Sequential migration files (SOURCE OF TRUTH)
+├── migrations/                            # All schema files (SOURCE OF TRUTH)
+│   ├── 000_baseline.sql                   # Initial 50+ table schema
 │   ├── 001_migrate_role_to_auth.sql       # Phase 1: Authentication
 │   ├── 002_add_contract_pii_mapping.sql   # Phase 2: PII protection
 │   ├── 003_add_contract_parsing_fields.sql
@@ -57,7 +53,9 @@ database/
 │   ├── 008_default_event_evidence.sql     # Phase 3: Evidence JSONB
 │   ├── 009_integration_credential.sql     # Phase 3: API key/OAuth storage
 │   ├── 010_integration_site.sql           # Phase 3: External site mapping
-│   └── 011_ingestion_log.sql              # Phase 3: Ingestion audit trail
+│   ├── 011_ingestion_log.sql              # Phase 3: Ingestion audit trail
+│   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
+│   └── README.md
 │
 ├── diagrams/                              # Entity relationship diagrams
 │   ├── entity_diagram_v1.0.drawio         # Manual draw.io diagrams
@@ -77,14 +75,10 @@ database/
 │   │   └── 05_auth_seed.sql               # Test users
 │   └── README.md
 │
-├── sql/                                   # Read-only queries
-│   ├── validation/                        # Data integrity checks
-│   │   └── test_queries.sql               # System validation queries
-│   ├── reports/                           # Business reports
-│   │   └── (future report queries)
-│   ├── admin/                             # Admin queries
-│   │   └── (future admin queries)
-│   └── README.md
+├── scripts/                               # Database management scripts
+│   ├── apply_schema.sh                    # Apply all migrations
+│   ├── create-phase-snapshot.sh           # Create schema snapshot
+│   └── load_test_data.sh                  # Load seed data
 │
 ├── functions/                             # PostgreSQL functions (future)
 ├── views/                                 # Database views (future)
@@ -122,7 +116,7 @@ CREATE INDEX idx_contract_pii_contract_id ON contract_pii_mapping(contract_id);
 
 ### Snapshots (Reference Points)
 
-**Format**: `v1.0_baseline.sql`, `v1.1_phase1_auth.sql`, `v2.0_phase2_parsing.sql`
+**Format**: `snapshot_v2.0.sql`, `snapshot_v3.0.sql` (stored in `migrations/`)
 
 **Characteristics**:
 - Full schema dump at a specific point in time
@@ -130,6 +124,7 @@ CREATE INDEX idx_contract_pii_contract_id ON contract_pii_mapping(contract_id);
 - Combines multiple migrations
 - Used for quick database recreation
 - Read-only (DO NOT EDIT)
+- Stored in `migrations/` but prefixed with `snapshot_` to differentiate
 
 **When to Create**:
 - After completing a major phase
@@ -150,11 +145,11 @@ CREATE INDEX idx_contract_pii_contract_id ON contract_pii_mapping(contract_id);
 
 ### 1. `apply_schema.sh`
 
-**Purpose**: Apply baseline schema to a fresh database
+**Purpose**: Apply all migrations to a fresh database
 
 **Usage**:
 ```bash
-./scripts/apply_schema.sh
+./database/scripts/apply_schema.sh
 ```
 
 **When to use**:
@@ -163,9 +158,9 @@ CREATE INDEX idx_contract_pii_contract_id ON contract_pii_mapping(contract_id);
 - After running `reset_database.sh`
 
 **What it does**:
-1. Loads the latest version snapshot (e.g., v1.0_baseline.sql)
-2. Applies all migrations in sequence
-3. Verifies schema integrity
+1. Applies all migrations from `database/migrations/` in numeric order
+2. Skips `_UP.sql` reversal files
+3. Stops on first error
 
 **Prerequisites**: `SUPABASE_DB_URL` environment variable set
 
@@ -177,7 +172,7 @@ CREATE INDEX idx_contract_pii_contract_id ON contract_pii_mapping(contract_id);
 
 **Usage**:
 ```bash
-./scripts/backup_database.sh
+./database/scripts/backup_database.sh
 ```
 
 **When to use**:
@@ -200,7 +195,7 @@ CREATE INDEX idx_contract_pii_contract_id ON contract_pii_mapping(contract_id);
 
 **Usage**:
 ```bash
-./scripts/reset_database.sh
+./database/scripts/reset_database.sh
 ```
 
 **When to use**:
@@ -223,7 +218,7 @@ CREATE INDEX idx_contract_pii_contract_id ON contract_pii_mapping(contract_id);
 
 **Usage**:
 ```bash
-./scripts/load_test_data.sh
+./database/scripts/load_test_data.sh
 ```
 
 **When to use**:
@@ -252,7 +247,7 @@ Loading test fixtures...
 
 **Usage**:
 ```bash
-./scripts/document-migration.sh database/migrations/002_add_contract_pii_mapping.sql
+./database/scripts/document-migration.sh database/migrations/002_add_contract_pii_mapping.sql
 ```
 
 **When to use**:
@@ -294,7 +289,7 @@ Loading test fixtures...
 
 **Usage**:
 ```bash
-./scripts/create-phase-snapshot.sh v2.0 "Phase 2 - Contract Parsing"
+./database/scripts/create-phase-snapshot.sh v2.0 "Phase 2 - Contract Parsing"
 ```
 
 **When to use**:
@@ -305,13 +300,13 @@ Loading test fixtures...
 **What it does**:
 1. Exports full schema from Supabase using `pg_dump`
 2. Adds version header with metadata
-3. Saves to `database/versions/v2.0_snapshot.sql`
+3. Saves to `database/migrations/snapshot_v2.0.sql`
 4. Updates `database/SCHEMA_CHANGES.md` changelog
 
 **Example output**:
 ```
 📸 Creating schema snapshot: v2.0
-✅ Snapshot saved to database/versions/v2.0_snapshot.sql
+✅ Snapshot saved to database/migrations/snapshot_v2.0.sql
 ✅ Changelog updated in database/SCHEMA_CHANGES.md
 
 📌 Next steps:
@@ -373,7 +368,7 @@ for file in database/seed/fixtures/*.sql; do
 done
 
 # Or use helper script
-./scripts/load_test_data.sh
+./database/scripts/load_test_data.sh
 ```
 
 **Best practices**:
@@ -381,65 +376,6 @@ done
 - Document dependencies (numbered prefixes)
 - Never commit real user data
 - Reset frequently during development
-
----
-
-### SQL Queries
-
-#### Validation Queries (`database/sql/validation/`)
-
-**Purpose**: Data integrity checks and system validation
-
-**Files**: `test_queries.sql`
-
-**Usage**:
-```bash
-psql $SUPABASE_DB_URL -f database/sql/validation/test_queries.sql
-```
-
-**Examples**:
-- Verify foreign key integrity
-- Check for orphaned records
-- Test RLS policies
-- Validate data constraints
-
----
-
-#### Report Queries (`database/sql/reports/`)
-
-**Purpose**: Business reports and analytics
-
-**Future files**:
-- `contract_summary.sql`
-- `monthly_invoice_report.sql`
-- `compliance_dashboard.sql`
-
-**Usage**:
-```bash
-psql $SUPABASE_DB_URL -f database/sql/reports/contract_summary.sql
-```
-
-**Best practices**:
-- Add comments explaining query purpose
-- Use parameters (`$1`, `$2`) for reusable queries
-- Test with production-like data volumes
-- Check `EXPLAIN ANALYZE` for performance
-
----
-
-#### Admin Queries (`database/sql/admin/`)
-
-**Purpose**: Administrative and maintenance queries
-
-**Future files**:
-- `orphaned_data.sql`
-- `system_health.sql`
-- `user_activity.sql`
-
-**Usage**:
-```bash
-psql $SUPABASE_DB_URL -f database/sql/admin/orphaned_data.sql
-```
 
 ---
 
@@ -455,7 +391,7 @@ psql $SUPABASE_DB_URL -f database/sql/admin/orphaned_data.sql
 
 1. **After creating a migration**, run the documentation helper:
    ```bash
-   ./scripts/document-migration.sh database/migrations/002_add_contract_pii_mapping.sql
+   ./database/scripts/document-migration.sh database/migrations/002_add_contract_pii_mapping.sql
    ```
 
 2. **Review the summary** to understand what changed:
@@ -497,7 +433,7 @@ vi database/migrations/002_add_contract_pii_mapping.sql
 psql $SUPABASE_DB_URL -f database/migrations/002_add_contract_pii_mapping.sql
 
 # 4. Document changes for diagram update
-./scripts/document-migration.sh database/migrations/002_add_contract_pii_mapping.sql
+./database/scripts/document-migration.sh database/migrations/002_add_contract_pii_mapping.sql
 
 # 5. Update draw.io diagram
 # Open database/diagrams/entity_diagram_v2.0.drawio
@@ -518,15 +454,15 @@ git push
 
 ```bash
 # 1. Generate snapshot (combines all migrations)
-./scripts/create-phase-snapshot.sh v2.0 "Phase 2 - Contract Parsing"
+./database/scripts/create-phase-snapshot.sh v2.0 "Phase 2 - Contract Parsing"
 
 # Output:
 # 📸 Creating schema snapshot: v2.0
-# ✅ Snapshot saved to database/versions/v2.0_snapshot.sql
+# ✅ Snapshot saved to database/migrations/snapshot_v2.0.sql
 # ✅ Changelog updated in database/SCHEMA_CHANGES.md
 
 # 2. Review generated files
-cat database/versions/v2.0_snapshot.sql | head -20
+cat database/migrations/snapshot_v2.0.sql | head -20
 cat database/SCHEMA_CHANGES.md
 
 # 3. Update final diagram for this version
@@ -534,7 +470,7 @@ cat database/SCHEMA_CHANGES.md
 # Ensure all Phase 2 changes are reflected
 
 # 4. Commit everything
-git add database/versions/v2.0_snapshot.sql \
+git add database/migrations/snapshot_v2.0.sql \
         database/SCHEMA_CHANGES.md \
         database/diagrams/entity_diagram_v2.0.drawio
 
@@ -550,7 +486,7 @@ git push
 
 ```bash
 # Load all data (reference + fixtures)
-./scripts/load_test_data.sh
+./database/scripts/load_test_data.sh
 
 # Or load selectively:
 
@@ -563,20 +499,19 @@ psql $SUPABASE_DB_URL -f database/seed/fixtures/01_test_organizations.sql
 
 ---
 
-### Workflow 4: Running Validation Queries
+### Workflow 4: Verifying Database State
 
-**Scenario**: Verify database integrity after migrations
+**Scenario**: Check database state after migrations
 
 ```bash
-# Run all validation queries
-psql $SUPABASE_DB_URL -f database/sql/validation/test_queries.sql
+# List all tables
+psql $SUPABASE_DB_URL -c "\dt"
 
-# Run specific report
-psql $SUPABASE_DB_URL -f database/sql/reports/contract_summary.sql
+# Check row counts
+psql $SUPABASE_DB_URL -c "SELECT COUNT(*) FROM organization;"
 
 # Interactive query session
 psql $SUPABASE_DB_URL
-\i database/sql/validation/test_queries.sql
 ```
 
 ---
@@ -597,10 +532,10 @@ cp .env.example .env.local
 echo "SUPABASE_DB_URL=postgresql://user:pass@host:5432/db" >> .env.local
 
 # 4. Apply schema (baseline + migrations)
-./scripts/apply_schema.sh
+./database/scripts/apply_schema.sh
 
 # 5. Load test data
-./scripts/load_test_data.sh
+./database/scripts/load_test_data.sh
 
 # 6. Verify
 psql $SUPABASE_DB_URL -c "SELECT COUNT(*) FROM organization;"
@@ -648,10 +583,10 @@ pip install psycopg2-binary
 **Step 6: Load initial schema and data**
 ```bash
 # Apply baseline schema
-./scripts/apply_schema.sh
+./database/scripts/apply_schema.sh
 
 # Load test data
-./scripts/load_test_data.sh
+./database/scripts/load_test_data.sh
 ```
 
 **Step 7: Verify setup**
@@ -679,18 +614,18 @@ ls database/migrations/
 psql $SUPABASE_DB_URL -f database/migrations/00X_*.sql
 
 # 4. Reload test data if schema changed
-./scripts/load_test_data.sh
+./database/scripts/load_test_data.sh
 ```
 
 **Before creating a pull request**:
 ```bash
 # 1. Ensure all migrations are documented
-./scripts/document-migration.sh database/migrations/00X_*.sql
+./database/scripts/document-migration.sh database/migrations/00X_*.sql
 
 # 2. Update draw.io diagram if needed
 
-# 3. Run validation queries
-psql $SUPABASE_DB_URL -f database/sql/validation/test_queries.sql
+# 3. Verify database state
+psql $SUPABASE_DB_URL -c "\dt"
 
 # 4. Commit with descriptive message
 git add database/migrations/00X_*.sql
@@ -775,9 +710,9 @@ CREATE TABLE IF NOT EXISTS contract_pii_mapping (
 
 **Option 3**: Reset database (development only)
 ```bash
-./scripts/reset_database.sh
-./scripts/apply_schema.sh
-./scripts/load_test_data.sh
+./database/scripts/reset_database.sh
+./database/scripts/apply_schema.sh
+./database/scripts/load_test_data.sh
 ```
 
 ---
@@ -809,7 +744,7 @@ psql $SUPABASE_DB_URL -f database/seed/fixtures/03_default_event_scenario.sql
 psql $SUPABASE_DB_URL -f database/seed/fixtures/05_auth_seed.sql
 
 # Or use helper script (handles order)
-./scripts/load_test_data.sh
+./database/scripts/load_test_data.sh
 ```
 
 **Common issues**:
@@ -823,7 +758,7 @@ psql $SUPABASE_DB_URL -f database/seed/fixtures/05_auth_seed.sql
 
 **Symptoms**:
 ```
-permission denied: ./scripts/apply_schema.sh
+permission denied: ./database/scripts/apply_schema.sh
 ```
 
 **Cause**: Scripts not executable
@@ -900,16 +835,16 @@ ORDER BY c.relname;
 
 ```bash
 # Apply latest migration only
-psql $SUPABASE_DB_URL -f $(ls database/migrations/*.sql | tail -1)
+psql $SUPABASE_DB_URL -f $(ls database/migrations/[0-9]*.sql | grep -v "_UP.sql" | tail -1)
 
 # Count tables in database
 psql $SUPABASE_DB_URL -c "\dt" | wc -l
 
-# Show current schema version
-head -5 database/versions/v*.sql | grep "Schema Version"
+# Show baseline schema header
+head -5 database/migrations/000_baseline.sql
 
 # Reset and reload everything (DESTRUCTIVE)
-./scripts/reset_database.sh && ./scripts/apply_schema.sh && ./scripts/load_test_data.sh
+./database/scripts/reset_database.sh && ./database/scripts/apply_schema.sh && ./database/scripts/load_test_data.sh
 
 # List all migrations
 ls -1 database/migrations/
@@ -927,12 +862,11 @@ pg_dump $SUPABASE_DB_URL > backup_$(date +%Y%m%d).sql
 
 ```
 database/
-├── versions/v1.0_baseline.sql              # Initial schema snapshot
+├── migrations/000_baseline.sql             # Initial schema (baseline)
 ├── migrations/001_migrate_role.sql         # First migration (auth)
 ├── diagrams/entity_diagram_v1.0.drawio     # Manual diagram v1.0
 ├── seed/reference/00_reference.sql         # Production lookup data
 ├── seed/fixtures/01_test_orgs.sql          # Test organizations
-├── sql/validation/test_queries.sql         # Validation queries
 └── SCHEMA_CHANGES.md                       # Version history log
 ```
 
@@ -1059,10 +993,10 @@ git commit -m "snapshot(db): v2.0 Phase 2 Contract Parsing Complete"
 
 ### Project Files
 - [SCHEMA_CHANGES.md](database/SCHEMA_CHANGES.md) - Version changelog
-- [Contract Digitization Guide](IMPLEMENTATION_GUIDE.md) - Phase 2 plan
-- [Data Ingestion Architecture](DATA_INGESTION_ARCHITECTURE.md) - Phase 3 lake-house design
+- [Contract Digitization Guide](contract-digitization/docs/IMPLEMENTATION_GUIDE.md) - Phase 2 plan
+- [Data Ingestion Architecture](data-ingestion/docs/IMPLEMENTATION_GUIDE_ARCHITECTURE.md) - Phase 3 lake-house design
 - [Database Seed README](database/seed/README.md) - Data loading guide
-- [Database SQL README](database/sql/README.md) - Query organization
+- [Migrations README](database/migrations/README.md) - Migration guidelines
 
 ### GitHub
 - [Repository](https://github.com/<org>/<repo>) - Source code

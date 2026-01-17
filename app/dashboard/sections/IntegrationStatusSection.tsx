@@ -13,6 +13,9 @@ import {
   Database,
   Calendar
 } from "lucide-react"
+import snowflakeLogo from '@/app/assets/integrations/snowflake.png'
+import sapLogo from '@/app/assets/integrations/sap.png'
+import sageLogo from '@/app/assets/integrations/sage.png'
 
 interface IntegrationStatusSectionProps {
   onSectionChange: (section: string) => void
@@ -114,7 +117,7 @@ export function IntegrationStatusSection({ onSectionChange }: IntegrationStatusS
               <div className="flex flex-col items-center gap-2 text-xs text-slate-500">
                 <span>Run on your data warehouse</span>
                 <Image
-                  src="/images/integrations/c4d5e14da3b974a2b83b5efe76b0c8136de87322.png"
+                  src={snowflakeLogo}
                   alt="Snowflake Logo"
                   width={112}
                   height={64}
@@ -155,14 +158,14 @@ export function IntegrationStatusSection({ onSectionChange }: IntegrationStatusS
                 <span>Integrated with</span>
                 <div className="flex items-center gap-3">
                   <Image
-                    src="/images/integrations/45abfef21c0003fd0fb9e3cb32f0d66205de889a.png"
+                    src={sapLogo}
                     alt="SAP Logo"
                     width={72}
                     height={40}
                     className="object-contain"
                   />
                   <Image
-                    src="/images/integrations/e057346b5c69680c8ea6d15c6cbd188029f69caf.png"
+                    src={sageLogo}
                     alt="SAGE Logo"
                     width={72}
                     height={40}

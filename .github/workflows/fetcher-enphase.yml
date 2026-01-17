@@ -1,9 +1,9 @@
-name: SolarEdge Fetcher
+name: Enphase Fetcher
 
 on:
   schedule:
-    # Run every hour at minute 5
-    - cron: '5 * * * *'
+    # Run every hour at minute 15
+    - cron: '15 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
@@ -23,7 +23,7 @@ env:
 
 jobs:
   fetch:
-    name: Fetch SolarEdge Data
+    name: Fetch Enphase Data
     runs-on: ubuntu-latest
 
     steps:
@@ -54,17 +54,23 @@ jobs:
           SUPABASE_URL=$(aws secretsmanager get-secret-value --secret-id frontiermind/supabase-url --query SecretString --output text)
           SUPABASE_KEY=$(aws secretsmanager get-secret-value --secret-id frontiermind/supabase-service-key --query SecretString --output text)
           ENCRYPTION_KEY=$(aws secretsmanager get-secret-value --secret-id frontiermind/encryption-key --query SecretString --output text)
+          ENPHASE_CLIENT_ID=$(aws secretsmanager get-secret-value --secret-id frontiermind/enphase-client-id --query SecretString --output text 2>/dev/null || echo "")
+          ENPHASE_CLIENT_SECRET=$(aws secretsmanager get-secret-value --secret-id frontiermind/enphase-client-secret --query SecretString --output text 2>/dev/null || echo "")
 
           # Set as environment variables (masked in logs)
           echo "::add-mask::$SUPABASE_URL"
           echo "::add-mask::$SUPABASE_KEY"
           echo "::add-mask::$ENCRYPTION_KEY"
+          echo "::add-mask::$ENPHASE_CLIENT_ID"
+          echo "::add-mask::$ENPHASE_CLIENT_SECRET"
 
           echo "SUPABASE_URL=$SUPABASE_URL" >> $GITHUB_ENV
           echo "SUPABASE_SERVICE_KEY=$SUPABASE_KEY" >> $GITHUB_ENV
           echo "ENCRYPTION_KEY=$ENCRYPTION_KEY" >> $GITHUB_ENV
+          echo "ENPHASE_CLIENT_ID=$ENPHASE_CLIENT_ID" >> $GITHUB_ENV
+          echo "ENPHASE_CLIENT_SECRET=$ENPHASE_CLIENT_SECRET" >> $GITHUB_ENV
 
-      - name: Run SolarEdge Fetcher
+      - name: Run Enphase Fetcher
         run: |
           DRY_RUN_FLAG=""
           if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
@@ -76,13 +82,13 @@ jobs:
             LOOKBACK="2"
           fi
 
-          cd data-ingestion/sources/inverter-api && python -m solaredge.fetcher $DRY_RUN_FLAG --lookback $LOOKBACK --verbose
+          cd data-ingestion/sources/inverter-api && python -m enphase.fetcher $DRY_RUN_FLAG --lookback $LOOKBACK --verbose
 
       - name: Report status
         if: always()
         run: |
           if [ "${{ job.status }}" = "success" ]; then
-            echo "✅ SolarEdge fetch completed successfully"
+            echo "Enphase fetch completed successfully"
           else
-            echo "❌ SolarEdge fetch failed"
+            echo "Enphase fetch failed"
           fi

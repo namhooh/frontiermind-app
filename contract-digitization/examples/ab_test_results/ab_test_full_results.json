@@ -1,0 +1,1694 @@
+{
+  "test_info": {
+    "contract_length": 6563,
+    "test_date": "2026-01-16 01:54:39"
+  },
+  "config_a": {
+    "name": "Old (single-pass only)",
+    "settings": {
+      "extraction_mode": "single_pass",
+      "enable_targeted": false,
+      "enable_validation": false
+    },
+    "stats": {
+      "total_clauses": 34,
+      "categories": {
+        "AVAILABILITY": 2,
+        "GENERAL": 6,
+        "PERFORMANCE_GUARANTEE": 3,
+        "CONDITIONS_PRECEDENT": 2,
+        "PRICING": 2,
+        "PAYMENT_TERMS": 3,
+        "LIQUIDATED_DAMAGES": 3,
+        "SECURITY_PACKAGE": 2,
+        "DEFAULT": 3,
+        "TERMINATION": 1,
+        "FORCE_MAJEURE": 2,
+        "MAINTENANCE": 3,
+        "COMPLIANCE": 2
+      },
+      "unique_categories": 13,
+      "avg_payload_fields": 3.5588235294117645,
+      "unidentified": 0
+    },
+    "processing_time_sec": 101.0532739162445,
+    "clauses": [
+      {
+        "clause_id": "clause_001",
+        "clause_name": "Availability Definition",
+        "category": "AVAILABILITY",
+        "category_code": "AVAILABILITY",
+        "category_confidence": 0.95,
+        "section_reference": "Section 1.1",
+        "raw_text": "\"Availability\" means the percentage of time during each Contract Year that the Facility is capable of delivering Energy to the Delivery Point.",
+        "normalized_payload": {
+          "measurement_period": "annual",
+          "calculation_method": "percentage of time facility capable of delivering energy",
+          "measurement_location": "Delivery Point"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.9,
+        "notes": "Definition clause for availability measurement"
+      },
+      {
+        "clause_id": "clause_002",
+        "clause_name": "Commercial Operation Date Definition",
+        "category": "GENERAL",
+        "category_code": "GENERAL",
+        "category_confidence": 0.85,
+        "section_reference": "Section 1.2",
+        "raw_text": "\"Commercial Operation Date\" or \"COD\" means the date on which the Facility achieves Commercial Operation as certified by the Independent Engineer.",
+        "normalized_payload": {
+          "definition_type": "commercial_operation_date",
+          "certification_required": true,
+          "certifying_party": "Independent Engineer"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.9,
+        "notes": "Key milestone definition requiring independent certification"
+      },
+      {
+        "clause_id": "clause_003",
+        "clause_name": "Guaranteed Capacity Definition",
+        "category": "PERFORMANCE_GUARANTEE",
+        "category_code": "PERFORMANCE_GUARANTEE",
+        "category_confidence": 0.9,
+        "section_reference": "Section 1.3",
+        "raw_text": "\"Guaranteed Capacity\" means 50 MW AC measured at the Delivery Point.",
+        "normalized_payload": {
+          "guaranteed_capacity_mw": 50.0,
+          "measurement_type": "AC",
+          "measurement_location": "Delivery Point"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Capacity guarantee definition with specific measurement requirements"
+      },
+      {
+        "clause_id": "clause_004",
+        "clause_name": "Conditions Precedent to Buyer's Obligations",
+        "category": "CONDITIONS_PRECEDENT",
+        "category_code": "CONDITIONS_PRECEDENT",
+        "category_confidence": 0.95,
+        "section_reference": "Section 2.1",
+        "raw_text": "The obligations of Buyer under this Agreement shall be subject to the satisfaction of the following conditions precedent on or before the Target COD: (a) Seller shall have obtained all required Permits; (b) Seller shall have delivered the Performance Security; (c) The Facility shall have achieved Mechanical Completion; (d) Seller shall have obtained all required interconnection approvals from the Transmission Provider.",
+        "normalized_payload": {
+          "conditions_list": [
+            "Seller obtains all required Permits",
+            "Seller delivers Performance Security",
+            "Facility achieves Mechanical Completion",
+            "Seller obtains interconnection approvals from Transmission Provider"
+          ],
+          "responsible_party_by_condition": {
+            "permits": "Seller",
+            "performance_security": "Seller",
+            "mechanical_completion": "Seller",
+            "interconnection_approvals": "Seller"
+          },
+          "satisfaction_deadline": "Target COD",
+          "failure_consequences": "Buyer obligations do not become effective"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Four specific conditions precedent all assigned to Seller"
+      },
+      {
+        "clause_id": "clause_005",
+        "clause_name": "Conditions Precedent to Seller's Obligations",
+        "category": "CONDITIONS_PRECEDENT",
+        "category_code": "CONDITIONS_PRECEDENT",
+        "category_confidence": 0.95,
+        "section_reference": "Section 2.2",
+        "raw_text": "The obligations of Seller under this Agreement shall be subject to Buyer providing the Site Lease in form and substance acceptable to Seller.",
+        "normalized_payload": {
+          "conditions_list": [
+            "Buyer provides Site Lease in acceptable form"
+          ],
+          "responsible_party_by_condition": {
+            "site_lease": "Buyer"
+          },
+          "approval_standard": "form and substance acceptable to Seller",
+          "failure_consequences": "Seller obligations do not become effective"
+        },
+        "responsible_party": "Buyer",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.9,
+        "notes": "Single condition precedent assigned to Buyer with subjective approval standard"
+      },
+      {
+        "clause_id": "clause_006",
+        "clause_name": "Contract Price",
+        "category": "PRICING",
+        "category_code": "PRICING",
+        "category_confidence": 0.95,
+        "section_reference": "Section 3.1",
+        "raw_text": "Buyer shall pay Seller for all Energy delivered to the Delivery Point at the Contract Price of $45.00 per MWh for the first Contract Year, subject to annual escalation.",
+        "normalized_payload": {
+          "pricing_structure": "escalating",
+          "base_rate": 45.0,
+          "base_rate_unit": "$/MWh",
+          "escalation_frequency": "annual",
+          "payment_basis": "energy_delivered"
+        },
+        "responsible_party": "Buyer",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.95,
+        
+        "notes": "Fixed base rate with annual escalation referenced"
+      },
+      {
+        "clause_id": "clause_007",
+        "clause_name": "Price Escalation",
+        "category": "PRICING",
+        "category_code": "PRICING",
+        "category_confidence": 0.95,
+        "section_reference": "Section 3.2",
+        "raw_text": "The Contract Price shall escalate annually by 2.0% beginning on the first anniversary of the Commercial Operation Date.",
+        "normalized_payload": {
+          "pricing_structure": "escalating",
+          "escalation_rate_percent_per_year": 2.0,
+          "escalation_start_date": "first anniversary of COD",
+          "escalation_frequency": "annual"
+        },
+        "responsible_party": "Buyer",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.95,
+        "notes": "Annual 2% escalation starting one year after COD"
+      },
+      {
+        "clause_id": "clause_008",
+        "clause_name": "Minimum Purchase Obligation",
+        "category": "PAYMENT_TERMS",
+        "category_code": "PAYMENT_TERMS",
+        "category_confidence": 0.9,
+        "section_reference": "Section 3.3",
+        "raw_text": "Buyer agrees to purchase, or pay for if not taken, a minimum of 80% of the Expected Annual Energy Output in each Contract Year (\"Take-or-Pay Obligation\").",
+        "normalized_payload": {
+          "minimum_purchase_percent": 80.0,
+          "measurement_period": "annual",
+          "take_or_pay_applies": true,
+          "shortfall_payment_required": true,
+          "basis": "Expected Annual Energy Output"
+        },
+        "responsible_party": "Buyer",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.95,
+        "notes": "80% minimum offtake with take-or-pay obligation"
+      },
+      {
+        "clause_id": "clause_009",
+        "clause_name": "Availability Guarantee",
+        "category": "AVAILABILITY",
+        "category_code": "AVAILABILITY",
+        "category_confidence": 0.95,
+        "section_reference": "Section 4.1",
+        "raw_text": "Seller guarantees that the Facility shall achieve an annual Availability of at least 95% (\"Guaranteed Availability\").",
+        "normalized_payload": {
+          "threshold_percent": 95.0,
+          "measurement_period": "annual",
+          "guarantee_type": "minimum_availability"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "95% annual availability guarantee"
+      },
+      {
+        "clause_id": "clause_010",
+        "clause_name": "Performance Ratio Guarantee",
+        "category": "PERFORMANCE_GUARANTEE",
+        "category_code": "PERFORMANCE_GUARANTEE",
+        "category_confidence": 0.95,
+        "section_reference": "Section 4.2",
+        "raw_text": "Seller guarantees that the Facility shall achieve a minimum Performance Ratio of 80% during each Contract Year.",
+        "normalized_payload": {
+          "guaranteed_performance_ratio_percent": 80.0,
+          "measurement_period": "annual"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "80% performance ratio guarantee measured annually"
+      },
+      {
+        "clause_id": "clause_011",
+        "clause_name": "Degradation Guarantee",
+        "category": "PERFORMANCE_GUARANTEE",
+        "category_code": "PERFORMANCE_GUARANTEE",
+        "category_confidence": 0.9,
+        "section_reference": "Section 4.3",
+        "raw_text": "The parties acknowledge that the Facility output may degrade over time. Seller guarantees that annual degradation shall not exceed 0.5% per year.",
+        "normalized_payload": {
+          "degradation_rate_percent_per_year": 0.5,
+          "degradation_acknowledgment": true,
+          "guarantee_type": "maximum_degradation"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Maximum 0.5% annual degradation allowance"
+      },
+      {
+        "clause_id": "clause_012",
+        "clause_name": "Availability Shortfall Damages",
+        "category": "LIQUIDATED_DAMAGES",
+        "category_code": "LIQUIDATED_DAMAGES",
+        "category_confidence": 0.95,
+        "section_reference": "Section 5.1",
+        "raw_text": "If the Facility's annual Availability falls below the Guaranteed Availability, Seller shall pay Buyer liquidated damages equal to $50,000 per percentage point below 95%, up to a maximum of $500,000 per Contract Year.",
+        "normalized_payload": {
+          "trigger_type": "availability_shortfall",
+          "calculation_type": "per_point",
+          "rate": 50000,
+          "rate_unit": "$/point",
+          "threshold_percent": 95.0,
+          "cap_type": "annual",
+          "cap_amount": 500000
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "$50k per percentage point below 95% availability, capped at $500k annually"
+      },
+      {
+        "clause_id": "clause_013",
+        "clause_name": "Delay Damages",
+        "category": "LIQUIDATED_DAMAGES",
+        "category_code": "LIQUIDATED_DAMAGES",
+        "category_confidence": 0.95,
+        "section_reference": "Section 5.2",
+        "raw_text": "If Commercial Operation is not achieved by the Target COD, Seller shall pay Buyer delay liquidated damages of $10,000 per day, up to a maximum of 180 days.",
+        "normalized_payload": {
+          "trigger_type": "delay",
+          "calculation_type": "per_day",
+          "rate": 10000,
+          "rate_unit": "$/day",
+          "trigger_event": "failure to achieve COD by Target COD",
+          "cap_type": "duration",
+          "cap_duration_days": 180,
+          "cap_amount": 1800000
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "$10k per day delay damages capped at 180 days ($1.8M total)"
+      },
+      {
+        "clause_id": "clause_014",
+        "clause_name": "Performance Shortfall Damages",
+        "category": "LIQUIDATED_DAMAGES",
+        "category_code": "LIQUIDATED_DAMAGES",
+        "category_confidence": 0.95,
+        "section_reference": "Section 5.3",
+        "raw_text": "For each percentage point that the actual Performance Ratio falls below the guaranteed 80%, Seller shall pay Buyer $25,000 per Contract Year.",
+        "normalized_payload": {
+          "trigger_type": "performance_shortfall",
+          "calculation_type": "per_point",
+          "rate": 25000,
+          "rate_unit": "$/point/year",
+          "threshold_percent": 80.0,
+          "measurement_period": "annual"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "$25k per percentage point below 80% performance ratio annually"
+      },
+      {
+        "clause_id": "clause_015",
+        "clause_name": "Performance Security",
+        "category": "SECURITY_PACKAGE",
+        "category_code": "SECURITY_PACKAGE",
+        "category_confidence": 0.95,
+        "section_reference": "Section 6.1",
+        "raw_text": "Prior to the commencement of construction, Seller shall deliver to Buyer a letter of credit in the amount of $2,500,000 from a bank with a credit rating of at least A- from S&P or equivalent.",
+        "normalized_payload": {
+          "security_type": "letter_of_credit",
+          "security_amount": 2500000,
+          "posting_trigger": "prior to commencement of construction",
+          "issuer_requirements": "bank with credit rating of at least A- from S&P or equivalent"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "$2.5M letter of credit from A- rated bank required before construction"
+      },
+      {
+        "clause_id": "clause_016",
+        "clause_name": "Release of Security",
+        "category": "SECURITY_PACKAGE",
+        "category_code": "SECURITY_PACKAGE",
+        "category_confidence": 0.9,
+        "section_reference": "Section 6.2",
+        "raw_text": "The Performance Security shall be reduced by 50% upon achievement of COD and fully released after the second anniversary of COD, provided no Events of Default have occurred.",
+        "normalized_payload": {
+          "release_conditions": [
+            "50% reduction upon COD achievement",
+            "Full release after second anniversary of COD"
+          ],
+          "release_contingency": "no Events of Default",
+          "partial_release_percent": 50.0,
+          "full_release_timing": "second anniversary of COD"
+        },
+        "responsible_party": "Buyer",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.9,
+        "notes": "Staged release: 50% at COD, remainder at COD+2 years if no defaults"
+      },
+      {
+        "clause_id": "clause_017",
+        "clause_name": "Events of Default by Seller",
+        "category": "DEFAULT",
+        "category_code": "DEFAULT",
+        "category_confidence": 0.95,
+        "section_reference": "Section 7.1",
+        "raw_text": "(a) Failure to achieve COD within 180 days of the Target COD; (b) Failure to maintain the Performance Security as required; (c) Material breach of any representation, warranty, or covenant; (d) Bankruptcy or insolvency of Seller.",
+        "normalized_payload": {
+          "owner_default_events": [
+            "Failure to achieve COD within 180 days of Target COD",
+            "Failure to maintain Performance Security",
+            "Material breach of representation, warranty, or covenant",
+            "Bankruptcy or insolvency"
+          ],
+          "cod_delay_threshold_days": 180,
+          "materiality_standard": "material breach"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Four seller default events including 180-day COD delay threshold"
+      },
+      {
+        "clause_id": "clause_018",
+        "clause_name": "Events of Default by Buyer",
+        "category": "DEFAULT",
+        "category_code": "DEFAULT",
+        "category_confidence": 0.95,
+        "section_reference": "Section 7.2",
+        "raw_text": "(a) Failure to make undisputed payments within 30 days of the due date; (b) Material breach of any representation, warranty, or covenant; (c) Bankruptcy or insolvency of Buyer.",
+        "normalized_payload": {
+          "buyer_default_events": [
+            "Failure to make undisputed payments within 30 days of due date",
+            "Material breach of representation, warranty, or covenant",
+            "Bankruptcy or insolvency"
+          ],
+          "payment_default_threshold_days": 30,
+          "payment_qualification": "undisputed payments",
+          "materiality_standard": "material breach"
+        },
+        "responsible_party": "Buyer",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.95,
+        "notes": "Three buyer default events including 30-day payment default threshold"
+      },
+      {
+        "clause_id": "clause_019",
+        "clause_name": "Cure Period",
+        "category": "DEFAULT",
+        "category_code": "DEFAULT",
+        "category_confidence": 0.9,
+        "section_reference": "Section 7.3",
+        "raw_text": "The non-defaulting Party shall provide written notice of any Event of Default. The defaulting Party shall have 30 days to cure (or 60 days if the cure requires more time and diligent efforts are being made).",
+        "normalized_payload": {
+          "cure_period_days": 30,
+          "extended_cure_period_days": 60,
+          "cure_notice_method": "written notice",
+          "extended_cure_condition": "cure requires more time and diligent efforts are being made"
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.95,
+        "notes": "Standard 30-day cure period, extendable to 60 days with diligent efforts"
+      },
+      {
+        "clause_id": "clause_020",
+        "clause_name": "Termination Rights",
+        "category": "TERMINATION",
+        "category_code": "TERMINATION",
+        "category_confidence": 0.9,
+        "section_reference": "Section 7.4",
+        "raw_text": "Upon the occurrence of an Event of Default that is not cured within the applicable cure period, the non-defaulting Party may terminate this Agreement.",
+        "normalized_payload": {
+          "termination_trigger": "uncured Event of Default",
+          "termination_right_holder": "non-defaulting Party",
+          "cure_period_required": true,
+          "termination_type": "for_cause"
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.9,
+        "notes": "Termination right for non-defaulting party after cure period expires"
+      },
+      {
+        "clause_id": "clause_021",
+        "clause_name": "Force Majeure Definition",
+        "category": "FORCE_MAJEURE",
+        "category_code": "FORCE_MAJEURE",
+        "category_confidence": 0.95,
+        "section_reference": "Section 8.1",
+        "raw_text": "\"Force Majeure\" means any event beyond the reasonable control of a Party, including acts of God, war, terrorism, strikes, natural disasters, and changes in law.",
+        "normalized_payload": {
+          "defined_events": [
+            "acts of God",
+            "war",
+            "terrorism",
+            "strikes",
+            "natural disasters",
+            "changes in law"
+          ],
+          "control_standard": "beyond reasonable control of a Party"
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.95,
+        "notes": "Comprehensive FM definition including specific examples"
+      },
+      {
+        "clause_id": "clause_022",
+        "clause_name": "Effect of Force Majeure",
+        "category": "FORCE_MAJEURE",
+        "category_code": "FORCE_MAJEURE",
+        "category_confidence": 0.9,
+        "section_reference": "Section 8.2",
+        "raw_text": "A Party's performance shall be excused to the extent prevented by Force Majeure, provided that the affected Party gives prompt notice and uses commercially reasonable efforts to mitigate the effects.",
+        "normalized_payload": {
+          "performance_excuse": "to the extent prevented by Force Majeure",
+          "notice_requirement": "prompt notice",
+          "mitigation_standard": "commercially reasonable efforts",
+          "notice_timing": "prompt"
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.9,
+        "notes": "Performance excused with prompt notice and mitigation requirements"
+      },
+      {
+        "clause_id": "clause_023",
+        "clause_name": "O&M Obligations",
+        "category": "MAINTENANCE",
+        "category_code": "MAINTENANCE",
+        "category_confidence": 0.95,
+        "section_reference": "Section 9.1",
+        "raw_text": "Seller shall operate and maintain the Facility in accordance with Prudent Utility Practices and manufacturer recommendations.",
+        "normalized_payload": {
+          "maintenance_responsible_party": "Seller",
+          "maintenance_standard": "Prudent Utility Practices and manufacturer recommendations"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Seller responsible for O&M per industry standards and OEM recommendations"
+      },
+      {
+        "clause_id": "clause_024",
+        "clause_name": "Scheduled Maintenance",
+        "category": "MAINTENANCE",
+        "category_code": "MAINTENANCE",
+        "category_confidence": 0.9,
+        "section_reference": "Section 9.2",
+        "raw_text": "Seller shall schedule major maintenance during periods of low solar irradiance and provide Buyer at least 30 days advance notice.",
+        "normalized_payload": {
+          "scheduled_outage_notice_days": 30,
+          "scheduling_preference": "periods of low solar irradiance",
+          "maintenance_type": "major maintenance"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "30-day advance notice required for major maintenance, scheduled during low irradiance"
+      },
+      {
+        "clause_id": "clause_025",
+        "clause_name": "Unscheduled Outages",
+        "category": "MAINTENANCE",
+        "category_code": "MAINTENANCE",
+        "category_confidence": 0.85,
+        "section_reference": "Section 9.3",
+        "raw_text": "Seller shall notify Buyer within 24 hours of any unscheduled outage and provide regular updates on restoration efforts.",
+        "normalized_payload": {
+          "notification_period_hours": 24,
+          "outage_type": "unscheduled",
+          "update_requirement": "regular updates on restoration efforts"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.9,
+        "notes": "24-hour notification requirement for unscheduled outages with regular updates"
+      },
+      {
+        "clause_id": "clause_026",
+        "clause_name": "Environmental Compliance",
+        "category": "COMPLIANCE",
+        "category_code": "COMPLIANCE",
+        "category_confidence": 0.95,
+        "section_reference": "Section 10.1",
+        "raw_text": "Seller shall comply with all applicable environmental laws and maintain all required environmental permits.",
+        "normalized_payload": {
+          "compliance_responsible_party": "Seller",
+          "compliance_scope": "all applicable environmental laws",
+          "permit_maintenance_required": true,
+          "permit_type": "environmental permits"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Seller responsible for environmental law compliance and permit maintenance"
+      },
+      {
+        "clause_id": "clause_027",
+        "clause_name": "Regulatory Approvals",
+        "category": "COMPLIANCE",
+        "category_code": "COMPLIANCE",
+        "category_confidence": 0.9,
+        "section_reference": "Section 10.2",
+        "raw_text": "Each Party shall obtain and maintain all regulatory approvals necessary for the performance of its obligations under this Agreement.",
+        "normalized_payload": {
+          "compliance_responsible_party": "Both",
+          "approval_scope": "all regulatory approvals necessary for performance of obligations",
+          "maintenance_required": true
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.9,
+        "notes": "Both parties responsible for obtaining and maintaining necessary regulatory approvals"
+      },
+      {
+        "clause_id": "clause_028",
+        "clause_name": "Invoicing",
+        "category": "PAYMENT_TERMS",
+        "category_code": "PAYMENT_TERMS",
+        "category_confidence": 0.95,
+        "section_reference": "Section 11.1",
+        "raw_text": "Seller shall invoice Buyer monthly for all Energy delivered during the preceding month, with payment due within 30 days of invoice receipt.",
+        "normalized_payload": {
+          "billing_frequency": "monthly",
+          "invoice_timing": "for preceding month",
+          "payment_due_days": 30,
+          "payment_basis": "energy delivered"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.95,
+        "notes": "Monthly invoicing with 30-day payment terms"
+      },
+      {
+        "clause_id": "clause_029",
+        "clause_name": "Late Payment Interest",
+        "category": "PAYMENT_TERMS",
+        "category_code": "PAYMENT_TERMS",
+        "category_confidence": 0.9,
+        "section_reference": "Section 11.2",
+        "raw_text": "Any amounts not paid when due shall bear interest at the prime rate plus 2% per annum.",
+        "normalized_payload": {
+          "late_payment_interest_rate": "prime rate plus 2%",
+          "interest_calculation": "per annum",
+          "interest_trigger": "amounts not paid when due"
+        },
+        "responsible_party": "Buyer",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.9,
+        "notes": "Late payment interest at prime + 2% annually"
+      },
+      {
+        "clause_id": "clause_030",
+        "clause_name": "Governing Law",
+        "category": "GENERAL",
+        "category_code": "GENERAL",
+        "category_confidence": 0.95,
+        "section_reference": "Section 12.1",
+        "raw_text": "This Agreement shall be governed by the laws of the State of Illinois.",
+        "normalized_payload": {
+          "governing_law": "State of Illinois"
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.95,
+        "notes": "Illinois state law governs the agreement"
+      },
+      {
+        "clause_id": "clause_031",
+        "clause_name": "Dispute Resolution",
+        "category": "GENERAL",
+        "category_code": "GENERAL",
+        "category_confidence": 0.95,
+        "section_reference": "Section 12.2",
+        "raw_text": "Any dispute shall be resolved through binding arbitration under AAA Commercial Arbitration Rules.",
+        "normalized_payload": {
+          "dispute_resolution_method": "arbitration",
+          "arbitration_rules": "AAA Commercial Arbitration Rules",
+          "binding": true
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.95,
+        "notes": "Binding arbitration under AAA Commercial Rules for dispute resolution"
+      },
+      {
+        "clause_id": "clause_032",
+        "clause_name": "Assignment",
+        "category": "GENERAL",
+        "category_code": "GENERAL",
+        "category_confidence": 0.9,
+        "section_reference": "Section 12.3",
+        "raw_text": "Neither Party may assign this Agreement without the prior written consent of the other Party, except to an Affiliate or in connection with a merger or acquisition.",
+        "normalized_payload": {
+          "assignment_restrictions": "prior written consent required",
+          "assignment_exceptions": [
+            "assignment to Affiliate",
+            "assignment in connection with merger or acquisition"
+          ]
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.9,
+        "notes": "Assignment restricted except to affiliates or in M&A transactions"
+      },
+      {
+        "clause_id": "clause_033",
+        "clause_name": "Confidentiality",
+        "category": "GENERAL",
+        "category_code": "GENERAL",
+        "category_confidence": 0.85,
+        "section_reference": "Section 12.4",
+        "raw_text": "Each Party shall maintain the confidentiality of this Agreement and all confidential information received from the other Party.",
+        "normalized_payload": {
+          "confidentiality_scope": [
+            "this Agreement",
+            "confidential information received from other Party"
+          ],
+          "confidentiality_obligation": "maintain confidentiality"
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.85,
+        "notes": "Mutual confidentiality obligations for agreement and confidential information"
+      },
+      {
+        "clause_id": "clause_034",
+        "clause_name": "Notices",
+        "category": "GENERAL",
+        "category_code": "GENERAL",
+        "category_confidence": 0.9,
+        "section_reference": "Section 12.5",
+        "raw_text": "All notices shall be in writing and sent to the addresses specified in Exhibit A.",
+        "normalized_payload": {
+          "notice_method": "in writing",
+          "notice_addresses": "specified in Exhibit A"
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.85,
+        "notes": "Written notices required to addresses in Exhibit A"
+      }
+    ]
+  },
+  "config_b": {
+    "name": "New (two-pass + targeted + validation)",
+    "settings": {
+      "extraction_mode": "two_pass",
+      "enable_targeted": true,
+      "enable_validation": true
+    },
+    "stats": {
+      "total_clauses": 46,
+      "categories": {
+        "GENERAL": 12,
+        "CONDITIONS_PRECEDENT": 5,
+        "PRICING": 2,
+        "PAYMENT_TERMS": 3,
+        "AVAILABILITY": 1,
+        "PERFORMANCE_GUARANTEE": 2,
+        "LIQUIDATED_DAMAGES": 3,
+        "SECURITY_PACKAGE": 2,
+        "DEFAULT": 8,
+        "TERMINATION": 1,
+        "FORCE_MAJEURE": 2,
+        "MAINTENANCE": 3,
+        "COMPLIANCE": 2
+      },
+      "unique_categories": 13,
+      "avg_payload_fields": 3.5434782608695654,
+      "unidentified": 0
+    },
+    "processing_time_sec": 180.3912971019745,
+    "clauses": [
+      {
+        "original_clause_id": "disc_001",
+        "clause_id": "clause_001",
+        "clause_name": "Availability Definition",
+        "category": "GENERAL",
+        "category_code": "GENERAL",
+        "category_confidence": 0.9,
+        "section_reference": "Article 1.1",
+        "raw_text": "\"Availability\" means the percentage of time during each Contract Year that the Facility is capable of delivering Energy to the Delivery Point.",
+        "normalized_payload": {
+          "definition_term": "Availability",
+          "definition_type": "performance_metric",
+          "measurement_basis": "percentage of time",
+          "measurement_period": "Contract Year"
+        },
+        "responsible_party": null,
+        "beneficiary_party": null,
+        "extraction_confidence": 0.95,
+        "notes": "Definition clause for availability metric"
+      },
+      {
+        "original_clause_id": "disc_002",
+        "clause_id": "clause_002",
+        "clause_name": "Commercial Operation Date Definition",
+        "category": "GENERAL",
+        "category_code": "GENERAL",
+        "category_confidence": 0.9,
+        "section_reference": "Article 1.2",
+        "raw_text": "\"Commercial Operation Date\" or \"COD\" means the date on which the Facility achieves Commercial Operation as certified by the Independent Engineer.",
+        "normalized_payload": {
+          "definition_term": "Commercial Operation Date",
+          "definition_type": "milestone_date",
+          "certification_required": true,
+          "certifying_party": "Independent Engineer"
+        },
+        "responsible_party": null,
+        "beneficiary_party": null,
+        "extraction_confidence": 0.95,
+        "notes": "Definition clause for COD milestone"
+      },
+      {
+        "original_clause_id": "disc_003",
+        "clause_id": "clause_003",
+        "clause_name": "Guaranteed Capacity Definition",
+        "category": "GENERAL",
+        "category_code": "GENERAL",
+        "category_confidence": 0.9,
+        "section_reference": "Article 1.3",
+        "raw_text": "\"Guaranteed Capacity\" means 50 MW AC measured at the Delivery Point.",
+        "normalized_payload": {
+          "definition_term": "Guaranteed Capacity",
+          "definition_type": "capacity_specification",
+          "capacity_value": 50,
+          "capacity_unit": "MW AC",
+          "measurement_point": "Delivery Point"
+        },
+        "responsible_party": null,
+        "beneficiary_party": null,
+        "extraction_confidence": 0.95,
+        "notes": "Definition clause for guaranteed capacity"
+      },
+      {
+        "original_clause_id": "disc_004",
+        "clause_id": "clause_004",
+        "clause_name": "Buyer Conditions Precedent - Permits",
+        "category": "CONDITIONS_PRECEDENT",
+        "category_code": "CONDITIONS_PRECEDENT",
+        "category_confidence": 0.95,
+        "section_reference": "Article 2.1(a)",
+        "raw_text": "Seller shall have obtained all required Permits",
+        "normalized_payload": {
+          "conditions_list": [
+            "Obtain all required Permits"
+          ],
+          "responsible_party": "Seller",
+          "beneficiary_party": "Buyer",
+          "condition_type": "regulatory_approval"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Permit acquisition condition precedent"
+      },
+      {
+        "original_clause_id": "disc_005",
+        "clause_id": "clause_005",
+        "clause_name": "Buyer Conditions Precedent - Performance Security",
+        "category": "CONDITIONS_PRECEDENT",
+        "category_code": "CONDITIONS_PRECEDENT",
+        "category_confidence": 0.95,
+        "section_reference": "Article 2.1(b)",
+        "raw_text": "Seller shall have delivered the Performance Security",
+        "normalized_payload": {
+          "conditions_list": [
+            "Deliver Performance Security"
+          ],
+          "responsible_party": "Seller",
+          "beneficiary_party": "Buyer",
+          "condition_type": "financial_security"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Performance security delivery condition precedent"
+      },
+      {
+        "original_clause_id": "disc_006",
+        "clause_id": "clause_006",
+        "clause_name": "Buyer Conditions Precedent - Mechanical Completion",
+        "category": "CONDITIONS_PRECEDENT",
+        "category_code": "CONDITIONS_PRECEDENT",
+        "category_confidence": 0.95,
+        "section_reference": "Article 2.1(c)",
+        "raw_text": "The Facility shall have achieved Mechanical Completion",
+        "normalized_payload": {
+          "conditions_list": [
+            "Achieve Mechanical Completion"
+          ],
+          "responsible_party": "Seller",
+          "beneficiary_party": "Buyer",
+          "condition_type": "construction_milestone"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Mechanical completion condition precedent"
+      },
+      {
+        "original_clause_id": "disc_007",
+        "clause_id": "clause_007",
+        "clause_name": "Buyer Conditions Precedent - Interconnection Approvals",
+        "category": "CONDITIONS_PRECEDENT",
+        "category_code": "CONDITIONS_PRECEDENT",
+        "category_confidence": 0.95,
+        "section_reference": "Article 2.1(d)",
+        "raw_text": "Seller shall have obtained all required interconnection approvals from the Transmission Provider",
+        "normalized_payload": {
+          "conditions_list": [
+            "Obtain interconnection approvals from Transmission Provider"
+          ],
+          "responsible_party": "Seller",
+          "beneficiary_party": "Buyer",
+          "condition_type": "regulatory_approval"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Interconnection approval condition precedent"
+      },
+      {
+        "original_clause_id": "disc_008",
+        "clause_id": "clause_008",
+        "clause_name": "Seller Conditions Precedent - Site Lease",
+        "category": "CONDITIONS_PRECEDENT",
+        "category_code": "CONDITIONS_PRECEDENT",
+        "category_confidence": 0.95,
+        "section_reference": "Article 2.2",
+        "raw_text": "The obligations of Seller under this Agreement shall be subject to Buyer providing the Site Lease in form and substance acceptable to Seller.",
+        "normalized_payload": {
+          "conditions_list": [
+            "Buyer provide Site Lease in acceptable form"
+          ],
+          "responsible_party": "Buyer",
+          "beneficiary_party": "Seller",
+          "condition_type": "contractual_requirement"
+        },
+        "responsible_party": "Buyer",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.95,
+        "notes": "Site lease provision condition precedent"
+      },
+      {
+        "original_clause_id": "disc_009",
+        "clause_id": "clause_009",
+        "clause_name": "Contract Price Payment Obligation",
+        "category": "PRICING",
+        "category_code": "PRICING",
+        "category_confidence": 0.95,
+        "section_reference": "Article 3.1",
+        "raw_text": "Buyer shall pay Seller for all Energy delivered to the Delivery Point at the Contract Price of $45.00 per MWh for the first Contract Year, subject to annual escalation.",
+        "normalized_payload": {
+          "pricing_structure": "escalating",
+          "base_rate": 45.0,
+          "base_rate_unit": "$/MWh",
+          "escalation_frequency": "annual",
+          "payment_basis": "energy_delivered"
+        },
+        "responsible_party": "Buyer",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.95,
+        "notes": "Base energy pricing with escalation"
+      },
+      {
+        "original_clause_id": "disc_010",
+        "clause_id": "clause_010",
+        "clause_name": "Price Escalation Mechanism",
+        "category": "PRICING",
+        "category_code": "PRICING",
+        "category_confidence": 0.95,
+        "section_reference": "Article 3.2",
+        "raw_text": "The Contract Price shall escalate annually by 2.0% beginning on the first anniversary of the Commercial Operation Date.",
+        "normalized_payload": {
+          "pricing_structure": "escalating",
+          "escalation_rate_percent": 2.0,
+          "escalation_frequency": "annual",
+          "escalation_start_date": "first anniversary of COD"
+        },
+        "responsible_party": null,
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.95,
+        "notes": "Annual price escalation mechanism"
+      },
+      {
+        "original_clause_id": "disc_011",
+        "clause_id": "clause_011",
+        "clause_name": "Take-or-Pay Obligation",
+        "category": "PAYMENT_TERMS",
+        "category_code": "PAYMENT_TERMS",
+        "category_confidence": 0.95,
+        "section_reference": "Article 3.3",
+        "raw_text": "Buyer agrees to purchase, or pay for if not taken, a minimum of 80% of the Expected Annual Energy Output in each Contract Year (\"Take-or-Pay Obligation\").",
+        "normalized_payload": {
+          "payment_type": "take_or_pay",
+          "minimum_purchase_percent": 80.0,
+          "measurement_period": "annual",
+          "basis": "Expected Annual Energy Output"
+        },
+        "responsible_party": "Buyer",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.95,
+        "notes": "Take-or-pay obligation at 80% minimum"
+      },
+      {
+        "original_clause_id": "disc_012",
+        "clause_id": "clause_012",
+        "clause_name": "Availability Guarantee",
+        "category": "AVAILABILITY",
+        "category_code": "AVAILABILITY",
+        "category_confidence": 0.95,
+        "section_reference": "Article 4.1",
+        "raw_text": "Seller guarantees that the Facility shall achieve an annual Availability of at least 95% (\"Guaranteed Availability\").",
+        "normalized_payload": {
+          "threshold_percent": 95.0,
+          "measurement_period": "annual",
+          "guarantee_type": "minimum_availability"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "95% annual availability guarantee"
+      },
+      {
+        "original_clause_id": "disc_013",
+        "clause_id": "clause_013",
+        "clause_name": "Performance Ratio Guarantee",
+        "category": "PERFORMANCE_GUARANTEE",
+        "category_code": "PERFORMANCE_GUARANTEE",
+        "category_confidence": 0.95,
+        "section_reference": "Article 4.2",
+        "raw_text": "Seller guarantees that the Facility shall achieve a minimum Performance Ratio of 80% during each Contract Year.",
+        "normalized_payload": {
+          "guaranteed_performance_ratio_percent": 80.0,
+          "measurement_period": "annual",
+          "guarantee_type": "minimum_performance_ratio"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "80% minimum performance ratio guarantee"
+      },
+      {
+        "original_clause_id": "disc_014",
+        "clause_id": "clause_014",
+        "clause_name": "Degradation Guarantee",
+        "category": "PERFORMANCE_GUARANTEE",
+        "category_code": "PERFORMANCE_GUARANTEE",
+        "category_confidence": 0.95,
+        "section_reference": "Article 4.3",
+        "raw_text": "Seller guarantees that annual degradation shall not exceed 0.5% per year.",
+        "normalized_payload": {
+          "maximum_degradation_percent": 0.5,
+          "measurement_period": "annual",
+          "guarantee_type": "degradation_limit"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Maximum 0.5% annual degradation guarantee"
+      },
+      {
+        "original_clause_id": "disc_015",
+        "clause_id": "clause_015",
+        "clause_name": "Availability Shortfall Damages",
+        "category": "LIQUIDATED_DAMAGES",
+        "category_code": "LIQUIDATED_DAMAGES",
+        "category_confidence": 0.95,
+        "section_reference": "Article 5.1",
+        "raw_text": "If the Facility's annual Availability falls below the Guaranteed Availability, Seller shall pay Buyer liquidated damages equal to $50,000 per percentage point below 95%, up to a maximum of $500,000 per Contract Year.",
+        "normalized_payload": {
+          "trigger_type": "availability_shortfall",
+          "calculation_type": "per_point",
+          "rate": 50000,
+          "threshold_percent": 95.0,
+          "maximum_amount": 500000,
+          "measurement_period": "annual"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Availability liquidated damages with cap"
+      },
+      {
+        "original_clause_id": "disc_016",
+        "clause_id": "clause_016",
+        "clause_name": "Delay Damages",
+        "category": "LIQUIDATED_DAMAGES",
+        "category_code": "LIQUIDATED_DAMAGES",
+        "category_confidence": 0.95,
+        "section_reference": "Article 5.2",
+        "raw_text": "If Commercial Operation is not achieved by the Target COD, Seller shall pay Buyer delay liquidated damages of $10,000 per day, up to a maximum of 180 days.",
+        "normalized_payload": {
+          "trigger_type": "cod_delay",
+          "calculation_type": "per_day",
+          "rate": 10000,
+          "maximum_days": 180,
+          "maximum_amount": 1800000
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "COD delay liquidated damages with 180-day cap"
+      },
+      {
+        "original_clause_id": "disc_017",
+        "clause_id": "clause_017",
+        "clause_name": "Performance Shortfall Damages",
+        "category": "LIQUIDATED_DAMAGES",
+        "category_code": "LIQUIDATED_DAMAGES",
+        "category_confidence": 0.95,
+        "section_reference": "Article 5.3",
+        "raw_text": "For each percentage point that the actual Performance Ratio falls below the guaranteed 80%, Seller shall pay Buyer $25,000 per Contract Year.",
+        "normalized_payload": {
+          "trigger_type": "performance_shortfall",
+          "calculation_type": "per_point",
+          "rate": 25000,
+          "threshold_percent": 80.0,
+          "measurement_period": "annual"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Performance ratio liquidated damages"
+      },
+      {
+        "original_clause_id": "disc_018",
+        "clause_id": "clause_018",
+        "clause_name": "Performance Security Requirement",
+        "category": "SECURITY_PACKAGE",
+        "category_code": "SECURITY_PACKAGE",
+        "category_confidence": 0.95,
+        "section_reference": "Article 6.1",
+        "raw_text": "Prior to the commencement of construction, Seller shall deliver to Buyer a letter of credit in the amount of $2,500,000 from a bank with a credit rating of at least A- from S&P or equivalent.",
+        "normalized_payload": {
+          "security_type": "letter_of_credit",
+          "security_amount": 2500000,
+          "minimum_credit_rating": "A-",
+          "rating_agency": "S&P",
+          "delivery_deadline": "prior to construction commencement"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Letter of credit security requirement"
+      },
+      {
+        "original_clause_id": "disc_019",
+        "clause_id": "clause_019",
+        "clause_name": "Security Release Schedule",
+        "category": "SECURITY_PACKAGE",
+        "category_code": "SECURITY_PACKAGE",
+        "category_confidence": 0.95,
+        "section_reference": "Article 6.2",
+        "raw_text": "The Performance Security shall be reduced by 50% upon achievement of COD and fully released after the second anniversary of COD, provided no Events of Default have occurred.",
+        "normalized_payload": {
+          "release_schedule": [
+            {
+              "milestone": "COD achievement",
+              "reduction_percent": 50.0
+            },
+            {
+              "milestone": "second anniversary of COD",
+              "reduction_percent": 100.0
+            }
+          ],
+          "release_condition": "no Events of Default"
+        },
+        "responsible_party": null,
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.95,
+        "notes": "Performance security release schedule"
+      },
+      {
+        "original_clause_id": "disc_020",
+        "clause_id": "clause_020",
+        "clause_name": "Seller Default - COD Failure",
+        "category": "DEFAULT",
+        "category_code": "DEFAULT",
+        "category_confidence": 0.95,
+        "section_reference": "Article 7.1(a)",
+        "raw_text": "Failure to achieve COD within 180 days of the Target COD",
+        "normalized_payload": {
+          "default_party": "Seller",
+          "default_events": [
+            "Failure to achieve COD within 180 days of Target COD"
+          ],
+          "grace_period_days": 180
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Seller default for COD delay"
+      },
+      {
+        "original_clause_id": "disc_021",
+        "clause_id": "clause_021",
+        "clause_name": "Seller Default - Security Maintenance",
+        "category": "DEFAULT",
+        "category_code": "DEFAULT",
+        "category_confidence": 0.95,
+        "section_reference": "Article 7.1(b)",
+        "raw_text": "Failure to maintain the Performance Security as required",
+        "normalized_payload": {
+          "default_party": "Seller",
+          "default_events": [
+            "Failure to maintain Performance Security"
+          ],
+          "default_type": "security_maintenance"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Seller default for security maintenance failure"
+      },
+      {
+        "original_clause_id": "disc_022",
+        "clause_id": "clause_022",
+        "clause_name": "Seller Default - Material Breach",
+        "category": "DEFAULT",
+        "category_code": "DEFAULT",
+        "category_confidence": 0.95,
+        "section_reference": "Article 7.1(c)",
+        "raw_text": "Material breach of any representation, warranty, or covenant",
+        "normalized_payload": {
+          "default_party": "Seller",
+          "default_events": [
+            "Material breach of representation, warranty, or covenant"
+          ],
+          "default_type": "material_breach"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Seller default for material breach"
+      },
+      {
+        "original_clause_id": "disc_023",
+        "clause_id": "clause_023",
+        "clause_name": "Seller Default - Bankruptcy",
+        "category": "DEFAULT",
+        "category_code": "DEFAULT",
+        "category_confidence": 0.95,
+        "section_reference": "Article 7.1(d)",
+        "raw_text": "Bankruptcy or insolvency of Seller",
+        "normalized_payload": {
+          "default_party": "Seller",
+          "default_events": [
+            "Bankruptcy or insolvency"
+          ],
+          "default_type": "insolvency"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Seller default for bankruptcy/insolvency"
+      },
+      {
+        "original_clause_id": "disc_024",
+        "clause_id": "clause_024",
+        "clause_name": "Buyer Default - Payment Failure",
+        "category": "DEFAULT",
+        "category_code": "DEFAULT",
+        "category_confidence": 0.95,
+        "section_reference": "Article 7.2(a)",
+        "raw_text": "Failure to make undisputed payments within 30 days of the due date",
+        "normalized_payload": {
+          "default_party": "Buyer",
+          "default_events": [
+            "Failure to make undisputed payments within 30 days"
+          ],
+          "cure_period_days": 30,
+          "default_type": "payment_failure"
+        },
+        "responsible_party": "Buyer",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.95,
+        "notes": "Buyer default for payment failure"
+      },
+      {
+        "original_clause_id": "disc_025",
+        "clause_id": "clause_025",
+        "clause_name": "Buyer Default - Material Breach",
+        "category": "DEFAULT",
+        "category_code": "DEFAULT",
+        "category_confidence": 0.95,
+        "section_reference": "Article 7.2(b)",
+        "raw_text": "Material breach of any representation, warranty, or covenant",
+        "normalized_payload": {
+          "default_party": "Buyer",
+          "default_events": [
+            "Material breach of representation, warranty, or covenant"
+          ],
+          "default_type": "material_breach"
+        },
+        "responsible_party": "Buyer",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.95,
+        "notes": "Buyer default for material breach"
+      },
+      {
+        "original_clause_id": "disc_026",
+        "clause_id": "clause_026",
+        "clause_name": "Buyer Default - Bankruptcy",
+        "category": "DEFAULT",
+        "category_code": "DEFAULT",
+        "category_confidence": 0.95,
+        "section_reference": "Article 7.2(c)",
+        "raw_text": "Bankruptcy or insolvency of Buyer",
+        "normalized_payload": {
+          "default_party": "Buyer",
+          "default_events": [
+            "Bankruptcy or insolvency"
+          ],
+          "default_type": "insolvency"
+        },
+        "responsible_party": "Buyer",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.95,
+        "notes": "Buyer default for bankruptcy/insolvency"
+      },
+      {
+        "original_clause_id": "disc_027",
+        "clause_id": "clause_027",
+        "clause_name": "Cure Period Process",
+        "category": "DEFAULT",
+        "category_code": "DEFAULT",
+        "category_confidence": 0.9,
+        "section_reference": "Article 7.3",
+        "raw_text": "The non-defaulting Party shall provide written notice of any Event of Default. The defaulting Party shall have 30 days to cure (or 60 days if the cure requires more time and diligent efforts are being made).",
+        "normalized_payload": {
+          "cure_period_days": 30,
+          "extended_cure_period_days": 60,
+          "notice_requirement": "written notice",
+          "extension_condition": "diligent efforts for complex cures"
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.95,
+        "notes": "Default cure period process"
+      },
+      {
+        "original_clause_id": "disc_028",
+        "clause_id": "clause_028",
+        "clause_name": "Termination Right",
+        "category": "TERMINATION",
+        "category_code": "TERMINATION",
+        "category_confidence": 0.95,
+        "section_reference": "Article 7.4",
+        "raw_text": "Upon the occurrence of an Event of Default that is not cured within the applicable cure period, the non-defaulting Party may terminate this Agreement.",
+        "normalized_payload": {
+          "termination_trigger": "uncured Event of Default",
+          "termination_right_holder": "non-defaulting Party",
+          "prerequisite": "expiration of cure period"
+        },
+        "responsible_party": null,
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.95,
+        "notes": "Termination right for uncured default"
+      },
+      {
+        "original_clause_id": "disc_029",
+        "clause_id": "clause_029",
+        "clause_name": "Force Majeure Definition",
+        "category": "FORCE_MAJEURE",
+        "category_code": "FORCE_MAJEURE",
+        "category_confidence": 0.95,
+        "section_reference": "Article 8.1",
+        "raw_text": "\"Force Majeure\" means any event beyond the reasonable control of a Party, including acts of God, war, terrorism, strikes, natural disasters, and changes in law.",
+        "normalized_payload": {
+          "defined_events": [
+            "acts of God",
+            "war",
+            "terrorism",
+            "strikes",
+            "natural disasters",
+            "changes in law"
+          ],
+          "control_test": "beyond reasonable control",
+          "definition_type": "inclusive_list"
+        },
+        "responsible_party": null,
+        "beneficiary_party": null,
+        "extraction_confidence": 0.95,
+        "notes": "Force majeure definition with specific examples"
+      },
+      {
+        "original_clause_id": "disc_030",
+        "clause_id": "clause_030",
+        "clause_name": "Force Majeure Effect",
+        "category": "FORCE_MAJEURE",
+        "category_code": "FORCE_MAJEURE",
+        "category_confidence": 0.95,
+        "section_reference": "Article 8.2",
+        "raw_text": "A Party's performance shall be excused to the extent prevented by Force Majeure, provided that the affected Party gives prompt notice and uses commercially reasonable efforts to mitigate the effects.",
+        "normalized_payload": {
+          "performance_excuse": "to extent prevented",
+          "notice_requirement": "prompt notice",
+          "mitigation_obligation": "commercially reasonable efforts",
+          "effect_scope": "proportional to prevention"
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.95,
+        "notes": "Force majeure performance excuse with conditions"
+      },
+      {
+        "original_clause_id": "disc_031",
+        "clause_id": "clause_031",
+        "clause_name": "O&M Obligations",
+        "category": "MAINTENANCE",
+        "category_code": "MAINTENANCE",
+        "category_confidence": 0.95,
+        "section_reference": "Article 9.1",
+        "raw_text": "Seller shall operate and maintain the Facility in accordance with Prudent Utility Practices and manufacturer recommendations.",
+        "normalized_payload": {
+          "maintenance_standard": "Prudent Utility Practices",
+          "additional_requirements": [
+            "manufacturer recommendations"
+          ],
+          "scope": "operate and maintain"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "General O&M obligations with industry standards"
+      },
+      {
+        "original_clause_id": "disc_032",
+        "clause_id": "clause_032",
+        "clause_name": "Scheduled Maintenance Requirements",
+        "category": "MAINTENANCE",
+        "category_code": "MAINTENANCE",
+        "category_confidence": 0.95,
+        "section_reference": "Article 9.2",
+        "raw_text": "Seller shall schedule major maintenance during periods of low solar irradiance and provide Buyer at least 30 days advance notice.",
+        "normalized_payload": {
+          "scheduled_outage_notice_days": 30,
+          "scheduling_requirement": "periods of low solar irradiance",
+          "maintenance_type": "major maintenance"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Scheduled maintenance timing and notice requirements"
+      },
+      {
+        "original_clause_id": "disc_033",
+        "clause_id": "clause_033",
+        "clause_name": "Unscheduled Outage Notification",
+        "category": "MAINTENANCE",
+        "category_code": "MAINTENANCE",
+        "category_confidence": 0.95,
+        "section_reference": "Article 9.3",
+        "raw_text": "Seller shall notify Buyer within 24 hours of any unscheduled outage and provide regular updates on restoration efforts.",
+        "normalized_payload": {
+          "response_time_hours": 24,
+          "notification_type": "unscheduled outage",
+          "update_requirement": "regular updates on restoration"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Unscheduled outage notification requirements"
+      },
+      {
+        "original_clause_id": "disc_034",
+        "clause_id": "clause_034",
+        "clause_name": "Environmental Compliance Obligation",
+        "category": "COMPLIANCE",
+        "category_code": "COMPLIANCE",
+        "category_confidence": 0.95,
+        "section_reference": "Article 10.1",
+        "raw_text": "Seller shall comply with all applicable environmental laws and maintain all required environmental permits.",
+        "normalized_payload": {
+          "required_permits": [
+            "environmental permits"
+          ],
+          "compliance_scope": "all applicable environmental laws",
+          "reporting_obligations": [
+            "maintain permits"
+          ]
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Buyer",
+        "extraction_confidence": 0.95,
+        "notes": "Environmental compliance and permit maintenance"
+      },
+      {
+        "original_clause_id": "disc_035",
+        "clause_id": "clause_035",
+        "clause_name": "Regulatory Approvals Obligation",
+        "category": "COMPLIANCE",
+        "category_code": "COMPLIANCE",
+        "category_confidence": 0.95,
+        "section_reference": "Article 10.2",
+        "raw_text": "Each Party shall obtain and maintain all regulatory approvals necessary for the performance of its obligations under this Agreement.",
+        "normalized_payload": {
+          "required_permits": [
+            "regulatory approvals"
+          ],
+          "compliance_scope": "necessary for performance of obligations",
+          "reporting_obligations": [
+            "obtain and maintain approvals"
+          ]
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.95,
+        "notes": "General regulatory approval obligations"
+      },
+      {
+        "original_clause_id": "disc_036",
+        "clause_id": "clause_036",
+        "clause_name": "Monthly Invoicing Process",
+        "category": "PAYMENT_TERMS",
+        "category_code": "PAYMENT_TERMS",
+        "category_confidence": 0.95,
+        "section_reference": "Article 11.1",
+        "raw_text": "Seller shall invoice Buyer monthly for all Energy delivered during the preceding month, with payment due within 30 days of invoice receipt.",
+        "normalized_payload": {
+          "billing_frequency": "monthly",
+          "payment_due_days": 30,
+          "billing_basis": "energy delivered",
+          "billing_period": "preceding month"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.95,
+        "notes": "Monthly billing and payment terms"
+      },
+      {
+        "original_clause_id": "disc_037",
+        "clause_id": "clause_037",
+        "clause_name": "Late Payment Interest",
+        "category": "PAYMENT_TERMS",
+        "category_code": "PAYMENT_TERMS",
+        "category_confidence": 0.95,
+        "section_reference": "Article 11.2",
+        "raw_text": "Any amounts not paid when due shall bear interest at the prime rate plus 2% per annum.",
+        "normalized_payload": {
+          "late_payment_interest": "prime rate plus 2%",
+          "interest_calculation": "per annum",
+          "trigger": "amounts not paid when due"
+        },
+        "responsible_party": "Buyer",
+        "beneficiary_party": "Seller",
+        "extraction_confidence": 0.95,
+        "notes": "Late payment interest calculation"
+      },
+      {
+        "original_clause_id": "disc_038",
+        "clause_id": "clause_038",
+        "clause_name": "Governing Law",
+        "category": "GENERAL",
+        "category_code": "GENERAL",
+        "category_confidence": 0.95,
+        "section_reference": "Article 12.1",
+        "raw_text": "This Agreement shall be governed by the laws of the State of Illinois.",
+        "normalized_payload": {
+          "governing_law": "State of Illinois",
+          "jurisdiction_type": "state_law"
+        },
+        "responsible_party": null,
+        "beneficiary_party": null,
+        "extraction_confidence": 0.95,
+        "notes": "Governing law specification"
+      },
+      {
+        "original_clause_id": "disc_039",
+        "clause_id": "clause_039",
+        "clause_name": "Dispute Resolution",
+        "category": "GENERAL",
+        "category_code": "GENERAL",
+        "category_confidence": 0.95,
+        "section_reference": "Article 12.2",
+        "raw_text": "Any dispute shall be resolved through binding arbitration under AAA Commercial Arbitration Rules.",
+        "normalized_payload": {
+          "dispute_resolution_method": "binding arbitration",
+          "arbitration_rules": "AAA Commercial Arbitration Rules",
+          "binding_nature": true
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.95,
+        "notes": "Binding arbitration dispute resolution"
+      },
+      {
+        "original_clause_id": "disc_040",
+        "clause_id": "clause_040",
+        "clause_name": "Assignment Restriction",
+        "category": "GENERAL",
+        "category_code": "GENERAL",
+        "category_confidence": 0.9,
+        "section_reference": "Article 12.3",
+        "raw_text": "Neither Party may assign this Agreement without the prior written consent of the other Party, except to an Affiliate or in connection with a merger or acquisition.",
+        "normalized_payload": {
+          "assignment_restriction": true,
+          "consent_requirement": "prior written consent",
+          "exceptions": [
+            "assignment to Affiliate",
+            "merger or acquisition"
+          ],
+          "restriction_scope": "both parties"
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.95,
+        "notes": "Assignment restrictions with exceptions"
+      },
+      {
+        "original_clause_id": "disc_041",
+        "clause_id": "clause_041",
+        "clause_name": "Confidentiality Obligation",
+        "category": "GENERAL",
+        "category_code": "GENERAL",
+        "category_confidence": 0.9,
+        "section_reference": "Article 12.4",
+        "raw_text": "Each Party shall maintain the confidentiality of this Agreement and all confidential information received from the other Party.",
+        "normalized_payload": {
+          "confidentiality_scope": [
+            "Agreement",
+            "confidential information"
+          ],
+          "obligation_type": "maintain confidentiality",
+          "mutual_obligation": true
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.95,
+        "notes": "Mutual confidentiality obligations"
+      },
+      {
+        "original_clause_id": "disc_042",
+        "clause_id": "clause_042",
+        "clause_name": "Notice Requirements",
+        "category": "GENERAL",
+        "category_code": "GENERAL",
+        "category_confidence": 0.9,
+        "section_reference": "Article 12.5",
+        "raw_text": "All notices shall be in writing and sent to the addresses specified in Exhibit A.",
+        "normalized_payload": {
+          "notice_format": "writing",
+          "address_reference": "Exhibit A",
+          "delivery_requirement": "sent to specified addresses"
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.95,
+        "notes": "Written notice requirements"
+      },
+      {
+        "clause_id": "validation_001",
+        "clause_name": "Target COD Definition",
+        "category": "GENERAL",
+        "category_confidence": 0.9,
+        "section_reference": "Article 2.1 (referenced but not defined)",
+        "raw_text": "Target COD (referenced in conditions precedent but definition not provided in contract text)",
+        "normalized_payload": {
+          "term": "Target COD",
+          "status": "referenced_but_undefined",
+          "usage_context": "conditions_precedent_deadline"
+        },
+        "responsible_party": "Seller",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.75,
+        "why_missed": "Referenced term without explicit definition in provided contract text"
+      },
+      {
+        "clause_id": "validation_002",
+        "clause_name": "Expected Annual Energy Output Definition",
+        "category": "GENERAL",
+        "category_confidence": 0.85,
+        "section_reference": "Article 3.3 (referenced but not defined)",
+        "raw_text": "Expected Annual Energy Output (referenced in Take-or-Pay Obligation but definition not provided in contract text)",
+        "normalized_payload": {
+          "term": "Expected Annual Energy Output",
+          "status": "referenced_but_undefined",
+          "usage_context": "minimum_purchase_calculation"
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.75,
+        "why_missed": "Referenced term without explicit definition in provided contract text"
+      },
+      {
+        "clause_id": "validation_003",
+        "clause_name": "Delivery Point Definition",
+        "category": "GENERAL",
+        "category_confidence": 0.9,
+        "section_reference": "Articles 1.1, 1.3, 3.1 (referenced but not defined)",
+        "raw_text": "Delivery Point (referenced multiple times but definition not provided in contract text)",
+        "normalized_payload": {
+          "term": "Delivery Point",
+          "status": "referenced_but_undefined",
+          "usage_context": "energy_delivery_location"
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.8,
+        "why_missed": "Referenced term without explicit definition in provided contract text"
+      },
+      {
+        "clause_id": "validation_004",
+        "clause_name": "Notice Addresses Reference",
+        "category": "GENERAL",
+        "category_confidence": 0.95,
+        "section_reference": "Article 12.5 references Exhibit A",
+        "raw_text": "All notices shall be in writing and sent to the addresses specified in Exhibit A.",
+        "normalized_payload": {
+          "exhibit_reference": "Exhibit A",
+          "content_type": "notice_addresses",
+          "requirement": "written_notice_to_specified_addresses"
+        },
+        "responsible_party": "Both",
+        "beneficiary_party": "Both",
+        "extraction_confidence": 0.85,
+        "why_missed": "References exhibit not provided in contract text"
+      }
+    ]
+  },
+  "comparison": {
+    "clause_delta": 12,
+    "category_delta": 0,
+    "payload_delta": -0.02,
+    "time_delta": 79.3
+  }
+}
