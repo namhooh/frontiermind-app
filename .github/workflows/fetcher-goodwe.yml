@@ -1,0 +1,88 @@
+name: GoodWe Fetcher
+
+on:
+  schedule:
+    # Run every hour at minute 10
+    - cron: '10 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Run in dry-run mode (no S3 upload)'
+        required: false
+        default: 'false'
+        type: boolean
+      lookback_hours:
+        description: 'Hours to look back for data'
+        required: false
+        default: '2'
+        type: string
+
+env:
+  AWS_REGION: us-east-1
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  fetch:
+    name: Fetch GoodWe Data
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+
+      - name: Install dependencies
+        run: |
+          pip install -r fetchers/requirements.txt
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Fetch secrets from AWS
+        id: secrets
+        run: |
+          # Fetch secrets from AWS Secrets Manager
+          SUPABASE_URL=$(aws secretsmanager get-secret-value --secret-id frontiermind/supabase-url --query SecretString --output text)
+          SUPABASE_KEY=$(aws secretsmanager get-secret-value --secret-id frontiermind/supabase-service-key --query SecretString --output text)
+          ENCRYPTION_KEY=$(aws secretsmanager get-secret-value --secret-id frontiermind/encryption-key --query SecretString --output text)
+
+          # Set as environment variables (masked in logs)
+          echo "::add-mask::$SUPABASE_URL"
+          echo "::add-mask::$SUPABASE_KEY"
+          echo "::add-mask::$ENCRYPTION_KEY"
+
+          echo "SUPABASE_URL=$SUPABASE_URL" >> $GITHUB_ENV
+          echo "SUPABASE_SERVICE_KEY=$SUPABASE_KEY" >> $GITHUB_ENV
+          echo "ENCRYPTION_KEY=$ENCRYPTION_KEY" >> $GITHUB_ENV
+
+      - name: Run GoodWe Fetcher
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+
+          LOOKBACK="${{ github.event.inputs.lookback_hours }}"
+          if [ -z "$LOOKBACK" ]; then
+            LOOKBACK="2"
+          fi
+
+          python -m fetchers.goodwe_fetcher $DRY_RUN_FLAG --lookback $LOOKBACK --verbose
+
+      - name: Report status
+        if: always()
+        run: |
+          if [ "${{ job.status }}" = "success" ]; then
+            echo "✅ GoodWe fetch completed successfully"
+          else
+            echo "❌ GoodWe fetch failed"
+          fi
