@@ -1,9 +1,11 @@
 name: Enphase Fetcher
 
+# DISABLED: Fetcher workflows are disabled until AWS infrastructure is deployed.
+# To re-enable, uncomment the schedule trigger below.
 on:
-  schedule:
-    # Run every hour at minute 15
-    - cron: '15 * * * *'
+  # schedule:
+  #   # Run every hour at minute 15
+  #   - cron: '15 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:

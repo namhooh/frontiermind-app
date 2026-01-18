@@ -1,9 +1,11 @@
 name: SMA Fetcher
 
+# DISABLED: Fetcher workflows are disabled until AWS infrastructure is deployed.
+# To re-enable, uncomment the schedule trigger below.
 on:
-  schedule:
-    # Run every hour at minute 20
-    - cron: '20 * * * *'
+  # schedule:
+  #   # Run every hour at minute 20
+  #   - cron: '20 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:

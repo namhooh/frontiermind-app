@@ -482,34 +482,36 @@ CLIENT                     YOUR APP                        S3
 
 | Phase | Focus | Components | Status |
 |-------|-------|------------|--------|
-| **Phase 1** | Foundation | S3 bucket, Validator Lambda, DB schema, manual upload | COMPLETE |
-| **Phase 2** | API Key Inverters | SolarEdge + GoodWe fetchers, credential storage | COMPLETE |
-| **Phase 3** | OAuth Inverters | OAuth callback endpoint, Enphase + SMA fetchers | COMPLETE |
+| **Phase 1** | Foundation | S3 bucket, Validator Lambda, DB schema, manual upload | NOT DEPLOYED |
+| **Phase 2** | API Key Inverters | SolarEdge + GoodWe fetchers, credential storage | CODE COMPLETE (schedules disabled) |
+| **Phase 3** | OAuth Inverters | OAuth callback endpoint, Enphase + SMA fetchers | CODE COMPLETE (schedules disabled) |
 | **Phase 4** | Client Platforms | Snowflake integration, documentation for clients | NOT STARTED |
 | **Phase 5** | Polish | Monitoring, alerting, credential health checks | NOT STARTED |
 
+> **Note:** Fetcher GitHub Actions workflows are disabled until AWS infrastructure (S3 bucket, Secrets Manager, IAM roles) is deployed. Workflows can still be triggered manually for testing via `workflow_dispatch`.
+
 ### Phase Implementation Details
 
-#### Phase 1: Foundation (COMPLETE)
-- [x] S3 bucket structure (`raw/`, `validated/`, `quarantine/`, `archive/`)
-- [x] Validator Lambda with S3 trigger
+#### Phase 1: Foundation (NOT DEPLOYED)
+- [ ] S3 bucket structure (`raw/`, `validated/`, `quarantine/`, `archive/`) - infrastructure not created
+- [ ] Validator Lambda with S3 trigger - code exists but not deployed
 - [x] Database schema (meter_reading partitioned, meter_aggregate, ingestion_log)
 - [x] Integration credential table with encryption
 - [x] Integration site table with sync tracking
 
-#### Phase 2: API Key Inverters (COMPLETE)
+#### Phase 2: API Key Inverters (CODE COMPLETE - schedules disabled)
 - [x] Base fetcher class (`data-ingestion/sources/inverter-api/base_fetcher.py`)
 - [x] SolarEdge fetcher (`data-ingestion/sources/inverter-api/solaredge/fetcher.py`)
 - [x] GoodWe fetcher (`data-ingestion/sources/inverter-api/goodwe/fetcher.py`)
-- [x] GitHub Actions workflows (`fetcher-solaredge.yml`, `fetcher-goodwe.yml`)
+- [x] GitHub Actions workflows (`fetcher-solaredge.yml`, `fetcher-goodwe.yml`) - schedules disabled
 - [x] Credential CRUD API endpoints
 
-#### Phase 3: OAuth Inverters (COMPLETE)
+#### Phase 3: OAuth Inverters (CODE COMPLETE - schedules disabled)
 - [x] OAuth token refresh in base_fetcher.py
 - [x] Enphase fetcher (`data-ingestion/sources/inverter-api/enphase/fetcher.py`)
 - [x] SMA fetcher (`data-ingestion/sources/inverter-api/sma/fetcher.py`)
 - [x] OAuth callback Edge Function (`data-ingestion/oauth/supabase-callback/`)
-- [x] GitHub Actions workflows (`fetcher-enphase.yml`, `fetcher-sma.yml`)
+- [x] GitHub Actions workflows (`fetcher-enphase.yml`, `fetcher-sma.yml`) - schedules disabled
 - [x] Config updates for OAuth client credentials
 
 #### Phase 4: Snowflake Integration (NOT STARTED)

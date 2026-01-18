@@ -1,9 +1,11 @@
 name: SolarEdge Fetcher
 
+# DISABLED: Fetcher workflows are disabled until AWS infrastructure is deployed.
+# To re-enable, uncomment the schedule trigger below.
 on:
-  schedule:
-    # Run every hour at minute 5
-    - cron: '5 * * * *'
+  # schedule:
+  #   # Run every hour at minute 5
+  #   - cron: '5 * * * *'
   workflow_dispatch:
     inputs:
       dry_run:
