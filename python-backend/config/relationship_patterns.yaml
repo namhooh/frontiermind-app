@@ -1,0 +1,272 @@
+# =====================================================
+# Clause Relationship Patterns Configuration
+# =====================================================
+# Defines category-level relationship patterns for PPA and O&M contracts.
+# Used by the relationship_detector service to auto-detect clause relationships.
+#
+# Relationship Types:
+#   TRIGGERS - Obligation breach causes consequence (availability -> LD)
+#   EXCUSES  - Event/condition excuses obligation (FM -> availability)
+#   GOVERNS  - Sets context for clauses (CP -> all obligations)
+#   INPUTS   - Data flows between clauses (pricing -> payment)
+# =====================================================
+
+version: "1.0"
+description: "Category-level relationship patterns for PPA and O&M contracts"
+
+# =====================================================
+# Intra-contract Relationships (within same contract)
+# =====================================================
+intra_contract:
+
+  # -------------------------------------------------
+  # TRIGGERS: Obligation breach → Consequence
+  # -------------------------------------------------
+
+  # Availability breach triggers liquidated damages
+  - name: "availability_triggers_ld"
+    source_category: "AVAILABILITY"
+    target_category: "LIQUIDATED_DAMAGES"
+    relationship_type: "TRIGGERS"
+    default_confidence: 0.95
+    description: "Availability shortfall triggers liquidated damages"
+
+  # Performance guarantee breach triggers liquidated damages
+  - name: "performance_triggers_ld"
+    source_category: "PERF_GUARANTEE"
+    target_category: "LIQUIDATED_DAMAGES"
+    relationship_type: "TRIGGERS"
+    default_confidence: 0.95
+    description: "Performance ratio shortfall triggers liquidated damages"
+
+  # Capacity factor breach triggers liquidated damages
+  - name: "capacity_factor_triggers_ld"
+    source_category: "CAPACITY_FACTOR"
+    target_category: "LIQUIDATED_DAMAGES"
+    relationship_type: "TRIGGERS"
+    default_confidence: 0.90
+    description: "Capacity factor shortfall triggers liquidated damages"
+
+  # Default triggers termination rights
+  - name: "default_triggers_termination"
+    source_category: "DEFAULT"
+    target_category: "TERMINATION"
+    relationship_type: "TRIGGERS"
+    default_confidence: 0.90
+    description: "Default event triggers termination rights"
+
+  # Default triggers security draw
+  - name: "default_triggers_security"
+    source_category: "DEFAULT"
+    target_category: "SECURITY_PACKAGE"
+    relationship_type: "TRIGGERS"
+    default_confidence: 0.85
+    description: "Default event triggers security draw rights"
+
+  # Compliance failure triggers default
+  - name: "compliance_triggers_default"
+    source_category: "COMPLIANCE"
+    target_category: "DEFAULT"
+    relationship_type: "TRIGGERS"
+    default_confidence: 0.80
+    description: "Compliance failure can trigger default event"
+
+  # -------------------------------------------------
+  # EXCUSES: Event type → Excused Obligation
+  # -------------------------------------------------
+
+  # Force majeure excuses availability
+  - name: "fm_excuses_availability"
+    source_category: "FORCE_MAJEURE"
+    target_category: "AVAILABILITY"
+    relationship_type: "EXCUSES"
+    default_confidence: 0.95
+    description: "Force majeure events excuse availability obligation"
+
+  # Force majeure excuses performance guarantee
+  - name: "fm_excuses_performance"
+    source_category: "FORCE_MAJEURE"
+    target_category: "PERF_GUARANTEE"
+    relationship_type: "EXCUSES"
+    default_confidence: 0.95
+    description: "Force majeure events excuse performance ratio guarantee"
+
+  # Force majeure excuses capacity factor
+  - name: "fm_excuses_capacity_factor"
+    source_category: "FORCE_MAJEURE"
+    target_category: "CAPACITY_FACTOR"
+    relationship_type: "EXCUSES"
+    default_confidence: 0.90
+    description: "Force majeure events excuse capacity factor guarantee"
+
+  # Scheduled maintenance excuses availability (with limits)
+  - name: "maintenance_excuses_availability"
+    source_category: "MAINTENANCE"
+    target_category: "AVAILABILITY"
+    relationship_type: "EXCUSES"
+    default_confidence: 0.90
+    description: "Scheduled maintenance (within limits) excuses availability"
+    condition: "source.scheduled_outage_max_hours > 0"
+    parameters:
+      requires_notice: true
+      limit_type: "hours_per_year"
+
+  # Grid curtailment excuses availability
+  - name: "curtailment_excuses_availability"
+    source_category: "CURTAILMENT"
+    target_category: "AVAILABILITY"
+    relationship_type: "EXCUSES"
+    default_confidence: 0.95
+    description: "Utility-ordered curtailment excuses availability"
+
+  # Grid curtailment excuses performance
+  - name: "curtailment_excuses_performance"
+    source_category: "CURTAILMENT"
+    target_category: "PERF_GUARANTEE"
+    relationship_type: "EXCUSES"
+    default_confidence: 0.90
+    description: "Utility-ordered curtailment excuses performance ratio"
+
+  # -------------------------------------------------
+  # INPUTS: Data flow between clauses
+  # -------------------------------------------------
+
+  # Pricing inputs to payment terms
+  - name: "pricing_inputs_payment"
+    source_category: "PRICING"
+    target_category: "PAYMENT_TERMS"
+    relationship_type: "INPUTS"
+    default_confidence: 0.95
+    description: "Pricing parameters flow into payment calculations"
+
+  # Pricing inputs to LD calculation
+  - name: "pricing_inputs_ld"
+    source_category: "PRICING"
+    target_category: "LIQUIDATED_DAMAGES"
+    relationship_type: "INPUTS"
+    default_confidence: 0.75
+    description: "Contract price may be used in LD calculations"
+    condition: "target.calculation_type == 'per_kwh'"
+
+  # Metering inputs to availability
+  - name: "metering_inputs_availability"
+    source_category: "METERING"
+    target_category: "AVAILABILITY"
+    relationship_type: "INPUTS"
+    default_confidence: 0.90
+    description: "Metering requirements define availability measurement"
+
+  # Metering inputs to performance
+  - name: "metering_inputs_performance"
+    source_category: "METERING"
+    target_category: "PERF_GUARANTEE"
+    relationship_type: "INPUTS"
+    default_confidence: 0.90
+    description: "Metering requirements define performance measurement"
+
+  # -------------------------------------------------
+  # GOVERNS: Context setting
+  # -------------------------------------------------
+
+  # Conditions precedent govern all obligations
+  - name: "cp_governs_obligations"
+    source_category: "CONDITIONS_PRECEDENT"
+    target_categories:
+      - "AVAILABILITY"
+      - "PERF_GUARANTEE"
+      - "CAPACITY_FACTOR"
+      - "PAYMENT_TERMS"
+    relationship_type: "GOVERNS"
+    default_confidence: 0.90
+    description: "CP satisfaction unlocks all commercial obligations"
+
+  # General provisions govern all clauses
+  - name: "general_governs_all"
+    source_category: "GENERAL"
+    target_category: "*"
+    relationship_type: "GOVERNS"
+    default_confidence: 0.85
+    description: "General provisions (definitions, governing law) apply to all"
+
+  # Term clause governs all obligations
+  - name: "term_governs_obligations"
+    source_category: "TERM"
+    target_categories:
+      - "AVAILABILITY"
+      - "PERF_GUARANTEE"
+      - "PAYMENT_TERMS"
+      - "LIQUIDATED_DAMAGES"
+    relationship_type: "GOVERNS"
+    default_confidence: 0.95
+    description: "Contract term defines when obligations are active"
+
+
+# =====================================================
+# Cross-contract Relationships (PPA + O&M)
+# =====================================================
+cross_contract:
+
+  # O&M scheduled maintenance excuses PPA availability
+  - name: "om_maintenance_excuses_ppa_availability"
+    source_contract_type: "OM_SERVICE"
+    target_contract_type: "PPA"
+    source_category: "MAINTENANCE"
+    target_category: "AVAILABILITY"
+    relationship_type: "EXCUSES"
+    default_confidence: 0.85
+    description: "O&M scheduled maintenance can excuse PPA availability"
+    parameters:
+      requires_coordination: true
+      notice_period_days: 30
+
+  # O&M performance failure triggers PPA availability review
+  - name: "om_failure_triggers_ppa_review"
+    source_contract_type: "OM_SERVICE"
+    target_contract_type: "PPA"
+    source_category: "DEFAULT"
+    target_category: "AVAILABILITY"
+    relationship_type: "TRIGGERS"
+    default_confidence: 0.70
+    description: "O&M contractor failure may trigger PPA availability review"
+
+  # O&M response time governs PPA maintenance excuses
+  - name: "om_sla_governs_ppa_maintenance"
+    source_contract_type: "OM_SERVICE"
+    target_contract_type: "PPA"
+    source_category: "SERVICE_LEVEL"
+    target_category: "MAINTENANCE"
+    relationship_type: "GOVERNS"
+    default_confidence: 0.80
+    description: "O&M SLA requirements govern what counts as valid maintenance excuse"
+
+
+# =====================================================
+# Event Type Mappings
+# =====================================================
+# Maps event_type codes to clause categories for excuse relationships
+event_type_to_category:
+  FORCE_MAJEURE: "FORCE_MAJEURE"
+  SCHEDULED_MAINT: "MAINTENANCE"
+  UNSCHED_MAINT: "MAINTENANCE"
+  GRID_CURTAIL: "CURTAILMENT"
+  GRID_OUTAGE: "CURTAILMENT"
+  WEATHER: "FORCE_MAJEURE"
+  PERMIT_DELAY: "CONDITIONS_PRECEDENT"
+  EQUIP_FAILURE: "MAINTENANCE"
+
+
+# =====================================================
+# Detection Settings
+# =====================================================
+detection:
+  # Minimum confidence to auto-create relationship
+  min_confidence_threshold: 0.70
+
+  # Relationships below this confidence are flagged for human review
+  review_threshold: 0.85
+
+  # Whether to create relationships for wildcard targets (e.g., GENERAL -> *)
+  expand_wildcards: true
+
+  # Maximum relationships to create per contract (safety limit)
+  max_relationships_per_contract: 500

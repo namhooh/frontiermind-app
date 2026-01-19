@@ -18,6 +18,7 @@ from services.meter_aggregator import MeterAggregator
 from services.event_detector import EventDetector
 from db.rules_repository import RulesRepository
 from db.event_repository import EventRepository
+from db.ontology_repository import OntologyRepository
 from models.contract import RuleResult, RuleEvaluationResult
 
 logger = logging.getLogger(__name__)
@@ -83,7 +84,8 @@ class RulesEngine:
         meter_aggregator: Optional[MeterAggregator] = None,
         repository: Optional[RulesRepository] = None,
         event_detector: Optional[EventDetector] = None,
-        event_repository: Optional[EventRepository] = None
+        event_repository: Optional[EventRepository] = None,
+        ontology_repo: Optional[OntologyRepository] = None
     ):
         """
         Initialize rules engine.
@@ -93,11 +95,13 @@ class RulesEngine:
             repository: Optional custom repository
             event_detector: Optional custom event detector
             event_repository: Optional custom event repository
+            ontology_repo: Optional ontology repository for relationship queries
         """
         self.meter_aggregator = meter_aggregator or MeterAggregator()
         self.repository = repository or RulesRepository()
         self.event_detector = event_detector or EventDetector()
         self.event_repository = event_repository or EventRepository()
+        self.ontology_repo = ontology_repo or OntologyRepository()
 
     def evaluate_period(
         self,
@@ -350,8 +354,8 @@ class RulesEngine:
             )
             return None
 
-        # Instantiate and evaluate
-        rule = rule_class(clause)
+        # Instantiate with ontology_repo for relationship-based excuse detection
+        rule = rule_class(clause, ontology_repo=self.ontology_repo)
         result = rule.evaluate(meter_data, period_start, period_end, excused_events)
 
         return result

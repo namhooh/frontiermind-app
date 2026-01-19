@@ -243,3 +243,98 @@ This document tracks major schema versions and their associated changes.
 - Existing VARCHAR data dropped (not migratable without user mapping)
 
 ---
+
+### v4.0 - 2026-01-19 (Power Purchase Ontology Framework)
+
+**Description:** Implements semantic ontology layer for explicit clause relationships. Enables relationship-based excuse detection in rules engine and obligation tracking.
+
+**Reference:** `contract-digitization/docs/ONTOLOGY_GUIDE.md`
+
+**Migrations:**
+- `database/migrations/014_clause_relationship.sql` - Clause relationship table and event enhancements
+- `database/migrations/015_obligation_view.sql` - Obligation VIEW and helper functions
+
+**Key Changes:**
+
+**New Enum Type: relationship_type**
+- `TRIGGERS` - Source breach triggers target consequence (e.g., availability → LD)
+- `EXCUSES` - Source event excuses target obligation (e.g., FM → availability)
+- `GOVERNS` - Source sets context for target (e.g., CP → all obligations)
+- `INPUTS` - Source provides data to target (e.g., pricing → payment)
+
+**New Table: clause_relationship**
+- `id` - BIGSERIAL PRIMARY KEY
+- `source_clause_id` - BIGINT REFERENCES clause(id) ON DELETE CASCADE
+- `target_clause_id` - BIGINT REFERENCES clause(id) ON DELETE CASCADE
+- `relationship_type` - relationship_type enum
+- `is_cross_contract` - BOOLEAN (for PPA ↔ O&M relationships)
+- `parameters` - JSONB (relationship-specific parameters)
+- `is_inferred` - BOOLEAN (auto-detected vs explicit)
+- `confidence` - NUMERIC(4,3) (0.000-1.000 for inferred relationships)
+- `inferred_by` - VARCHAR(100) ('pattern_matcher', 'claude_extraction', 'human')
+- `created_at`, `created_by`
+- Unique constraint on (source_clause_id, target_clause_id, relationship_type)
+- Indexes on source_clause_id, target_clause_id, relationship_type, is_cross_contract
+
+**New View: obligation_view**
+- Exposes "Must A" obligations only (AVAILABILITY, PERFORMANCE_GUARANTEE, PAYMENT_TERMS, etc.)
+- Extracts metric, threshold_value, comparison_operator, evaluation_period from normalized_payload
+- Includes responsible_party, beneficiary_party
+- Does NOT include LD parameters (consequences come from TRIGGERS relationships per ontology design)
+- Read-only VIEW on clause table (not a duplicate table)
+
+**New View: obligation_with_relationships**
+- Extends obligation_view with relationship counts
+- Aggregates excuse_categories, triggered_categories arrays
+- Includes `ld_parameters` JSONB - extracted from triggered LIQUIDATED_DAMAGES clause via clause_relationship
+- Useful for UI dashboards
+
+**Enhanced event table:**
+- Added: `contract_id` - BIGINT REFERENCES contract(id) (optional contract link)
+- Added: `verified` - BOOLEAN (for excuse verification)
+- Added: `verified_by` - UUID
+- Added: `verified_at` - TIMESTAMPTZ
+
+**New event_type seeds:**
+- `FORCE_MAJEURE` - Act of God, war, natural disaster
+- `SCHEDULED_MAINT` - Planned maintenance outage
+- `GRID_CURTAIL` - Utility-ordered output reduction
+- `UNSCHED_MAINT` - Emergency repairs
+- `WEATHER` - Extreme weather affecting performance
+- `PERMIT_DELAY` - Regulatory delay
+- `EQUIP_FAILURE` - Equipment malfunction
+- `GRID_OUTAGE` - Grid unavailability
+
+**Helper Functions:**
+- `get_excuses_for_clause(clause_id)` - Returns clauses that excuse given clause
+- `get_triggers_for_clause(clause_id)` - Returns consequences triggered by clause
+- `get_contract_relationship_graph(contract_id)` - Returns full relationship graph
+- `get_obligation_details(clause_id)` - Returns obligation with all relationships and `ld_parameters` JSONB from triggered LIQUIDATED_DAMAGES clause
+
+**Python Backend Integration:**
+- `python-backend/services/ontology/` - New ontology service package
+- `python-backend/db/ontology_repository.py` - Repository for relationship CRUD
+- `python-backend/api/ontology.py` - REST API endpoints
+- `python-backend/config/relationship_patterns.yaml` - Pattern definitions for auto-detection
+
+**API Endpoints:**
+- `GET /api/ontology/contracts/{id}/obligations` - List obligations
+- `GET /api/ontology/clauses/{id}/relationships` - Get clause relationships
+- `GET /api/ontology/clauses/{id}/triggers` - Get triggered consequences
+- `GET /api/ontology/clauses/{id}/excuses` - Get excuse clauses
+- `POST /api/ontology/contracts/{id}/detect-relationships` - Auto-detect relationships
+- `GET /api/ontology/contracts/{id}/relationship-graph` - Get full graph
+
+**Rules Engine Integration:**
+- `BaseRule._get_excused_types_from_relationships()` - Queries EXCUSES relationships
+- `_calculate_excused_hours()` now combines legacy + relationship-based excuses
+- Auto-detection runs after contract parsing (Step 8 in pipeline)
+
+**Design Notes:**
+- VIEW-based obligation exposure (not table) per ontology framework recommendation
+- Single source of truth: clause table remains master, VIEW derives from it
+- Backward compatible: legacy `excused_events` in normalized_payload still works
+- Relationship detection uses configurable patterns in YAML
+- Cross-contract relationships supported (PPA ↔ O&M)
+
+---

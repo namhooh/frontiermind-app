@@ -438,6 +438,23 @@ class ContractParser:
                 processing_time=processing_time
             )
 
+            # Step 8: Auto-detect clause relationships (ontology layer)
+            relationships_detected = 0
+            try:
+                from services.ontology import RelationshipDetector
+                detector = RelationshipDetector()
+                detection_result = detector.detect_and_store(contract_id)
+                relationships_detected = detection_result.get('created_count', 0)
+                logger.info(
+                    f"Auto-detected {relationships_detected} clause relationships "
+                    f"(patterns matched: {detection_result.get('patterns_matched', [])})"
+                )
+            except Exception as rel_err:
+                # Relationship detection failure should not fail the overall parse
+                logger.warning(
+                    f"Relationship detection failed (non-critical): {rel_err}"
+                )
+
             result = ContractParseResult(
                 contract_id=contract_id,
                 clauses=clauses,

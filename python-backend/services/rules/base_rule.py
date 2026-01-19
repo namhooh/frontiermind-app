@@ -3,11 +3,15 @@ Base class for all contract compliance rules.
 
 Rules evaluate contract clauses against meter data to detect breaches
 and calculate liquidated damages (LDs).
+
+Integrates with ontology layer for:
+- Getting excuse types from EXCUSES relationships
+- Validating excused events against relationship-defined categories
 """
 
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any, List, Set
 from decimal import Decimal
 import pandas as pd
 import logging
@@ -25,7 +29,7 @@ class BaseRule(ABC):
     class and implements the evaluate() method with specific calculation logic.
     """
 
-    def __init__(self, clause: Dict[str, Any]):
+    def __init__(self, clause: Dict[str, Any], ontology_repo=None):
         """
         Initialize rule with clause data.
 
@@ -36,6 +40,7 @@ class BaseRule(ABC):
                 - normalized_payload: JSONB with rule parameters
                 - contract_id: Parent contract ID
                 - project_id: Project ID
+            ontology_repo: Optional OntologyRepository for relationship queries
         """
         self.clause = clause
         self.clause_id = clause['id']
@@ -43,6 +48,19 @@ class BaseRule(ABC):
         self.contract_id = clause['contract_id']
         self.project_id = clause['project_id']
         self.params = clause.get('normalized_payload', {})
+        self._ontology_repo = ontology_repo
+        self._excuse_types_cache: Optional[Set[str]] = None
+
+    @property
+    def ontology_repo(self):
+        """Lazy load ontology repository if not provided."""
+        if self._ontology_repo is None:
+            try:
+                from db.ontology_repository import OntologyRepository
+                self._ontology_repo = OntologyRepository()
+            except Exception as e:
+                logger.warning(f"Could not load OntologyRepository: {e}")
+        return self._ontology_repo
 
     @abstractmethod
     def evaluate(
@@ -66,6 +84,63 @@ class BaseRule(ABC):
         """
         pass
 
+    def _get_excused_types_from_relationships(self) -> Set[str]:
+        """
+        Get excuse event types from EXCUSES relationships in ontology.
+
+        Queries clause_relationship for EXCUSES relationships targeting
+        this clause, then maps source categories to event_type codes.
+
+        Returns:
+            Set of event_type codes that can excuse this clause
+        """
+        if self._excuse_types_cache is not None:
+            return self._excuse_types_cache
+
+        excuse_types: Set[str] = set()
+
+        if not self.ontology_repo:
+            return excuse_types
+
+        try:
+            # Get EXCUSES relationships for this clause
+            excuses = self.ontology_repo.get_excuses_for_clause(self.clause_id)
+
+            if not excuses:
+                self._excuse_types_cache = excuse_types
+                return excuse_types
+
+            # Get category codes that can excuse this clause
+            excuse_categories = {
+                e['source_category_code']
+                for e in excuses
+                if e.get('source_category_code')
+            }
+
+            # Map categories to event_type codes using detector config
+            from services.ontology import RelationshipDetector
+            detector = RelationshipDetector()
+            event_mapping = detector.get_event_category_mapping()
+
+            # Reverse lookup: find event codes that map to excuse categories
+            for event_code, category in event_mapping.items():
+                if category in excuse_categories:
+                    excuse_types.add(event_code)
+
+            logger.debug(
+                f"Clause {self.clause_id}: Found {len(excuse_types)} excuse types "
+                f"from {len(excuse_categories)} categories via relationships"
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"Failed to get excuse types from relationships for clause "
+                f"{self.clause_id}: {e}"
+            )
+
+        self._excuse_types_cache = excuse_types
+        return excuse_types
+
     def _calculate_excused_hours(
         self,
         excused_events: pd.DataFrame,
@@ -74,6 +149,10 @@ class BaseRule(ABC):
     ) -> float:
         """
         Calculate total excused hours from force majeure and other excused events.
+
+        Combines excuse types from:
+        1. Legacy: normalized_payload.excused_events
+        2. Ontology: EXCUSES relationships targeting this clause
 
         Args:
             excused_events: DataFrame with [time_start, time_end, event_type]
@@ -86,8 +165,19 @@ class BaseRule(ABC):
         if excused_events.empty:
             return 0.0
 
-        # Get excused event types from clause parameters
-        excused_types = self.params.get('excused_events', [])
+        # Get excused event types from clause parameters (legacy approach)
+        excused_types = set(self.params.get('excused_events', []))
+
+        # Add excuse types from ontology relationships (new approach)
+        relationship_excuses = self._get_excused_types_from_relationships()
+        excused_types.update(relationship_excuses)
+
+        if not excused_types:
+            logger.debug(
+                f"Clause {self.clause_id}: No excuse types defined "
+                "(neither in payload nor relationships)"
+            )
+            return 0.0
 
         # Filter to relevant event types
         relevant_events = excused_events[
@@ -108,7 +198,8 @@ class BaseRule(ABC):
                 total_hours += duration
 
         logger.debug(
-            f"Calculated {total_hours:.2f} excused hours from {len(relevant_events)} events"
+            f"Calculated {total_hours:.2f} excused hours from {len(relevant_events)} events "
+            f"(excuse types: {excused_types})"
         )
         return total_hours
 

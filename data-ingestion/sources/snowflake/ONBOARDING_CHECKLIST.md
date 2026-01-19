@@ -4,6 +4,71 @@ This checklist outlines the steps required to onboard a new client for Snowflake
 
 ---
 
+## How It Works (Conceptual Overview)
+
+Before diving into the steps, here's how the trust relationship between FrontierMind, Snowflake, and the client works:
+
+### What Each Party Has
+
+| Party | What They Have |
+|-------|----------------|
+| **FrontierMind** | AWS account with S3 bucket (`frontiermind-meter-data`) and IAM roles |
+| **Client** | Snowflake account with data to export |
+| **Snowflake** | Managed AWS infrastructure that executes COPY INTO commands |
+
+### Trust Relationship Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                           TRUST CHAIN                                       │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│   ┌──────────────┐         ┌──────────────┐         ┌──────────────┐       │
+│   │   Client's   │         │  Snowflake   │         │ FrontierMind │       │
+│   │   Snowflake  │────────▶│  Managed AWS │────────▶│   S3 Bucket  │       │
+│   │   Account    │         │  IAM User    │         │              │       │
+│   └──────────────┘         └──────────────┘         └──────────────┘       │
+│         │                        │                         ▲               │
+│         │                        │                         │               │
+│         │   Storage Integration  │   AssumeRole with       │               │
+│         │   (authorizes          │   External ID           │               │
+│         │    Snowflake to        │   validation            │               │
+│         │    use its IAM user)   │                         │               │
+│         │                        └─────────────────────────┘               │
+│         │                                                                   │
+│         └── Client runs COPY INTO ──▶ Data flows to S3                     │
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Step-by-Step Explanation
+
+1. **FrontierMind creates an IAM role** in our AWS account specifically for this client
+2. **Client creates a Storage Integration** in Snowflake, which tells Snowflake "use your managed IAM user to access FrontierMind's S3"
+3. **Snowflake generates IAM credentials** (an IAM user ARN and External ID) that it will use when connecting
+4. **Client sends these credentials to FrontierMind**, who updates the IAM role's trust policy to allow Snowflake's IAM user to assume it
+5. **When the client runs COPY INTO**, Snowflake's managed IAM user assumes FrontierMind's IAM role and writes to S3
+
+### Why Two External IDs?
+
+There are **two different External IDs** involved for security:
+
+| External ID | Created By | Purpose |
+|-------------|------------|---------|
+| **FrontierMind External ID** | FrontierMind | Included in the Storage Integration config. Prevents unauthorized integrations from connecting to our S3. |
+| **Snowflake External ID** | Snowflake | Auto-generated when client creates Storage Integration. Sent back to FrontierMind to add to trust policy. Prevents confused deputy attacks. |
+
+Both External IDs must match for the connection to work. This dual-verification ensures:
+- Only authorized Storage Integrations can access FrontierMind's bucket
+- Snowflake's IAM user can only assume the role when properly configured
+- No other AWS account can impersonate the connection
+
+### Summary
+
+The client's Snowflake account → delegates to Snowflake's managed AWS → which assumes FrontierMind's IAM role → to write to FrontierMind's S3 bucket. Each hop requires explicit authorization with External ID verification.
+
+---
+
 ## Phase 1: FrontierMind Setup
 
 ### 1.1 Create Organization (FrontierMind Team)

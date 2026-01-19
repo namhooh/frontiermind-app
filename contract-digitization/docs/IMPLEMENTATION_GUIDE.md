@@ -88,11 +88,21 @@
 │     • Store PII mapping (encrypted, separate table)         │
 │     • Link to project/organization                          │
 │                                                              │
+│  Step 7: Relationship Detection (Ontology Layer) [v4.0]     │
+│     • Auto-detect clause relationships from categories      │
+│     • TRIGGERS: breach → consequence (availability → LD)    │
+│     • EXCUSES: event → obligation (FM → availability)       │
+│     • GOVERNS: context → clauses (CP → all obligations)     │
+│     • INPUTS: data flow (pricing → payment)                 │
+│     • Store in clause_relationship table                    │
+│     • Confidence scoring for inferred relationships         │
+│                                                              │
 │  RULES ENGINE:                                              │
 │  ────────────────────────────────────────────────────────   │
 │  • Evaluate meter data against contract clauses            │
 │  • Detect defaults (availability < threshold)              │
-│  • Calculate liquidated damages                            │
+│  • Query EXCUSES relationships for excuse detection [v4.0] │
+│  • Calculate liquidated damages after excuses applied      │
 │  • Generate notifications                                   │
 │  • Create invoices                                          │
 │                                                              │
@@ -132,10 +142,18 @@
 │  ✅ notification - Alert system                            │
 │  ✅ organization, project, counterparty - Multi-tenant     │
 │                                                              │
+│  ONTOLOGY LAYER [v4.0]:                                     │
+│  ✅ clause_relationship - Explicit clause relationships    │
+│       • TRIGGERS, EXCUSES, GOVERNS, INPUTS types           │
+│       • Cross-contract support (PPA ↔ O&M)                 │
+│       • Confidence scoring for inferred relationships      │
+│  ✅ obligation_view - VIEW on clause for obligations       │
+│  ✅ obligation_with_relationships - Obligations + counts   │
+│                                                              │
 │  Row-Level Security (RLS) enabled                           │
 │  Multi-tenant isolation via organization_id                 │
 │                                                              │
-│  See database/migrations/002-004 for migration details.    │
+│  See database/migrations/002-004, 014-015 for details.     │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -258,6 +276,7 @@ energy-compliance-system/
 │   │   ├── __init__.py
 │   │   ├── contracts.py              # Contract endpoints
 │   │   ├── rules.py                  # Rules engine endpoints
+│   │   ├── ontology.py               # [v4.0] Ontology endpoints
 │   │   └── meters.py                 # Meter data endpoints
 │   │
 │   ├── services/                     # Business logic
@@ -265,7 +284,10 @@ energy-compliance-system/
 │   │   ├── contract_parser.py        # CONTRACT PARSING PIPELINE
 │   │   ├── pii_detector.py           # Presidio integration
 │   │   ├── rules_engine.py           # Rules evaluation
-│   │   └── meter_aggregator.py       # Meter data processing
+│   │   ├── meter_aggregator.py       # Meter data processing
+│   │   └── ontology/                 # [v4.0] Ontology services
+│   │       ├── __init__.py
+│   │       └── relationship_detector.py  # Auto-detect relationships
 │   │
 │   ├── models/                       # Pydantic models
 │   │   ├── __init__.py
@@ -275,7 +297,8 @@ energy-compliance-system/
 │   │
 │   ├── db/                           # Database utilities
 │   │   ├── __init__.py
-│   │   └── connection.py
+│   │   ├── connection.py
+│   │   └── ontology_repository.py    # [v4.0] Relationship CRUD
 │   │
 │   └── tests/                        # pytest tests
 │       ├── test_contract_parser.py
@@ -1845,6 +1868,165 @@ curl https://frontiermind-backend-gp2lbvl7gq-uc.a.run.app/health
 # === SECRETS ===
 gcloud secrets list                                          # List secrets
 gcloud secrets versions access latest --secret=anthropic-api-key  # View secret
+```
+
+---
+
+### Power Purchase Ontology Framework (v4.0) - January 2026
+
+**Purpose:** Implements a semantic ontology layer for explicit clause relationships, enabling relationship-based excuse detection in the rules engine and obligation tracking.
+
+**Reference Documentation:** `contract-digitization/docs/ONTOLOGY_GUIDE.md`
+
+**Key Concepts:**
+
+| Concept | Description |
+|---------|-------------|
+| **Obligation** | A "Must A" clause requiring a party to meet a metric (e.g., 95% availability) |
+| **Consequence** | What happens when an obligation is breached (e.g., liquidated damages) |
+| **Excuse** | A condition that excuses an obligation (e.g., force majeure) |
+| **Relationship** | An explicit link between two clauses with a defined type |
+
+**Relationship Types:**
+
+```
+TRIGGERS  - Obligation breach triggers consequence
+            AVAILABILITY breach → TRIGGERS → LIQUIDATED_DAMAGES
+
+EXCUSES   - Event/clause excuses obligation
+            FORCE_MAJEURE → EXCUSES → AVAILABILITY obligation
+
+GOVERNS   - Clause sets context for other clauses
+            CONDITIONS_PRECEDENT → GOVERNS → [all obligations]
+
+INPUTS    - Clause provides data to another clause
+            PRICING → INPUTS → PAYMENT_TERMS calculation
+```
+
+**Database Schema (migrations 014, 015):**
+
+```sql
+-- clause_relationship table
+CREATE TABLE clause_relationship (
+    id BIGSERIAL PRIMARY KEY,
+    source_clause_id BIGINT REFERENCES clause(id),
+    target_clause_id BIGINT REFERENCES clause(id),
+    relationship_type relationship_type NOT NULL,  -- ENUM
+    is_cross_contract BOOLEAN DEFAULT FALSE,
+    parameters JSONB DEFAULT '{}',
+    is_inferred BOOLEAN DEFAULT FALSE,
+    confidence NUMERIC(4,3),  -- 0.000 to 1.000
+    inferred_by VARCHAR(100)  -- 'pattern_matcher', 'claude_extraction', 'human'
+);
+
+-- obligation_view (VIEW, not table)
+SELECT * FROM obligation_view WHERE contract_id = X;
+```
+
+**API Endpoints (`python-backend/api/ontology.py`):**
+
+```
+GET  /api/ontology/contracts/{id}/obligations      # List obligations
+GET  /api/ontology/clauses/{id}/relationships      # Get clause relationships
+GET  /api/ontology/clauses/{id}/triggers           # Get consequence chain
+GET  /api/ontology/clauses/{id}/excuses            # Get excuse clauses
+POST /api/ontology/relationships                   # Create relationship
+POST /api/ontology/contracts/{id}/detect-relationships  # Auto-detect
+GET  /api/ontology/contracts/{id}/relationship-graph    # Full graph
+```
+
+**Integration with Contract Parser:**
+
+After clause extraction (Step 6), the parser automatically runs relationship detection (Step 7):
+
+```python
+# Step 7 in contract_parser.py
+from services.ontology import RelationshipDetector
+detector = RelationshipDetector()
+detection_result = detector.detect_and_store(contract_id)
+```
+
+**Integration with Rules Engine:**
+
+The rules engine now queries EXCUSES relationships for dynamic excuse detection:
+
+```python
+# In base_rule.py
+def _get_excused_types_from_relationships(self) -> Set[str]:
+    """Get excuse types from EXCUSES relationships."""
+    excuses = self.ontology_repo.get_excuses_for_clause(self.clause_id)
+    # Maps source categories to event_type codes
+    return excuse_types
+
+def _calculate_excused_hours(self, excused_events, period_start, period_end):
+    # Combines legacy (normalized_payload.excused_events)
+    # + relationship-based (EXCUSES relationships)
+    excused_types = set(self.params.get('excused_events', []))
+    relationship_excuses = self._get_excused_types_from_relationships()
+    excused_types.update(relationship_excuses)
+```
+
+**Pattern Configuration (`python-backend/config/relationship_patterns.yaml`):**
+
+```yaml
+intra_contract:
+  - name: "availability_triggers_ld"
+    source_category: "AVAILABILITY"
+    target_category: "LIQUIDATED_DAMAGES"
+    relationship_type: "TRIGGERS"
+    default_confidence: 0.95
+
+  - name: "fm_excuses_availability"
+    source_category: "FORCE_MAJEURE"
+    target_category: "AVAILABILITY"
+    relationship_type: "EXCUSES"
+    default_confidence: 0.95
+
+cross_contract:
+  - name: "om_maintenance_excuses_ppa_availability"
+    source_contract_type: "OM_SERVICE"
+    target_contract_type: "PPA"
+    source_category: "MAINTENANCE"
+    target_category: "AVAILABILITY"
+    relationship_type: "EXCUSES"
+```
+
+**Files Created/Modified:**
+
+| File | Status | Purpose |
+|------|--------|---------|
+| `database/migrations/014_clause_relationship.sql` | NEW | Relationship table + event enhancements |
+| `database/migrations/015_obligation_view.sql` | NEW | Obligation VIEW and helpers |
+| `python-backend/config/relationship_patterns.yaml` | NEW | Pattern definitions |
+| `python-backend/services/ontology/__init__.py` | NEW | Package |
+| `python-backend/services/ontology/relationship_detector.py` | NEW | Detection service |
+| `python-backend/db/ontology_repository.py` | NEW | Repository |
+| `python-backend/api/ontology.py` | NEW | API router |
+| `python-backend/services/contract_parser.py` | MODIFIED | Calls detector after extraction |
+| `python-backend/services/rules/base_rule.py` | MODIFIED | Queries EXCUSES relationships |
+| `python-backend/services/rules_engine.py` | MODIFIED | Passes ontology_repo to rules |
+| `python-backend/main.py` | MODIFIED | Registers ontology router |
+| `contract-digitization/docs/ONTOLOGY_GUIDE.md` | NEW | Comprehensive documentation |
+
+**Verification:**
+
+```sql
+-- Check relationships detected for a contract
+SELECT
+    sc.name AS source_clause,
+    tc.name AS target_clause,
+    cr.relationship_type,
+    cr.confidence
+FROM clause_relationship cr
+JOIN clause sc ON sc.id = cr.source_clause_id
+JOIN clause tc ON tc.id = cr.target_clause_id
+WHERE sc.contract_id = <contract_id>;
+
+-- Check obligations for a contract
+SELECT * FROM obligation_view WHERE contract_id = <contract_id>;
+
+-- Check excuses for an availability clause
+SELECT * FROM get_excuses_for_clause(<clause_id>);
 ```
 
 ---

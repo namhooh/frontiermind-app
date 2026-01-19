@@ -24,6 +24,7 @@ import os
 from api.contracts import router as contracts_router
 from api.rules import router as rules_router
 from api.ingest import router as ingest_router
+from api.ontology import router as ontology_router
 
 # Initialize FastAPI application
 app = FastAPI(
@@ -52,6 +53,7 @@ app.add_middleware(
 app.include_router(contracts_router)
 app.include_router(rules_router)
 app.include_router(ingest_router)
+app.include_router(ontology_router)
 
 
 @app.get("/", response_model=Dict[str, str])

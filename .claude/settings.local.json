@@ -37,7 +37,9 @@
       "Bash(git mv:*)",
       "Bash(while read dir)",
       "Bash(do echo \"$dir/\")",
-      "Bash(done)"
+      "Bash(done)",
+      "mcp__figma__get_screenshot",
+      "mcp__figma__get_design_context"
     ]
   }
 }

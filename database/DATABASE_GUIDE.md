@@ -3,7 +3,7 @@
 
 Quick links: [Directory Structure](#directory-structure) | [Workflows](#common-workflows) | [Scripts](#scripts-reference) | [Troubleshooting](#troubleshooting)
 
-Last updated: 2026-01-16
+Last updated: 2026-01-19
 
 ---
 
@@ -54,6 +54,9 @@ database/
 │   ├── 009_integration_credential.sql     # Phase 3: API key/OAuth storage
 │   ├── 010_integration_site.sql           # Phase 3: External site mapping
 │   ├── 011_ingestion_log.sql              # Phase 3: Ingestion audit trail
+│   ├── 012_audit_columns_uuid.sql         # Phase 3.1: Audit column standardization
+│   ├── 014_clause_relationship.sql        # Phase 4: Ontology relationships + event enhancements
+│   ├── 015_obligation_view.sql            # Phase 4: Obligation VIEW and helpers
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -901,6 +904,21 @@ database/
 - **pg_cron**: Automatic partition management (monthly job)
 - Reference: `DATA_INGESTION_ARCHITECTURE.md`
 
+**v3.1 (Audit Column Standardization)** - Completed
+- Migration: `012_audit_columns_uuid.sql`
+- Standardized audit columns (`created_by`, `updated_by`) from VARCHAR to UUID
+- FK references to `auth.users(id)` for Supabase Auth consistency
+
+**v4.0 (Phase 4 - Power Purchase Ontology Framework)** - Completed
+- Migrations: `014_clause_relationship.sql`, `015_obligation_view.sql`
+- New: `clause_relationship` table (TRIGGERS, EXCUSES, GOVERNS, INPUTS relationships)
+- New: `obligation_view` VIEW (exposes "Must A" obligations)
+- New: `obligation_with_relationships` VIEW (obligations with relationship aggregates)
+- Enhanced: `event` table with verification columns (`verified`, `verified_by`, `verified_at`, `contract_id`)
+- Seeded: New event types (`FORCE_MAJEURE`, `SCHEDULED_MAINT`, `GRID_CURTAIL`, etc.)
+- Helper functions: `get_excuses_for_clause()`, `get_triggers_for_clause()`, `get_contract_relationship_graph()`
+- Reference: `contract-digitization/docs/ONTOLOGY_GUIDE.md`
+
 ---
 
 ## Best Practices
@@ -995,6 +1013,7 @@ git commit -m "snapshot(db): v2.0 Phase 2 Contract Parsing Complete"
 - [SCHEMA_CHANGES.md](database/SCHEMA_CHANGES.md) - Version changelog
 - [Contract Digitization Guide](contract-digitization/docs/IMPLEMENTATION_GUIDE.md) - Phase 2 plan
 - [Data Ingestion Architecture](data-ingestion/docs/IMPLEMENTATION_GUIDE_ARCHITECTURE.md) - Phase 3 lake-house design
+- [Ontology Framework Guide](contract-digitization/docs/ONTOLOGY_GUIDE.md) - Phase 4 clause relationships
 - [Database Seed README](database/seed/README.md) - Data loading guide
 - [Migrations README](database/migrations/README.md) - Migration guidelines
 
