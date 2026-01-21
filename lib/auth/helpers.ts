@@ -39,17 +39,22 @@ export async function getCurrentUser(): Promise<AuthenticatedUser | null> {
     return null
   }
 
-  // Get the current session to check MFA status
-  const { data: { session } } = await supabase.auth.getSession()
-
-  // Check if user has MFA factors enrolled
+  // Get MFA assurance level and factors
+  const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
   const { data: factors } = await supabase.auth.mfa.listFactors()
 
+  // Exclude the original factors property to avoid type conflict with AuthenticatedUser.factors
+  const { factors: _userFactors, ...userWithoutFactors } = user
+
   return {
-    ...user,
-    aal: (session?.aal as 'aal1' | 'aal2') || 'aal1',
-    amr: session?.amr,
-    factors: factors?.totp || [],
+    ...userWithoutFactors,
+    aal: aalData?.currentLevel || 'aal1',
+    amr: aalData?.currentAuthenticationMethods,
+    factors: factors?.totp?.map(f => ({
+      id: f.id,
+      type: f.factor_type,
+      status: f.status,
+    })) || [],
   } as AuthenticatedUser
 }
 
@@ -64,11 +69,11 @@ export async function checkMFAStatus(): Promise<{
 }> {
   const supabase = await createClient()
 
-  const { data: { session } } = await supabase.auth.getSession()
+  const { data: aalData } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel()
   const { data: factors } = await supabase.auth.mfa.listFactors()
 
   const hasEnrolledFactors = (factors?.totp?.length || 0) > 0
-  const currentLevel = (session?.aal as 'aal1' | 'aal2') || 'aal1'
+  const currentLevel = aalData?.currentLevel || 'aal1'
   const isVerified = currentLevel === 'aal2'
 
   return {
