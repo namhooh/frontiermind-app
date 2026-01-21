@@ -27,3 +27,7 @@ pytest>=7.4.0              # For testing
 httpx>=0.26.0              # For async HTTP requests
 cryptography>=42.0.0       # For PII encryption (Phase 2)
 python-multipart>=0.0.6    # For file uploads
+
+# Security
+slowapi>=0.1.9             # Rate limiting for FastAPI
+boto3>=1.34.0              # AWS SDK for S3 presigned URLs

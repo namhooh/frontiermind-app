@@ -3,7 +3,7 @@
 
 Quick links: [Directory Structure](#directory-structure) | [Workflows](#common-workflows) | [Scripts](#scripts-reference) | [Troubleshooting](#troubleshooting)
 
-Last updated: 2026-01-19
+Last updated: 2026-01-20
 
 ---
 
@@ -57,6 +57,8 @@ database/
 │   ├── 012_audit_columns_uuid.sql         # Phase 3.1: Audit column standardization
 │   ├── 014_clause_relationship.sql        # Phase 4: Ontology relationships + event enhancements
 │   ├── 015_obligation_view.sql            # Phase 4: Obligation VIEW and helpers
+│   ├── 016_audit_log.sql                  # Phase 4.1: Comprehensive security audit logging
+│   ├── 017_core_table_rls.sql             # Phase 4.1: RLS policies for core tables
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -867,6 +869,8 @@ pg_dump $SUPABASE_DB_URL > backup_$(date +%Y%m%d).sql
 database/
 ├── migrations/000_baseline.sql             # Initial schema (baseline)
 ├── migrations/001_migrate_role.sql         # First migration (auth)
+├── migrations/016_audit_log.sql            # Security audit logging
+├── migrations/017_core_table_rls.sql       # RLS for core tables
 ├── diagrams/entity_diagram_v1.0.drawio     # Manual diagram v1.0
 ├── seed/reference/00_reference.sql         # Production lookup data
 ├── seed/fixtures/01_test_orgs.sql          # Test organizations
@@ -918,6 +922,16 @@ database/
 - Seeded: New event types (`FORCE_MAJEURE`, `SCHEDULED_MAINT`, `GRID_CURTAIL`, etc.)
 - Helper functions: `get_excuses_for_clause()`, `get_triggers_for_clause()`, `get_contract_relationship_graph()`
 - Reference: `contract-digitization/docs/ONTOLOGY_GUIDE.md`
+
+**v4.1 (Security Hardening)** - Completed
+- Migrations: `016_audit_log.sql`, `017_core_table_rls.sql`
+- New: `audit_log` table with 50+ action types (auth, data access, PII, exports, admin)
+- New: `audit_action_type` and `audit_severity` enums
+- New: `v_security_events` VIEW for security monitoring
+- New: RLS policies on 15+ core tables (organization, project, contract, clause, event, etc.)
+- Helper functions: `log_audit_event()`, `log_pii_access_event()`, `get_audit_summary()`
+- Security: Organization isolation, admin-only PII access, service role policies
+- Reference: `SECURITY_PRIVACY_ASSESSMENT.md` Appendix E
 
 ---
 
@@ -1014,6 +1028,7 @@ git commit -m "snapshot(db): v2.0 Phase 2 Contract Parsing Complete"
 - [Contract Digitization Guide](contract-digitization/docs/IMPLEMENTATION_GUIDE.md) - Phase 2 plan
 - [Data Ingestion Architecture](data-ingestion/docs/IMPLEMENTATION_GUIDE_ARCHITECTURE.md) - Phase 3 lake-house design
 - [Ontology Framework Guide](contract-digitization/docs/ONTOLOGY_GUIDE.md) - Phase 4 clause relationships
+- [Security Assessment](SECURITY_PRIVACY_ASSESSMENT.md) - Security controls and implementation status
 - [Database Seed README](database/seed/README.md) - Data loading guide
 - [Migrations README](database/migrations/README.md) - Migration guidelines
 

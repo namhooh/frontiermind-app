@@ -14,17 +14,25 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Now import modules that depend on environment variables
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from typing import Dict
 import os
+import logging
 
 # Import API routers (these can now access DATABASE_URL)
 from api.contracts import router as contracts_router
 from api.rules import router as rules_router
 from api.ingest import router as ingest_router
 from api.ontology import router as ontology_router
+
+# Import rate limiting middleware
+from middleware.rate_limiter import setup_rate_limiting, limiter, limit_health
+
+# Configure logging
+logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
+logger = logging.getLogger(__name__)
 
 # Initialize FastAPI application
 app = FastAPI(
@@ -34,6 +42,9 @@ app = FastAPI(
     docs_url="/docs",
     redoc_url="/redoc",
 )
+
+# Setup rate limiting (before other middleware)
+setup_rate_limiting(app)
 
 # Configure CORS for Vercel frontend and local development
 # Note: allow_origins doesn't support wildcards, so we use allow_origin_regex for Vercel
@@ -57,7 +68,8 @@ app.include_router(ontology_router)
 
 
 @app.get("/", response_model=Dict[str, str])
-async def root() -> Dict[str, str]:
+@limiter.limit("100/minute")
+async def root(request: Request) -> Dict[str, str]:
     """
     Root endpoint with API information.
 
@@ -74,7 +86,8 @@ async def root() -> Dict[str, str]:
 
 
 @app.get("/health", response_model=Dict[str, str])
-async def health_check() -> Dict[str, str]:
+@limit_health
+async def health_check(request: Request) -> Dict[str, str]:
     """
     Health check endpoint for monitoring and load balancers.
 

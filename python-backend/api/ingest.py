@@ -17,8 +17,10 @@ from typing import List, Optional
 
 import boto3
 from botocore.exceptions import ClientError
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from pydantic import BaseModel, Field
+
+from middleware.rate_limiter import limiter, limit_default
 
 from db.database import init_connection_pool
 from db.integration_repository import IntegrationRepository
@@ -64,6 +66,11 @@ except Exception as e:
 # S3 configuration
 S3_BUCKET = os.getenv("METER_DATA_BUCKET", "frontiermind-meter-data")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
+
+# Security: Presigned URL expiration times (in seconds)
+# Per Security Assessment Section 3.2: Use short expiration times
+PRESIGNED_URL_EXPIRY_UPLOAD = int(os.getenv("PRESIGNED_URL_EXPIRY_UPLOAD", "900"))  # 15 minutes
+PRESIGNED_URL_EXPIRY_DOWNLOAD = int(os.getenv("PRESIGNED_URL_EXPIRY_DOWNLOAD", "300"))  # 5 minutes
 
 
 def get_s3_client():
@@ -111,12 +118,19 @@ class FileIdResponse(BaseModel):
     summary="Generate S3 presigned URL for upload",
     description="Generate a presigned URL for direct upload to S3. The file will be processed by the Validator Lambda.",
 )
+@limiter.limit("30/minute")  # Rate limit presigned URL generation
 async def generate_presigned_url(
+    http_request: Request,  # Required for rate limiting
     request: PresignedUrlRequestBody,
     organization_id: int = Query(..., description="Organization ID"),
 ) -> PresignedUrlResponse:
     """
     Generate a presigned URL for uploading meter data to S3.
+
+    Security:
+    - Presigned URLs expire after 15 minutes (configurable via PRESIGNED_URL_EXPIRY_UPLOAD)
+    - Rate limited to 30 requests/minute per client
+    - Organization ID required for audit trail
 
     The uploaded file will land in s3://bucket/raw/{source}/{org_id}/{date}/{file_id}_{filename}
     and trigger the Validator Lambda for processing.
@@ -131,7 +145,7 @@ async def generate_presigned_url(
         # Build S3 key
         s3_key = f"raw/{request.source_type.value}/{organization_id}/{date_str}/{file_id}_{request.filename}"
 
-        # Generate presigned URL for PUT
+        # Generate presigned URL for PUT with short expiration
         presigned_url = s3_client.generate_presigned_url(
             "put_object",
             Params={
@@ -144,18 +158,19 @@ async def generate_presigned_url(
                     "original-filename": request.filename,
                 },
             },
-            ExpiresIn=3600,  # 1 hour
+            ExpiresIn=PRESIGNED_URL_EXPIRY_UPLOAD,  # 15 minutes (security best practice)
         )
 
         logger.info(
-            f"Generated presigned URL for org {organization_id}, file_id {file_id}"
+            f"Generated presigned URL for org {organization_id}, file_id {file_id}, "
+            f"expires_in={PRESIGNED_URL_EXPIRY_UPLOAD}s"
         )
 
         return PresignedUrlResponse(
             upload_url=presigned_url,
             file_id=file_id,
             s3_key=s3_key,
-            expires_in=3600,
+            expires_in=PRESIGNED_URL_EXPIRY_UPLOAD,
         )
 
     except ClientError as e:

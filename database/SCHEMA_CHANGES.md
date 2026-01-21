@@ -338,3 +338,145 @@ This document tracks major schema versions and their associated changes.
 - Cross-contract relationships supported (PPA ↔ O&M)
 
 ---
+
+### v4.1 - 2026-01-20 (Security Hardening)
+
+**Description:** Comprehensive security hardening based on Security & Privacy Assessment cross-reference analysis. Implements audit logging, enhanced RLS, and access controls.
+
+**Reference:** `SECURITY_PRIVACY_ASSESSMENT.md` Appendix E
+
+**Migrations:**
+- `database/migrations/016_audit_log.sql` - Comprehensive audit logging
+- `database/migrations/017_core_table_rls.sql` - RLS policies for core tables
+
+**Key Changes:**
+
+**New Enum: audit_action_type**
+- 50+ action types covering: authentication, authorization, data events, PII access, contract events, integration events, administrative events, security events
+
+**New Enum: audit_severity**
+- `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
+
+**New Enum: data_classification_level**
+- `public` - Safe for public access (API health, version info)
+- `internal` - Internal use only, minimal harm if exposed (general events)
+- `confidential` - Sensitive business data, requires protection (pricing, terms)
+- `restricted` - PII, credentials, security - strictest controls, may trigger legal notification (GDPR, CCPA)
+
+**New Table: audit_log**
+- `id` - BIGSERIAL PRIMARY KEY
+- `timestamp` - TIMESTAMPTZ (when event occurred)
+- `user_id` - UUID REFERENCES auth.users (actor)
+- `organization_id` - BIGINT REFERENCES organization (tenant)
+- `session_id` - TEXT
+- `action` - audit_action_type
+- `severity` - audit_severity
+- `resource_type` - TEXT (e.g., 'contract', 'clause')
+- `resource_id` - TEXT
+- `resource_name` - TEXT
+- `ip_address` - INET
+- `user_agent` - TEXT
+- `details` - JSONB (flexible event data)
+- `success` - BOOLEAN
+- `error_message` - TEXT
+- `duration_ms` - INTEGER
+- `records_affected` - INTEGER
+- `compliance_relevant` - BOOLEAN
+- `data_classification` - data_classification_level ENUM (DEFAULT 'internal')
+- Indexes: timestamp, user_id, organization_id, action, resource, severity, compliance
+
+**Immutability Enforcement:**
+- `prevent_audit_log_modification()` - Trigger function that blocks UPDATE/DELETE
+- `audit_log_immutability` - BEFORE UPDATE OR DELETE trigger on audit_log
+- Ensures forensic integrity and compliance with data protection regulations
+
+**New Helper Functions:**
+- `log_audit_event()` - Main audit logging function (SECURITY DEFINER)
+  - Validates organization_id and user_id exist before INSERT
+  - Only callable by service_role (PUBLIC revoked)
+- `log_pii_access_event()` - Convenience wrapper for PII access logging
+  - Validates contract_id exists (BIGINT to match contract.id BIGSERIAL)
+  - Auto-classifies as 'restricted'
+  - Only callable by service_role (PUBLIC revoked)
+- `get_audit_summary()` - Audit statistics by organization
+  - Requires caller to be admin of the specified organization (authorization check)
+  - Service role bypass: backend can call without admin check
+  - Granted to both authenticated and service_role
+- `prevent_audit_log_modification()` - Immutability trigger function
+  - PUBLIC execution revoked for security
+
+**New View: v_security_events**
+- Shows WARNING/ERROR/CRITICAL events with user and org info
+- Useful for security monitoring dashboards
+
+**RLS Helper Functions (migration 017):**
+- `is_org_member(p_org_id)` - Check if current user is a member of org (SECURITY DEFINER)
+- `is_org_admin(p_org_id)` - Check if current user is an admin of org (SECURITY DEFINER)
+- `get_project_org_id(p_project_id)` - Get organization_id for a project
+- `get_contract_org_id(p_contract_id)` - Get organization_id for a contract (via project)
+- `get_asset_org_id(p_asset_id)` - Get organization_id for an asset (via project)
+- `get_meter_org_id(p_meter_id)` - Get organization_id for a meter (via asset -> project)
+- All helper functions: PUBLIC revoked, granted to authenticated and service_role
+
+**RLS Performance Indexes (migration 017):**
+- `idx_role_user_org_active` - Composite index on role(user_id, organization_id, is_active)
+- `idx_role_admin_check` - Partial index for admin checks
+- `idx_project_id_org` - Project org lookup
+- `idx_contract_project` - Contract to project mapping
+- `idx_asset_project` - Asset to project mapping
+- `idx_meter_asset` - Meter to asset mapping
+
+**RLS Policies Added:**
+
+Tables with new RLS:
+- `organization` - Users see only their organization
+- `project` - Organization-scoped
+- `contract` - Organization-scoped via project
+- `clause` - Organization-scoped via contract
+- `event` - Organization-scoped via contract
+- `default_event` - Organization-scoped via contract
+- `counterparty` - Organization-scoped
+- `invoice_header` - Organization-scoped via contract
+- `received_invoice_header` - Organization-scoped via contract
+- `asset` - Organization-scoped via project
+- `meter` - Organization-scoped via asset
+- `meter_reading` - Organization-scoped via meter
+- `audit_log` - Admins see org logs, users see own activity
+
+Policy Pattern (applied to all):
+- `{table}_org_policy` - SELECT: Uses `is_org_member()` helper
+- `{table}_admin_modify_policy` - ALL: Uses `is_org_admin()` helper
+- `{table}_service_policy` - ALL: Service role full access
+- All policies idempotent: `DROP POLICY IF EXISTS` before `CREATE POLICY`
+
+**Security Features:**
+- All audit log entries have organization isolation
+- PII access always logged with COMPLIANCE_RELEVANT=true
+- Admin-only approval for bulk exports (via Python service)
+- Service role policies enable backend operations
+- Audit log immutability enforced via trigger (no UPDATE/DELETE)
+- Input validation on all SECURITY DEFINER functions
+- Authorization check on `get_audit_summary()` (admin-only)
+- Service role bypass for `get_audit_summary()` (trusted backend)
+- Data classification ENUM ensures only valid values
+- Explicit REVOKE FROM PUBLIC on all SECURITY DEFINER functions
+
+**Operational Procedures:**
+- Immutability trigger bypass procedure documented in migration comments
+- For GDPR right-to-erasure or court orders: use ALTER TABLE DISABLE/ENABLE TRIGGER
+- All bypass operations must be logged manually and go through change management
+
+**Application Integration:**
+- `python-backend/middleware/rate_limiter.py` - FastAPI rate limiting
+- `python-backend/services/export_controls.py` - Dual approval for bulk exports
+- `lib/auth/helpers.ts` - MFA enforcement
+- `lib/supabase/middleware.ts` - Session timeout tracking
+
+**Configuration:**
+- `REQUIRE_MFA=true` - Enable MFA enforcement
+- `SESSION_IDLE_TIMEOUT=1800` - 30 minute idle timeout
+- `SESSION_ABSOLUTE_TIMEOUT=86400` - 24 hour absolute timeout
+- `RATE_LIMIT_DEFAULT=100/minute` - API rate limiting
+- `EXPORT_BULK_THRESHOLD=20` - Bulk export approval threshold
+
+---

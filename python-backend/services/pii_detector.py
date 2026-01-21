@@ -87,6 +87,9 @@ class PIIDetector:
 
         Adds recognizers for:
         - CONTRACT_ID: Pattern PPA-YYYY-NNNNNN (e.g., PPA-2024-001234)
+        - CAPACITY: Power capacity values (e.g., "5.5 MW", "500 kW", "1.2 GW")
+        - PRICE: Price and rate values (e.g., "$100/MWh", "€50 per kWh")
+        - PROJECT_NAME: Solar/Wind project names (e.g., "SunValley Solar Farm")
         """
         # CONTRACT_ID pattern: PPA-YYYY-NNNNNN
         contract_id_pattern = Pattern(
@@ -102,8 +105,116 @@ class PIIDetector:
 
         # Register the custom recognizer
         self.analyzer.registry.add_recognizer(contract_id_recognizer)
-
         logger.info("Registered custom CONTRACT_ID recognizer")
+
+        # CAPACITY patterns: Energy capacity values
+        # Matches: "5.5 MW", "500 kW", "1.2 GW", "100 MWh", "50 kWh", "10 MW AC"
+        capacity_patterns = [
+            Pattern(
+                name="capacity_mw",
+                regex=r'\b(\d{1,4}(?:\.\d{1,3})?)\s*(MW|GW|kW|mW)\s*(?:AC|DC)?\b',
+                score=0.85
+            ),
+            Pattern(
+                name="capacity_mwh",
+                regex=r'\b(\d{1,6}(?:\.\d{1,3})?)\s*(MWh|GWh|kWh)\b',
+                score=0.85
+            ),
+            # Pattern for capacity ranges: "100-500 MW"
+            Pattern(
+                name="capacity_range",
+                regex=r'\b(\d{1,4}(?:\.\d{1,3})?)\s*[-–to]\s*(\d{1,4}(?:\.\d{1,3})?)\s*(MW|GW|kW)\b',
+                score=0.8
+            ),
+        ]
+
+        capacity_recognizer = PatternRecognizer(
+            supported_entity="CAPACITY",
+            patterns=capacity_patterns
+        )
+
+        self.analyzer.registry.add_recognizer(capacity_recognizer)
+        logger.info("Registered custom CAPACITY recognizer")
+
+        # PRICE patterns: Energy pricing values
+        # Matches: "$100/MWh", "€50 per kWh", "$0.05/kWh", "USD 75.50/MWh"
+        price_patterns = [
+            # Standard currency with per unit: $100/MWh
+            Pattern(
+                name="price_per_unit",
+                regex=r'[\$€£]\s*\d{1,6}(?:\.\d{1,4})?\s*/\s*(?:MWh|kWh|MW|kW)',
+                score=0.9
+            ),
+            # Currency code format: USD 100/MWh
+            Pattern(
+                name="price_currency_code",
+                regex=r'\b(?:USD|EUR|GBP|AUD|CAD)\s*\d{1,6}(?:\.\d{1,4})?\s*/\s*(?:MWh|kWh|MW)',
+                score=0.9
+            ),
+            # Per unit spelled out: $100 per MWh
+            Pattern(
+                name="price_per_spelled",
+                regex=r'[\$€£]\s*\d{1,6}(?:\.\d{1,4})?\s+per\s+(?:MWh|kWh|MW|kW|unit)',
+                score=0.85
+            ),
+            # Price ranges: $50-$100/MWh
+            Pattern(
+                name="price_range",
+                regex=r'[\$€£]\s*\d{1,6}(?:\.\d{1,4})?\s*[-–to]\s*[\$€£]?\s*\d{1,6}(?:\.\d{1,4})?\s*/\s*(?:MWh|kWh)',
+                score=0.8
+            ),
+            # Simple currency amount with energy context
+            Pattern(
+                name="price_amount",
+                regex=r'(?:price|rate|tariff|cost)\s+(?:of\s+)?[\$€£]\s*\d{1,8}(?:\.\d{1,4})?',
+                score=0.75
+            ),
+        ]
+
+        price_recognizer = PatternRecognizer(
+            supported_entity="PRICE",
+            patterns=price_patterns
+        )
+
+        self.analyzer.registry.add_recognizer(price_recognizer)
+        logger.info("Registered custom PRICE recognizer")
+
+        # PROJECT_NAME patterns: Energy project names
+        # Matches: "SunValley Solar Farm", "WindPower Station", "Project Alpha"
+        project_name_patterns = [
+            # Solar/Wind facilities
+            Pattern(
+                name="project_facility",
+                regex=r'(?:the\s+)?([A-Z][A-Za-z0-9\s&\'-]{2,40})\s+(?:Solar|Wind|Hydro|Power|Energy)\s+(?:Farm|Plant|Station|Facility|Project|Park)',
+                score=0.8
+            ),
+            # Project followed by name
+            Pattern(
+                name="project_named",
+                regex=r'(?:Project|Facility|Site|Location|Asset)\s*[:\s]+\s*([A-Z][A-Za-z0-9\s&\'-]{2,40})',
+                score=0.75
+            ),
+            # PV/Solar specific
+            Pattern(
+                name="project_pv",
+                regex=r'([A-Z][A-Za-z0-9\s&\'-]{2,40})\s+(?:PV|Photovoltaic|Solar\s+Array)',
+                score=0.75
+            ),
+            # Battery/Storage facilities
+            Pattern(
+                name="project_storage",
+                regex=r'([A-Z][A-Za-z0-9\s&\'-]{2,40})\s+(?:Battery|Storage|BESS)\s+(?:Facility|System|Project)',
+                score=0.75
+            ),
+        ]
+
+        project_name_recognizer = PatternRecognizer(
+            supported_entity="PROJECT_NAME",
+            patterns=project_name_patterns
+        )
+
+        self.analyzer.registry.add_recognizer(project_name_recognizer)
+        logger.info("Registered custom PROJECT_NAME recognizer")
 
     def detect(self, text: str) -> List[PIIEntity]:
         """
@@ -133,8 +244,13 @@ class PIIDetector:
         try:
             logger.info(f"Detecting PII in text (length: {len(text)} characters)")
 
-            # Add CONTRACT_ID to supported entities
-            entities_to_detect = self.SUPPORTED_ENTITIES + ["CONTRACT_ID"]
+            # Add custom energy-specific entities to detection
+            entities_to_detect = self.SUPPORTED_ENTITIES + [
+                "CONTRACT_ID",
+                "CAPACITY",
+                "PRICE",
+                "PROJECT_NAME",
+            ]
 
             # Run Presidio analyzer
             results: List[RecognizerResult] = self.analyzer.analyze(
@@ -231,6 +347,7 @@ class PIIDetector:
 
             # Define anonymization operators
             operators = {
+                # Standard PII types
                 "EMAIL_ADDRESS": OperatorConfig(
                     "replace", {"new_value": "<EMAIL_REDACTED>"}
                 ),
@@ -242,8 +359,19 @@ class PIIDetector:
                 ),
                 "US_SSN": OperatorConfig("redact", {}),
                 "CREDIT_CARD": OperatorConfig("redact", {}),
+                # Contract-specific identifiers
                 "CONTRACT_ID": OperatorConfig(
                     "replace", {"new_value": "<CONTRACT_ID_REDACTED>"}
+                ),
+                # Energy-specific sensitive business data
+                "CAPACITY": OperatorConfig(
+                    "replace", {"new_value": "<CAPACITY_REDACTED>"}
+                ),
+                "PRICE": OperatorConfig(
+                    "replace", {"new_value": "<PRICE_REDACTED>"}
+                ),
+                "PROJECT_NAME": OperatorConfig(
+                    "replace", {"new_value": "<PROJECT_NAME_REDACTED>"}
                 ),
             }
 

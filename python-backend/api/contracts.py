@@ -6,12 +6,13 @@ Phase 1 implementation focuses on in-memory processing without database persiste
 """
 
 import logging
-from fastapi import APIRouter, UploadFile, File, HTTPException, status, Query
+from fastapi import APIRouter, UploadFile, File, HTTPException, status, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
+from middleware.rate_limiter import limiter, limit_upload, limit_export
 from services.contract_parser import (
     ContractParser,
     ContractParserError,
@@ -171,7 +172,9 @@ class ErrorResponse(BaseModel):
         },
     },
 )
+@limit_upload  # Rate limit: 10 requests/minute for expensive file upload operations
 async def parse_contract(
+    request: Request,  # Required for rate limiting
     file: UploadFile = File(
         ...,
         description="Contract file to parse (PDF or DOCX)",
