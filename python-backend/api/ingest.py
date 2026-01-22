@@ -74,13 +74,33 @@ PRESIGNED_URL_EXPIRY_DOWNLOAD = int(os.getenv("PRESIGNED_URL_EXPIRY_DOWNLOAD", "
 
 
 def get_s3_client():
-    """Get S3 client with configured credentials."""
-    return boto3.client(
-        "s3",
-        region_name=AWS_REGION,
-        aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
-        aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
-    )
+    """
+    Get S3 client with configured credentials.
+
+    On AWS ECS Fargate with a task role, uses IAM role credentials automatically.
+    For local development or environments without IAM roles, uses explicit credentials.
+    """
+    # Check if running on ECS (task role provides credentials via container metadata)
+    if os.getenv("AWS_CONTAINER_CREDENTIALS_RELATIVE_URI"):
+        # Running on ECS Fargate - use IAM task role (boto3 handles this automatically)
+        logger.info("Using IAM task role for S3 credentials")
+        return boto3.client("s3", region_name=AWS_REGION)
+
+    # Check if running with AWS credentials in environment (EC2, Lambda, etc.)
+    # boto3 will automatically use AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY if set
+    if os.getenv("AWS_ACCESS_KEY_ID") and os.getenv("AWS_SECRET_ACCESS_KEY"):
+        logger.info("Using explicit AWS credentials for S3")
+        return boto3.client(
+            "s3",
+            region_name=AWS_REGION,
+            aws_access_key_id=os.getenv("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.getenv("AWS_SECRET_ACCESS_KEY"),
+        )
+
+    # Fallback: let boto3 use its default credential chain
+    # (instance metadata, config files, etc.)
+    logger.info("Using boto3 default credential chain for S3")
+    return boto3.client("s3", region_name=AWS_REGION)
 
 
 # ============================================================================

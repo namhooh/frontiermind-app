@@ -1,0 +1,86 @@
+{
+  "family": "frontiermind-backend",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "2048",
+  "memory": "4096",
+  "executionRoleArn": "arn:aws:iam::724772070642:role/frontiermind-ecs-execution-role",
+  "taskRoleArn": "arn:aws:iam::724772070642:role/frontiermind-ecs-task-role",
+  "containerDefinitions": [
+    {
+      "name": "frontiermind-backend",
+      "image": "724772070642.dkr.ecr.us-east-1.amazonaws.com/frontiermind-backend:latest",
+      "essential": true,
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "hostPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "environment": [
+        {
+          "name": "ENVIRONMENT",
+          "value": "production"
+        },
+        {
+          "name": "LOG_LEVEL",
+          "value": "INFO"
+        },
+        {
+          "name": "AWS_REGION",
+          "value": "us-east-1"
+        },
+        {
+          "name": "METER_DATA_BUCKET",
+          "value": "frontiermind-meter-data"
+        },
+        {
+          "name": "PORT",
+          "value": "8080"
+        }
+      ],
+      "secrets": [
+        {
+          "name": "ANTHROPIC_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:724772070642:secret:frontiermind/backend/anthropic-api-key"
+        },
+        {
+          "name": "LLAMA_CLOUD_API_KEY",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:724772070642:secret:frontiermind/backend/llama-api-key"
+        },
+        {
+          "name": "DATABASE_URL",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:724772070642:secret:frontiermind/backend/database-url"
+        },
+        {
+          "name": "SUPABASE_DB_URL",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:724772070642:secret:frontiermind/supabase-url"
+        },
+        {
+          "name": "ENCRYPTION_KEY",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:724772070642:secret:frontiermind/backend/encryption-key"
+        }
+      ],
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/frontiermind-backend",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "healthCheck": {
+        "command": ["CMD-SHELL", "curl -f http://localhost:8080/health || exit 1"],
+        "interval": 30,
+        "timeout": 10,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ],
+  "runtimePlatform": {
+    "cpuArchitecture": "X86_64",
+    "operatingSystemFamily": "LINUX"
+  }
+}
