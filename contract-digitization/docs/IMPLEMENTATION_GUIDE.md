@@ -226,14 +226,16 @@
   - Results display with extracted clauses
   - Error handling with user-friendly messages
 
-❌ **Pending:**
-- ❌ **Deployment (Task 5.1-5.2):** Docker and Cloud Run deployment pending
+✅ **Deployment (January 2026):**
+- ✅ **AWS ECS Fargate Deployment (Task 5.1-5.2):** Backend deployed to AWS ECS Fargate
+  - Backend URL: `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com`
+  - Health Check: `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/health`
+  - See `CLAUDE.md` for full deployment documentation
 
 **Next Steps:**
 1. Test end-to-end flow: Upload contract → Parse → Evaluate rules → View defaults
-2. Deploy Python backend to Cloud Run (Tasks 5.1-5.2)
-3. Add authentication integration (pass Supabase token to APIClient)
-4. Build dashboard for viewing defaults and LD summaries
+2. Add authentication integration (pass Supabase token to APIClient)
+3. Build dashboard for viewing defaults and LD summaries
 
 ---
 
@@ -1547,8 +1549,8 @@ database/migrations/
 └─────────────────────────────────────────────────────────────────────────────┘
 
     ┌─────────────┐         ┌──────────────────┐         ┌─────────────────┐
-    │   Browser   │         │     Vercel       │         │  Google Cloud   │
-    │   (User)    │────────▶│   (Next.js)      │────────▶│    Run          │
+    │   Browser   │         │     Vercel       │         │   AWS ECS       │
+    │   (User)    │────────▶│   (Next.js)      │────────▶│   Fargate       │
     │             │         │                  │         │  (Python API)   │
     └─────────────┘         └──────────────────┘         └────────┬────────┘
                                                                   │
@@ -1560,8 +1562,8 @@ database/migrations/
 
     URLS:
     ├── Frontend:  https://frontiermind-app.vercel.app
-    ├── Backend:   https://frontiermind-backend-gp2lbvl7gq-uc.a.run.app
-    └── Database:  Supabase PostgreSQL (connection pooler port 6543)
+    ├── Backend:   http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com
+    └── Database:  Supabase PostgreSQL (Transaction Pooler port 6543)
 ```
 
 ### Why This Architecture?
@@ -1569,13 +1571,15 @@ database/migrations/
 | Component | Platform | Reason |
 |-----------|----------|--------|
 | **Frontend** | Vercel | Optimized for Next.js, auto-deploy from Git, global CDN |
-| **Backend** | Cloud Run | Python support, 300s timeout for contract parsing, 2GB memory for ML models |
+| **Backend** | AWS ECS Fargate | No timeout limit, scale-to-zero, consolidates AWS infrastructure (S3 already on AWS) |
 | **Database** | Supabase | Managed PostgreSQL, built-in Auth, Row-Level Security |
 
 **Why not all on Vercel?**
 - Vercel serverless functions have 60s max timeout (we need 90s+)
 - Limited to 1GB memory (we need 2GB+ for Presidio/spaCy)
 - Not optimized for Python ML workloads
+
+**For full AWS deployment documentation, see `CLAUDE.md` in the project root.**
 
 ---
 
@@ -1595,12 +1599,14 @@ git push origin main
 
 ```bash
 cd python-backend
-./deploy.sh
+source aws/infrastructure-config.env  # Load infrastructure variables
+./deploy-aws.sh
 
 # This will:
-# 1. Build Docker image with Cloud Build (~2-5 min)
-# 2. Deploy to Cloud Run
-# 3. Output the service URL
+# 1. Build Docker image
+# 2. Push to ECR
+# 3. Update ECS service
+# 4. Wait for deployment to stabilize
 ```
 
 **When to redeploy backend:**
@@ -1608,6 +1614,8 @@ cd python-backend
 - New API endpoints
 - Updated dependencies in `requirements.txt`
 - Bug fixes in parsing/rules logic
+
+**For full deployment documentation, see `CLAUDE.md` in the project root.**
 
 ---
 
@@ -1632,17 +1640,20 @@ Frontend automatically uses `localhost:8000` when `NEXT_PUBLIC_PYTHON_BACKEND_UR
 **Vercel (Frontend):**
 | Variable | Value |
 |----------|-------|
-| `NEXT_PUBLIC_PYTHON_BACKEND_URL` | `https://frontiermind-backend-gp2lbvl7gq-uc.a.run.app` |
+| `NEXT_PUBLIC_PYTHON_BACKEND_URL` | `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com` |
 | `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Your Supabase anon key |
 
-**Cloud Run (Backend) - via Google Secret Manager:**
+**AWS ECS (Backend) - via AWS Secrets Manager:**
 | Secret Name | Description |
 |-------------|-------------|
-| `anthropic-api-key` | Claude API key for clause extraction |
-| `llama-api-key` | LlamaParse API key for document OCR |
-| `database-url` | Supabase PostgreSQL connection string |
-| `encryption-key` | AES-256 key for PII encryption |
+| `frontiermind/backend/anthropic-api-key` | Claude API key for clause extraction |
+| `frontiermind/backend/llama-api-key` | LlamaParse API key for document OCR |
+| `frontiermind/backend/database-url` | Supabase PostgreSQL connection string (Transaction Pooler) |
+| `frontiermind/backend/encryption-key` | AES-256 key for PII encryption |
+| `frontiermind/supabase-url` | Supabase project URL |
+
+**For secret creation commands, see `CLAUDE.md` in the project root.**
 
 ---
 
@@ -1652,54 +1663,53 @@ Frontend automatically uses `localhost:8000` when `NEXT_PUBLIC_PYTHON_BACKEND_UR
 
 ```bash
 # Recent logs
-gcloud run services logs read frontiermind-backend --region=us-central1
+aws logs tail /ecs/frontiermind-backend --since 1h
 
 # Follow logs in real-time
-gcloud run services logs tail frontiermind-backend --region=us-central1
+aws logs tail /ecs/frontiermind-backend --follow
 
-# Filter by severity
-gcloud run services logs read frontiermind-backend --region=us-central1 --log-filter="severity>=ERROR"
+# Filter by pattern
+aws logs filter-log-events --log-group-name /ecs/frontiermind-backend --filter-pattern "ERROR"
 ```
 
 #### Health Checks
 
 ```bash
 # Backend health
-curl https://frontiermind-backend-gp2lbvl7gq-uc.a.run.app/health
+curl http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/health
 
 # API documentation
-open https://frontiermind-backend-gp2lbvl7gq-uc.a.run.app/docs
+open http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/docs
 ```
 
-#### Cloud Console Dashboards
+#### AWS Console Dashboards
 
-- **Cloud Run Metrics:** https://console.cloud.google.com/run
-  - Request count, latency, error rate
-  - Instance count, CPU/memory usage
+- **ECS Service:** https://console.aws.amazon.com/ecs/home?region=us-east-1#/clusters/frontiermind-cluster/services
+  - Task status, deployment history
+  - CPU/memory utilization
 
-- **Billing:** https://console.cloud.google.com/billing
-  - Cost breakdown by service
+- **CloudWatch Logs:** https://console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/log-group/$252Fecs$252Ffrontiermind-backend
+  - Log streams, search, insights
 
-- **Logs Explorer:** https://console.cloud.google.com/logs
-  - Advanced log filtering and analysis
+- **Load Balancer:** https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#LoadBalancers:
+  - Request count, latency, healthy targets
 
 ---
 
 ### Cost Overview
 
-#### Google Cloud Run (Python Backend)
+#### AWS ECS Fargate (Python Backend)
 
 | Resource | Pricing | Estimated Monthly |
 |----------|---------|-------------------|
-| CPU | $0.000024/vCPU-second | ~$5-10 |
-| Memory | $0.0000025/GiB-second | ~$2-5 |
-| Requests | $0.40/million | ~$1 |
-| **Total** | | **~$10-20/month** (low traffic) |
+| CPU (0.25 vCPU) | $0.04048/vCPU-hour | ~$5-15 |
+| Memory (0.5 GB) | $0.004445/GB-hour | ~$2-5 |
+| Load Balancer | $0.0225/hour + LCU | ~$16 |
+| **Total** | | **~$18-35/month** (low traffic) |
 
-**Free Tier Includes:**
-- 2 million requests/month
-- 360,000 vCPU-seconds/month
-- 180,000 GiB-seconds/month
+**Cost Saving Tips:**
+- Scale to 0 when not in use: `aws ecs update-service --cluster frontiermind-cluster --service frontiermind-backend --desired-count 0`
+- Cold start time is 30-60 seconds when scaling back up
 
 #### Vercel (Frontend)
 
@@ -1724,18 +1734,17 @@ open https://frontiermind-backend-gp2lbvl7gq-uc.a.run.app/docs
 
 ### Cold Starts
 
-Cloud Run scales to zero when idle to save costs. The first request after idle takes longer:
+ECS Fargate can scale to zero when idle to save costs. The first request after idle takes longer:
 
 | Scenario | Response Time |
 |----------|---------------|
 | Warm instance | 200-500ms |
-| Cold start | 5-15 seconds |
+| Cold start | 30-60 seconds |
 
 **To minimize cold starts:**
 ```bash
-# Keep one instance always running (~$20-30/month extra)
-# Edit deploy.sh and change:
---min-instances 0  →  --min-instances 1
+# Keep one instance always running (~$18/month extra)
+aws ecs update-service --cluster frontiermind-cluster --service frontiermind-backend --desired-count 1
 ```
 
 ---
@@ -1746,23 +1755,28 @@ Cloud Run scales to zero when idle to save costs. The first request after idle t
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
-| 503 Service Unavailable | Cold start or crash | Wait 10s, retry. Check logs for errors |
-| 500 Internal Server Error | Code bug or missing env var | Check `gcloud run services logs read` |
-| Timeout (504) | Processing > 300s | Optimize code or increase timeout |
-| Database connection failed | Wrong connection string | Verify `database-url` secret |
+| 503 Service Unavailable | Task not running or unhealthy | Check ECS service status and logs |
+| 500 Internal Server Error | Code bug or missing secret | Check `aws logs tail /ecs/frontiermind-backend` |
+| Task fails to start | Missing secrets or IAM permissions | Verify secrets exist and IAM policy is attached |
+| Database connection failed | Wrong connection string or port | Use Transaction Pooler (port 6543), not Direct Connection (port 5432) |
 
 #### Debug Commands
 
 ```bash
 # Check service status
-gcloud run services describe frontiermind-backend --region=us-central1
+aws ecs describe-services --cluster frontiermind-cluster --services frontiermind-backend
 
-# Check recent deployments
-gcloud run revisions list --service=frontiermind-backend --region=us-central1
+# Check task status
+aws ecs list-tasks --cluster frontiermind-cluster --service-name frontiermind-backend
 
-# Re-deploy with fresh image
-./deploy.sh
+# View recent logs
+aws logs tail /ecs/frontiermind-backend --since 1h
+
+# Re-deploy
+cd python-backend && ./deploy-aws.sh
 ```
+
+**For comprehensive troubleshooting, see `CLAUDE.md` in the project root.**
 
 ---
 
@@ -1771,7 +1785,7 @@ gcloud run revisions list --service=frontiermind-backend --region=us-central1
 #### 1. Access Setup
 - [ ] GitHub repository access
 - [ ] Vercel team invitation
-- [ ] Google Cloud project access (`frontiermind-app`)
+- [ ] AWS account access (us-east-1 region)
 - [ ] Supabase project access
 
 #### 2. Local Development Setup
@@ -1796,13 +1810,13 @@ cp .env.example .env
 
 #### 3. Install Tools
 ```bash
-# Google Cloud CLI
-brew install google-cloud-sdk
-gcloud auth login
-gcloud config set project frontiermind-app
+# AWS CLI v2
+brew install awscli
+aws configure  # Enter access key, secret key, region: us-east-1
 
 # Verify access
-gcloud run services list
+aws ecs list-clusters
+aws secretsmanager list-secrets --region us-east-1 --filter Key=name,Values=frontiermind
 ```
 
 #### 4. Key Files to Understand
@@ -1858,16 +1872,21 @@ cd python-backend && uvicorn main:app --reload --port 8000  # Start backend
 npm run dev                                                   # Start frontend
 
 # === DEPLOYMENT ===
-git push origin main                    # Deploy frontend (auto)
-cd python-backend && ./deploy.sh        # Deploy backend
+git push origin main                                          # Deploy frontend (auto)
+cd python-backend && source aws/infrastructure-config.env && ./deploy-aws.sh  # Deploy backend
 
 # === MONITORING ===
-gcloud run services logs read frontiermind-backend --region=us-central1
-curl https://frontiermind-backend-gp2lbvl7gq-uc.a.run.app/health
+aws logs tail /ecs/frontiermind-backend --follow
+curl http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/health
 
 # === SECRETS ===
-gcloud secrets list                                          # List secrets
-gcloud secrets versions access latest --secret=anthropic-api-key  # View secret
+aws secretsmanager list-secrets --region us-east-1 --filter Key=name,Values=frontiermind
+aws secretsmanager get-secret-value --region us-east-1 --secret-id frontiermind/backend/anthropic-api-key
+
+# === ECS MANAGEMENT ===
+aws ecs describe-services --cluster frontiermind-cluster --services frontiermind-backend
+aws ecs update-service --cluster frontiermind-cluster --service frontiermind-backend --desired-count 1  # Scale up
+aws ecs update-service --cluster frontiermind-cluster --service frontiermind-backend --desired-count 0  # Scale down
 ```
 
 ---
