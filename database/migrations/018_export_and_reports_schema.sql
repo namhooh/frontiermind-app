@@ -123,7 +123,7 @@ CREATE TABLE scheduled_report (
     name VARCHAR(255) NOT NULL,
 
     -- Schedule configuration
-    frequency report_frequency NOT NULL,
+    report_frequency report_frequency NOT NULL,
     day_of_month INTEGER,         -- 1-28 (for monthly/quarterly/annual)
     time_of_day TIME NOT NULL DEFAULT '06:00:00',
     timezone VARCHAR(50) NOT NULL DEFAULT 'UTC',
@@ -172,8 +172,8 @@ CREATE TABLE scheduled_report (
         ),
     CONSTRAINT chk_frequency_requires_day
         CHECK (
-            frequency = 'on_demand'
-            OR (frequency IN ('monthly', 'quarterly', 'annual') AND day_of_month IS NOT NULL)
+            report_frequency = 'on_demand'
+            OR (report_frequency IN ('monthly', 'quarterly', 'annual') AND day_of_month IS NOT NULL)
         )
 );
 
@@ -494,9 +494,9 @@ CREATE TRIGGER report_template_updated_at
 CREATE OR REPLACE FUNCTION update_scheduled_report_next_run()
 RETURNS TRIGGER AS $$
 BEGIN
-    IF NEW.is_active AND NEW.frequency != 'on_demand' THEN
+    IF NEW.is_active AND NEW.report_frequency != 'on_demand' THEN
         NEW.next_run_at := calculate_next_run_time(
-            NEW.frequency,
+            NEW.report_frequency,
             NEW.day_of_month,
             NEW.time_of_day,
             NEW.timezone,
