@@ -339,6 +339,159 @@ This document tracks major schema versions and their associated changes.
 
 ---
 
+### v5.1 - 2026-01-24 (Simplified Export & Reports - Invoice-Focused)
+
+**Description:** Simplified report generation schema focused on invoice workflows. Removed approval workflow, consolidated workflows into on-demand vs scheduled generation, integrated with billing_period table.
+
+**Reference:** `IMPLEMENTATION_GUIDE_REPORTS.md`
+
+**Migrations:**
+- `database/migrations/018_export_and_reports_schema.sql` - Simplified report generation tables
+
+**Key Changes from v5.0:**
+- **Removed:** `export_request` table (merged into simplified workflow)
+- **Removed:** Approval workflow (no `requires_approval`, `approved_by`, etc.)
+- **Removed:** `check_export_requires_approval()` function
+- **Simplified:** Status lifecycle from 7 states to 4 (pending, processing, completed, failed)
+- **Simplified:** Report types from 8 generic to 4 invoice-focused
+- **Added:** `billing_period_id` FK instead of date ranges
+- **Added:** `generation_source` enum for audit trail (on_demand vs scheduled)
+
+**New Enum Types:**
+- `invoice_report_type` - (invoice_to_client, invoice_expected, invoice_received, invoice_comparison)
+- `export_file_format` - (csv, xlsx, json, pdf)
+- `report_frequency` - (monthly, quarterly, annual, on_demand)
+- `report_status` - (pending, processing, completed, failed)
+- `generation_source` - (on_demand, scheduled)
+
+**Invoice Report Types (4 focused types):**
+| Type | Description | Source Tables |
+|------|-------------|---------------|
+| `invoice_to_client` | Generated invoice to issue to paying client | invoice_header, invoice_line_item |
+| `invoice_expected` | Expected invoice from contractor | expected_invoice_header |
+| `invoice_received` | Received invoice from contractor | received_invoice_header |
+| `invoice_comparison` | Variance analysis (expected vs received) | invoice_comparison, invoice_comparison_line_item |
+
+**Table: report_template (simplified)**
+- Reusable report configurations with organization/project scoping
+- `report_type` uses new `invoice_report_type` enum
+- Template-specific settings: `include_charts`, `include_summary`, `include_line_items`
+- Default scope: `default_contract_id`
+- Branding: logo, header, footer text
+- Unique constraint via partial indexes (PG14 compatible)
+
+**Table: scheduled_report (simplified)**
+- Automated report scheduling linked to report_template
+- Frequency: monthly, quarterly, annual (removed daily, weekly - aligned with billing periods)
+- **Billing period integration:** `billing_period_id` FK
+  - `NULL` = auto-select most recent completed billing period at run time
+  - Set = always use specific billing period (for historical reruns)
+- Email delivery with recipients JSONB array
+- S3 automated storage option
+- CHECK constraint: `chk_frequency_requires_day` - Ensures day_of_month is set for scheduled frequencies
+
+**Table: generated_report (simplified)**
+- Historical report archive
+- **Traceability:** `report_template_id`, `scheduled_report_id`, `generation_source`
+- **Billing period:** `billing_period_id` FK (replaces period_start/period_end)
+- File details: path, size, hash
+- Processing metrics: started_at, completed_at, time_ms, error
+- Summary data JSONB for quick dashboard display
+- Download tracking and archival
+
+**Helper Functions:**
+- `get_latest_completed_billing_period()` - Returns most recent billing period where end_date < CURRENT_DATE (STABLE)
+- `calculate_next_run_time()` - Computes next scheduled run for monthly/quarterly/annual (STABLE)
+  - Null parameter validation: raises exception if day_of_month NULL for scheduled frequencies
+  - Timezone-aware arithmetic
+- `get_report_statistics()` - Report metrics by organization (STABLE SECURITY DEFINER)
+
+**Pre-seeded Templates (4 invoice-focused):**
+- Invoice to Client Report
+- Expected Invoice Report
+- Received Invoice Report
+- Invoice Comparison Report
+
+**Triggers:**
+- `report_template_updated_at` - Auto-update timestamp on modification
+- `scheduled_report_next_run` - Auto-calculate next_run_at when schedule changes
+- `generated_report_timestamps` - Auto-update processing timestamps on status change
+
+**Performance Indexes:**
+- `idx_generated_report_billing_period` - Billing period lookup
+- `idx_generated_report_pending` - Partial index for processing queue
+- `idx_generated_report_created` - Organization + created_at DESC for listing
+- `idx_scheduled_report_active_next_run` - Composite for scheduler queries
+- `idx_report_template_config` - GIN index for JSONB template_config
+
+**Security:**
+- RLS enabled on all tables
+- Org members can view, admins can modify
+- Service role bypass for background processing
+- REVOKE FROM PUBLIC on all helper functions
+
+---
+
+### v5.2 - 2026-01-24 (Invoice Reconciliation Columns)
+
+**Description:** Added final reconciliation columns to `invoice_comparison` table to track the reconciled payment amount after variance review.
+
+**Migrations:**
+- `database/migrations/019_invoice_comparison_final_amount.sql` - Add final_amount and adjustment_amount columns
+
+**Changes:**
+
+**Enhanced invoice_comparison table:**
+- `final_amount` - NUMERIC(15,2) - Final reconciled amount to pay contractor (may differ from received amount after negotiation)
+- `adjustment_amount` - NUMERIC(15,2) DEFAULT 0 - Adjustment made during reconciliation (final_amount - received_amount)
+
+**New Index:**
+- `idx_invoice_comparison_final_amount` - Partial index on final_amount WHERE final_amount IS NOT NULL
+
+**Workflow:**
+1. Comparison created → `final_amount` = NULL (not yet reconciled)
+2. User reviews variance → Updates `status` (matched/underbilled/overbilled)
+3. User reconciles → Sets `final_amount` (and optionally `adjustment_amount`)
+4. Reports → Query `final_amount` for payment reports
+
+**Design Notes:**
+- Columns added to existing table (no new table required)
+- `final_amount` nullable to distinguish unreconciled comparisons
+- `adjustment_amount` defaults to 0 for backward compatibility
+- Partial index optimizes queries for reconciled invoices only
+
+---
+
+### v5.3 - 2026-01-25 (Enum Name Cleanup)
+
+**Description:** Simplify enum names where context is unambiguous to improve consistency between enum names and column names.
+
+**Migrations:**
+- `database/migrations/020_rename_report_enums.sql` - Rename enums to simpler names
+
+**Enum Renames:**
+
+| Old Name | New Name | Reason |
+|----------|----------|--------|
+| `invoice_report_type` | `report_type` | Clearly scoped to reports, no conflict |
+| `export_file_format` | `file_format` | No conflict in schema |
+| `report_delivery_method` | `delivery_method` | No conflict in schema |
+
+**Enums Kept Unchanged:**
+
+| Enum | Reason |
+|------|--------|
+| `report_frequency` | Differentiates from meter data frequency |
+| `report_status` | Differentiates from contract/invoice status |
+| `generation_source` | Already clean, no prefix |
+
+**Design Notes:**
+- PostgreSQL `ALTER TYPE ... RENAME TO` automatically updates all columns referencing the enum
+- No application code changes required (column names unchanged)
+- Comments added to new enum types for documentation
+
+---
+
 ### v4.1 - 2026-01-20 (Security Hardening)
 
 **Description:** Comprehensive security hardening based on Security & Privacy Assessment cross-reference analysis. Implements audit logging, enhanced RLS, and access controls.
