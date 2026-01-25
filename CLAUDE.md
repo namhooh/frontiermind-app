@@ -10,6 +10,15 @@ Contract Compliance & Invoicing Verification Engine for renewable energy project
 - **Database:** Supabase (PostgreSQL)
 - **Deployment:** Docker, AWS ECS Fargate
 
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| **FRONTEND_ARCHITECTURE_GUIDE.md** | Frontend structure, components, state, API clients, Vercel deployment, Figma MCP |
+| **DATABASE_GUIDE.md** | Database schema and migrations |
+| **IMPLEMENTATION_GUIDE_REPORTS.md** | Report generation system |
+| **.claude/skills/sync-figma.md** | Detailed Figma-to-code workflow |
+
 ## Commands
 
 ```bash
