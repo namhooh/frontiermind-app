@@ -5,12 +5,30 @@ import { Badge } from "@/app/components/ui/badge"
 import { Button } from "@/app/components/ui/button"
 import { AlertCircle, CheckCircle, Clock, ChevronDown, ChevronUp } from "lucide-react"
 import { useState } from "react"
+import { useRouter } from "next/navigation"
 
 interface OverviewSectionProps {
-  onSectionChange: (section: string) => void
+  onSectionChange?: (section: string) => void
 }
 
 export function OverviewSection({ onSectionChange }: OverviewSectionProps) {
+  const router = useRouter()
+
+  const handleNavigate = (section: string) => {
+    if (onSectionChange) {
+      onSectionChange(section)
+    } else {
+      // Map section IDs to URL paths
+      const routes: Record<string, string> = {
+        'ppa-summary': '/dashboard/ppa',
+        'contracts': '/dashboard/contracts',
+        'integrations': '/dashboard/integrations',
+        'calendar': '/dashboard/calendar',
+        'settings': '/dashboard/settings',
+      }
+      router.push(routes[section] || '/dashboard')
+    }
+  }
   const [expandedCard, setExpandedCard] = useState<number | null>(null)
 
   const ppaSettlementList = [
@@ -163,7 +181,7 @@ export function OverviewSection({ onSectionChange }: OverviewSectionProps) {
                   <Card
                     key={index}
                     className="border border-slate-200 cursor-pointer hover:bg-slate-50 transition-colors"
-                    onClick={() => onSectionChange('ppa-summary')}
+                    onClick={() => handleNavigate('ppa-summary')}
                   >
                     <CardContent className="p-4">
                       <div className="space-y-2">

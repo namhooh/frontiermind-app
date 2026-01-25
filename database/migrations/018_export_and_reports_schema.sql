@@ -159,17 +159,10 @@ CREATE TABLE scheduled_report (
     -- Constraints
     CONSTRAINT chk_day_of_month_range
         CHECK (day_of_month IS NULL OR (day_of_month BETWEEN 1 AND 28)),
-    -- Validate recipients is a JSONB array with valid email objects
+    -- Validate recipients is a JSONB array
+    -- Note: Element-level validation (email format, required fields) handled at application layer
     CONSTRAINT chk_recipients_valid
-        CHECK (
-            jsonb_typeof(recipients) = 'array'
-            AND NOT EXISTS (
-                SELECT 1 FROM jsonb_array_elements(recipients) elem
-                WHERE jsonb_typeof(elem) <> 'object'
-                   OR (elem->>'email') IS NULL
-                   OR (elem->>'email') = ''
-            )
-        ),
+        CHECK (jsonb_typeof(recipients) = 'array'),
     CONSTRAINT chk_frequency_requires_day
         CHECK (
             report_frequency = 'on_demand'
@@ -199,7 +192,7 @@ CREATE TABLE generated_report (
     -- Report details
     report_type report_type NOT NULL,
     name VARCHAR(255) NOT NULL,
-    status report_status NOT NULL DEFAULT 'pending',
+    report_status report_status NOT NULL DEFAULT 'pending',
 
     -- Scope
     project_id BIGINT REFERENCES project(id),
@@ -239,12 +232,12 @@ CREATE TABLE generated_report (
 -- Consolidated indexes (removed redundant org-only index)
 CREATE INDEX idx_generated_report_org_created ON generated_report(organization_id, created_at DESC);
 CREATE INDEX idx_generated_report_type ON generated_report(report_type);
-CREATE INDEX idx_generated_report_status ON generated_report(status);
+CREATE INDEX idx_generated_report_status ON generated_report(report_status);
 CREATE INDEX idx_generated_report_billing_period ON generated_report(billing_period_id);
 CREATE INDEX idx_generated_report_template ON generated_report(report_template_id);
 CREATE INDEX idx_generated_report_schedule ON generated_report(scheduled_report_id);
-CREATE INDEX idx_generated_report_pending ON generated_report(status, created_at)
-    WHERE status IN ('pending', 'processing');
+CREATE INDEX idx_generated_report_pending ON generated_report(report_status, created_at)
+    WHERE report_status IN ('pending', 'processing');
 CREATE INDEX idx_generated_report_expires ON generated_report(expires_at)
     WHERE expires_at IS NOT NULL AND archived_at IS NULL;
 
@@ -375,16 +368,46 @@ BEGIN
     RETURN QUERY
     SELECT
         COUNT(*)::BIGINT,
-        COUNT(*) FILTER (WHERE gr.status = 'completed')::BIGINT,
-        COUNT(*) FILTER (WHERE gr.status = 'failed')::BIGINT,
-        COUNT(*) FILTER (WHERE gr.status IN ('pending', 'processing'))::BIGINT,
-        COALESCE(SUM(gr.record_count) FILTER (WHERE gr.status = 'completed'), 0)::BIGINT,
-        COALESCE(AVG(gr.processing_time_ms) FILTER (WHERE gr.status = 'completed'), 0.0)::DOUBLE PRECISION
+        COUNT(*) FILTER (WHERE gr.report_status = 'completed')::BIGINT,
+        COUNT(*) FILTER (WHERE gr.report_status = 'failed')::BIGINT,
+        COUNT(*) FILTER (WHERE gr.report_status IN ('pending', 'processing'))::BIGINT,
+        COALESCE(SUM(gr.record_count) FILTER (WHERE gr.report_status = 'completed'), 0)::BIGINT,
+        COALESCE(AVG(gr.processing_time_ms) FILTER (WHERE gr.report_status = 'completed'), 0.0)::DOUBLE PRECISION
     FROM generated_report gr
     WHERE gr.organization_id = p_organization_id
       AND gr.created_at >= now() - (p_days || ' days')::INTERVAL;
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+-- Check if current user is a member of the project's organization
+-- Required for RLS policies on project-scoped resources
+-- IMPORTANT: Relies on is_org_member() which must be:
+--   - SECURITY DEFINER
+--   - STABLE
+--   - Use (SELECT auth.uid()) pattern internally
+--   - REVOKE EXECUTE FROM PUBLIC with grants to authenticated/service_role
+-- Verify these properties exist from migration 017_core_table_rls.sql
+CREATE OR REPLACE FUNCTION is_project_member(p_project_id BIGINT)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_org_id BIGINT;
+BEGIN
+    -- Use SELECT to help query planner
+    SELECT organization_id INTO v_org_id
+    FROM project
+    WHERE id = p_project_id;
+
+    IF v_org_id IS NULL THEN
+        RETURN false;
+    END IF;
+
+    RETURN is_org_member(v_org_id);
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+REVOKE EXECUTE ON FUNCTION is_project_member FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION is_project_member TO authenticated;
+GRANT EXECUTE ON FUNCTION is_project_member TO service_role;
 
 -- =============================================================================
 -- SECTION 6: ROW LEVEL SECURITY
@@ -527,16 +550,16 @@ DECLARE
     v_start_time TIMESTAMPTZ;
 BEGIN
     IF TG_OP = 'INSERT' THEN
-        -- Set processing_started_at if inserting with status 'processing'
-        IF NEW.status = 'processing' AND NEW.processing_started_at IS NULL THEN
+        -- Set processing_started_at if inserting with report_status 'processing'
+        IF NEW.report_status = 'processing' AND NEW.processing_started_at IS NULL THEN
             NEW.processing_started_at = now();
         END IF;
     ELSIF TG_OP = 'UPDATE' THEN
         -- Transition to processing
-        IF NEW.status = 'processing' AND COALESCE(OLD.status, 'pending') = 'pending' THEN
+        IF NEW.report_status = 'processing' AND COALESCE(OLD.report_status, 'pending') = 'pending' THEN
             NEW.processing_started_at = now();
         -- Transition to completed/failed
-        ELSIF NEW.status IN ('completed', 'failed') AND COALESCE(OLD.status, 'pending') = 'processing' THEN
+        ELSIF NEW.report_status IN ('completed', 'failed') AND COALESCE(OLD.report_status, 'pending') = 'processing' THEN
             NEW.processing_completed_at = now();
             -- Use COALESCE to handle case where NEW doesn't include start time
             v_start_time := COALESCE(NEW.processing_started_at, OLD.processing_started_at);
@@ -638,40 +661,6 @@ GRANT EXECUTE ON FUNCTION get_report_statistics TO service_role;
 GRANT EXECUTE ON FUNCTION update_report_template_timestamp TO service_role;
 GRANT EXECUTE ON FUNCTION update_scheduled_report_next_run TO service_role;
 GRANT EXECUTE ON FUNCTION update_generated_report_timestamps TO service_role;
-
--- =============================================================================
--- SECTION 10: HELPER FUNCTION FOR PROJECT MEMBER CHECK
--- =============================================================================
-
--- Add is_project_member function if it doesn't exist (required for RLS policies)
--- This checks if the current user is a member of the project's organization
--- IMPORTANT: Relies on is_org_member() which must be:
---   - SECURITY DEFINER
---   - STABLE
---   - Use (SELECT auth.uid()) pattern internally
---   - REVOKE EXECUTE FROM PUBLIC with grants to authenticated/service_role
--- Verify these properties exist from migration 017_core_table_rls.sql
-CREATE OR REPLACE FUNCTION is_project_member(p_project_id BIGINT)
-RETURNS BOOLEAN AS $$
-DECLARE
-    v_org_id BIGINT;
-BEGIN
-    -- Use SELECT to help query planner
-    SELECT organization_id INTO v_org_id
-    FROM project
-    WHERE id = p_project_id;
-
-    IF v_org_id IS NULL THEN
-        RETURN false;
-    END IF;
-
-    RETURN is_org_member(v_org_id);
-END;
-$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
-
-REVOKE EXECUTE ON FUNCTION is_project_member FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION is_project_member TO authenticated;
-GRANT EXECUTE ON FUNCTION is_project_member TO service_role;
 
 -- =============================================================================
 -- VERIFICATION

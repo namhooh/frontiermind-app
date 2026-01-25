@@ -3,7 +3,7 @@
 
 Quick links: [Directory Structure](#directory-structure) | [Workflows](#common-workflows) | [Scripts](#scripts-reference) | [Troubleshooting](#troubleshooting)
 
-Last updated: 2026-01-20
+Last updated: 2026-01-24
 
 ---
 
@@ -59,6 +59,8 @@ database/
 │   ├── 015_obligation_view.sql            # Phase 4: Obligation VIEW and helpers
 │   ├── 016_audit_log.sql                  # Phase 4.1: Comprehensive security audit logging
 │   ├── 017_core_table_rls.sql             # Phase 4.1: RLS policies for core tables
+│   ├── 018_export_and_reports_schema.sql  # Phase 5: Export and report generation
+│   ├── 019_invoice_comparison_final_amount.sql  # Phase 5.2: Invoice reconciliation columns
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -871,6 +873,7 @@ database/
 ├── migrations/001_migrate_role.sql         # First migration (auth)
 ├── migrations/016_audit_log.sql            # Security audit logging
 ├── migrations/017_core_table_rls.sql       # RLS for core tables
+├── migrations/018_export_and_reports_schema.sql  # Export and reports
 ├── diagrams/entity_diagram_v1.0.drawio     # Manual diagram v1.0
 ├── seed/reference/00_reference.sql         # Production lookup data
 ├── seed/fixtures/01_test_orgs.sql          # Test organizations
@@ -932,6 +935,22 @@ database/
 - Helper functions: `log_audit_event()`, `log_pii_access_event()`, `get_audit_summary()`
 - Security: Organization isolation, admin-only PII access, service role policies
 - Reference: `SECURITY_PRIVACY_ASSESSMENT.md` Appendix E
+
+**v5.1 (Simplified Export & Reports - Invoice-Focused)** - Pending
+- Migration: `018_export_and_reports_schema.sql`
+- New tables: `report_template`, `scheduled_report`, `generated_report`
+- New enums: `invoice_report_type`, `export_file_format`, `report_frequency`, `report_status`, `generation_source`
+- Pre-seeded: 4 invoice-focused report templates per organization
+- Helper functions: `get_latest_completed_billing_period()`, `calculate_next_run_time()`, `get_report_statistics()`
+- **Billing Period Integration:** Reports reference `billing_period_id` FK instead of date ranges
+- **Simplified workflow:** No approval process, on-demand vs scheduled generation only
+- **Implementation Guide:** `IMPLEMENTATION_GUIDE_REPORTS.md`
+
+**v5.2 (Invoice Reconciliation Columns)** - Completed
+- Migration: `019_invoice_comparison_final_amount.sql`
+- Enhanced: `invoice_comparison` table with `final_amount` and `adjustment_amount` columns
+- New index: `idx_invoice_comparison_final_amount` (partial index for reconciled invoices)
+- **Workflow:** Track final reconciled payment amount after variance review
 
 ---
 
@@ -1028,6 +1047,7 @@ git commit -m "snapshot(db): v2.0 Phase 2 Contract Parsing Complete"
 - [Contract Digitization Guide](contract-digitization/docs/IMPLEMENTATION_GUIDE.md) - Phase 2 plan
 - [Data Ingestion Architecture](data-ingestion/docs/IMPLEMENTATION_GUIDE_ARCHITECTURE.md) - Phase 3 lake-house design
 - [Ontology Framework Guide](contract-digitization/docs/ONTOLOGY_GUIDE.md) - Phase 4 clause relationships
+- [Export & Reports Guide](database/IMPLEMENTATION_GUIDE_REPORTS.md) - Phase 5 export/report workflows
 - [Security Assessment](SECURITY_PRIVACY_ASSESSMENT.md) - Security controls and implementation status
 - [Database Seed README](database/seed/README.md) - Data loading guide
 - [Migrations README](database/migrations/README.md) - Migration guidelines

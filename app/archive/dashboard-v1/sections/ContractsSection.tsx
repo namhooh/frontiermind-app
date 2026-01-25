@@ -5,12 +5,25 @@ import { Input } from "@/app/components/ui/input"
 import { Badge } from "@/app/components/ui/badge"
 import { FileText } from "lucide-react"
 import ContractUpload from "@/app/components/ContractUpload"
+import { useRouter } from "next/navigation"
 
 interface ContractsSectionProps {
-  onSectionChange: (section: string) => void
+  onSectionChange?: (section: string) => void
 }
 
 export function ContractsSection({ onSectionChange }: ContractsSectionProps) {
+  const router = useRouter()
+
+  const handleNavigate = (section: string) => {
+    if (onSectionChange) {
+      onSectionChange(section)
+    } else {
+      const routes: Record<string, string> = {
+        'ppa-summary': '/dashboard/ppa',
+      }
+      router.push(routes[section] || '/dashboard')
+    }
+  }
   const contracts = [
     { name: "PPA - Sunfield Solar Park", term: "20 years", expiry: "Dec 2043", status: "active" },
     { name: "PPA - Windridge Energy Farm", term: "15 years", expiry: "Jun 2038", status: "active" },
@@ -56,7 +69,7 @@ export function ContractsSection({ onSectionChange }: ContractsSectionProps) {
                   }`}
                   onClick={() => {
                     if (contract.name === "PPA - Sunfield Solar Park") {
-                      onSectionChange("ppa-summary")
+                      handleNavigate("ppa-summary")
                     }
                   }}
                 >

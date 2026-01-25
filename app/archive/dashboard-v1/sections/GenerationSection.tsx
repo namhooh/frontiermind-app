@@ -5,10 +5,10 @@ import { Badge } from "@/app/components/ui/badge"
 import { Zap, TrendingUp, TrendingDown, Sun, Wind } from "lucide-react"
 
 interface GenerationSectionProps {
-  onSectionChange: (section: string) => void
+  onSectionChange?: (section: string) => void
 }
 
-export function GenerationSection({ onSectionChange }: GenerationSectionProps) {
+export function GenerationSection({ }: GenerationSectionProps) {
   const generationData = [
     {
       project: "Sunfield Solar Park",

@@ -1,7 +1,5 @@
 'use client'
 
-import Link from 'next/link'
-import { usePathname } from 'next/navigation'
 import {
   LayoutDashboard,
   Link2,
@@ -9,29 +7,31 @@ import {
   Calendar,
   Settings,
   Sparkles,
-  LogOut,
-  FileBarChart
+  LogOut
 } from "lucide-react"
 import { Button } from "@/app/components/ui/button"
 import { createClient } from "@/lib/supabase/client"
 
-const menuItems = [
-  { href: "/dashboard", label: "Overview", icon: LayoutDashboard },
-  { href: "/dashboard/integrations", label: "Integration Status", icon: Link2 },
-  { href: "/dashboard/contracts", label: "Contracts Hub", icon: FileText },
-  { href: "/dashboard/calendar", label: "Calendar Sync", icon: Calendar },
-  { href: "/dashboard/ppa", label: "PPA Summary", icon: FileBarChart },
-  { href: "/dashboard/settings", label: "Settings", icon: Settings },
-]
+interface SidebarProps {
+  activeSection: string
+  onSectionChange: (section: string) => void
+}
 
-export function Sidebar() {
-  const pathname = usePathname()
+export function Sidebar({ activeSection, onSectionChange }: SidebarProps) {
   const supabase = createClient()
 
   const handleLogout = async () => {
     await supabase.auth.signOut()
     window.location.href = '/login'
   }
+
+  const menuItems = [
+    { id: "overview", label: "Overview", icon: LayoutDashboard },
+    { id: "integration-status", label: "Integration Status", icon: Link2 },
+    { id: "contracts", label: "Contracts Hub", icon: FileText },
+    { id: "calendar", label: "Calendar Sync", icon: Calendar },
+    { id: "settings", label: "Settings", icon: Settings },
+  ]
 
   return (
     <div className="w-64 bg-white border-r border-slate-200 flex flex-col">
@@ -62,12 +62,11 @@ export function Sidebar() {
         <div className="text-xs text-slate-500 px-3 py-2">MAIN MENU</div>
         {menuItems.map((item) => {
           const Icon = item.icon
-          const isActive = pathname === item.href ||
-            (item.href !== '/dashboard' && pathname.startsWith(item.href))
+          const isActive = activeSection === item.id
           return (
-            <Link
-              key={item.href}
-              href={item.href}
+            <button
+              key={item.id}
+              onClick={() => onSectionChange(item.id)}
               className={`w-full flex items-center gap-3 px-3 py-2 rounded-lg transition-colors ${
                 isActive
                   ? "bg-blue-50 text-blue-700"
@@ -76,7 +75,7 @@ export function Sidebar() {
             >
               <Icon className="w-5 h-5" />
               <span>{item.label}</span>
-            </Link>
+            </button>
           )
         })}
       </nav>

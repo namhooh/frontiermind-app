@@ -8,6 +8,18 @@
 
 **"The Database is a Temple. Nothing enters unless it is clean. S3 is the Loading Dock."**
 
+### Backend API Endpoint
+
+The Python backend for data processing is deployed to AWS ECS Fargate:
+
+| Endpoint | URL |
+|----------|-----|
+| **Backend API** | `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com` |
+| **Ingest API** | `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/api/ingest` |
+| **Health Check** | `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/health` |
+
+**For full deployment documentation, see `CLAUDE.md` in the project root.**
+
 - All data lands in S3 first as raw files (JSON/CSV/Parquet)
 - Validator Lambda checks, cleans, and loads to database
 - Invalid files quarantined for review
@@ -68,17 +80,28 @@
                 │  • Load OR quarantine   │
                 └────────────┬────────────┘
                              │
-                             ▼
-                ┌─────────────────────────┐
-                │    SUPABASE POSTGRES    │
-                │                         │
-                │  meter_reading          │ ← Partitioned monthly, 90-day retention
-                │  meter_aggregate        │ ← Keep forever (financial truth)
-                │  default_event          │ ← With evidence JSONB
-                │  integration_credential │ ← Encrypted API keys/tokens
-                │  integration_site       │ ← Site-to-project mapping
-                └─────────────────────────┘
+              ┌──────────────┴──────────────┐
+              │                             │
+              ▼                             ▼
+┌─────────────────────────┐   ┌─────────────────────────┐
+│    SUPABASE POSTGRES    │   │   AWS ECS FARGATE       │
+│                         │   │   (Python Backend)      │
+│  meter_reading          │   │                         │
+│  meter_aggregate        │   │  Rules engine           │
+│  default_event          │   │  Contract parsing       │
+│  integration_credential │   │  API endpoints          │
+│  integration_site       │   │                         │
+└─────────────────────────┘   └─────────────────────────┘
+                                        │
+                              Backend API URL:
+              http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com
 ```
+
+**AWS Infrastructure:**
+- **Region:** us-east-1
+- **ECS Cluster:** frontiermind-cluster
+- **ECS Service:** frontiermind-backend
+- **Load Balancer:** frontiermind-alb
 
 ---
 

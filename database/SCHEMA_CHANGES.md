@@ -394,6 +394,7 @@ This document tracks major schema versions and their associated changes.
 **Table: generated_report (simplified)**
 - Historical report archive
 - **Traceability:** `report_template_id`, `scheduled_report_id`, `generation_source`
+- **Status:** `report_status` column (uses `report_status` enum - aligned column/enum naming)
 - **Billing period:** `billing_period_id` FK (replaces period_start/period_end)
 - File details: path, size, hash
 - Processing metrics: started_at, completed_at, time_ms, error

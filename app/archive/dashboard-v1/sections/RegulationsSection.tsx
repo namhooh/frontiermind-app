@@ -5,10 +5,10 @@ import { Badge } from "@/app/components/ui/badge"
 import { Shield, AlertTriangle, CheckCircle } from "lucide-react"
 
 interface RegulationsSectionProps {
-  onSectionChange: (section: string) => void
+  onSectionChange?: (section: string) => void
 }
 
-export function RegulationsSection({ onSectionChange }: RegulationsSectionProps) {
+export function RegulationsSection({ }: RegulationsSectionProps) {
   const regulations = [
     {
       name: "Grid Connection Charges",

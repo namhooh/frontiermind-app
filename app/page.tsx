@@ -1,9 +1,5 @@
-import { DashboardShell } from './dashboard/components/DashboardShell'
+import { redirect } from 'next/navigation'
 
 export default function Home() {
-  return (
-    <div className="fixed inset-0 flex bg-background z-50">
-      <DashboardShell />
-    </div>
-  )
+  redirect('/dashboard')
 }

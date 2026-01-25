@@ -3,13 +3,26 @@
 import { Card, CardContent, CardHeader, CardTitle } from "@/app/components/ui/card"
 import { Button } from "@/app/components/ui/button"
 import { ArrowLeft, Download, FileText } from "lucide-react"
+import { useRouter } from "next/navigation"
 
 interface PPASummarySectionProps {
-  onSectionChange: (section: string) => void
+  onSectionChange?: (section: string) => void
   projectName?: string
 }
 
 export function PPASummarySection({ onSectionChange, projectName = "Sunfield Solar Park" }: PPASummarySectionProps) {
+  const router = useRouter()
+
+  const handleNavigate = (section: string) => {
+    if (onSectionChange) {
+      onSectionChange(section)
+    } else {
+      const routes: Record<string, string> = {
+        'contracts': '/dashboard/contracts',
+      }
+      router.push(routes[section] || '/dashboard')
+    }
+  }
   return (
     <div className="p-8 space-y-6">
       {/* Header with Back Button */}
@@ -17,7 +30,7 @@ export function PPASummarySection({ onSectionChange, projectName = "Sunfield Sol
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => onSectionChange("contracts")}
+          onClick={() => handleNavigate("contracts")}
           className="gap-2"
         >
           <ArrowLeft className="w-4 h-4" />

@@ -16,12 +16,29 @@ import {
 import snowflakeLogo from '@/app/assets/integrations/snowflake.png'
 import sapLogo from '@/app/assets/integrations/sap.png'
 import sageLogo from '@/app/assets/integrations/sage.png'
+import { useRouter } from "next/navigation"
 
 interface IntegrationStatusSectionProps {
-  onSectionChange: (section: string) => void
+  onSectionChange?: (section: string) => void
 }
 
 export function IntegrationStatusSection({ onSectionChange }: IntegrationStatusSectionProps) {
+  const router = useRouter()
+
+  const handleNavigate = (section: string) => {
+    if (onSectionChange) {
+      onSectionChange(section)
+    } else {
+      const routes: Record<string, string> = {
+        'generation': '/dashboard/integrations',
+        'pricing': '/dashboard/integrations',
+        'regulations': '/dashboard/integrations',
+        'contracts': '/dashboard/contracts',
+        'calendar': '/dashboard/calendar',
+      }
+      router.push(routes[section] || '/dashboard')
+    }
+  }
   const dataInputs = [
     {
       name: "Generation Meter Data",
@@ -83,7 +100,7 @@ export function IntegrationStatusSection({ onSectionChange }: IntegrationStatusS
                 return (
                   <button
                     key={index}
-                    onClick={() => onSectionChange(input.sectionId)}
+                    onClick={() => handleNavigate(input.sectionId)}
                     className="w-full flex items-center gap-3 p-3 rounded-lg border border-slate-200 bg-white hover:border-blue-300 hover:bg-blue-50 transition-all cursor-pointer"
                   >
                     <div className={`p-2 rounded-lg ${input.color}`}>
@@ -135,7 +152,7 @@ export function IntegrationStatusSection({ onSectionChange }: IntegrationStatusS
                 return (
                   <div
                     key={index}
-                    onClick={() => output.name === "Calendar" && onSectionChange('calendar')}
+                    onClick={() => output.name === "Calendar" && handleNavigate('calendar')}
                     className={`flex items-center gap-3 p-3 rounded-lg border border-amber-200 bg-amber-50 ${
                       output.name === "Calendar" ? "hover:border-amber-300 hover:bg-amber-100 cursor-pointer transition-all" : ""
                     }`}

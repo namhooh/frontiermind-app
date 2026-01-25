@@ -1,6 +1,5 @@
-import { redirect } from 'next/navigation'
+import { OverviewSection } from '@/app/archive/dashboard-v1/sections/OverviewSection'
 
 export default function DashboardPage() {
-  // Dashboard is now at the root URL
-  redirect('/')
+  return <OverviewSection />
 }

@@ -5,10 +5,10 @@ import { Badge } from "@/app/components/ui/badge"
 import { TrendingUp, TrendingDown, DollarSign, Clock } from "lucide-react"
 
 interface PricingSectionProps {
-  onSectionChange: (section: string) => void
+  onSectionChange?: (section: string) => void
 }
 
-export function PricingSection({ onSectionChange }: PricingSectionProps) {
+export function PricingSection({ }: PricingSectionProps) {
   const marketPrices = [
     { region: "ERCOT (Texas)", price: "$42.50", change: "+$2.30", trend: "up", time: "2 mins ago" },
     { region: "PJM (Mid-Atlantic)", price: "$38.75", change: "-$1.15", trend: "down", time: "3 mins ago" },

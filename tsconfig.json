@@ -30,5 +30,5 @@
     ".next/dev/types/**/*.ts",
     "**/*.mts"
   ],
-  "exclude": ["node_modules", "figma_dashboard_design", "figma_dashboard_design", "data-ingestion/oauth"]
+  "exclude": ["node_modules", "app/archive", "data-ingestion/oauth"]
 }

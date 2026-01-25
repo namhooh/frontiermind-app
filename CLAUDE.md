@@ -8,7 +8,7 @@ Contract Compliance & Invoicing Verification Engine for renewable energy project
 - **UI Components:** Radix UI, Lucide React icons, Recharts
 - **Backend:** Python (FastAPI) in `/python-backend`
 - **Database:** Supabase (PostgreSQL)
-- **Deployment:** Docker, Google Cloud Run
+- **Deployment:** Docker, AWS ECS Fargate
 
 ## Commands
 
@@ -117,6 +117,145 @@ Uses the Figma desktop app's local MCP server.
 
 - See `DATABASE_GUIDE.md` for schema documentation
 - Migrations in `database/migrations/`
+
+## Backend Deployment
+
+The Python backend is deployed to AWS ECS Fargate.
+
+### Live Endpoints
+
+| Endpoint | URL |
+|----------|-----|
+| **Backend API** | `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com` |
+| **Health Check** | `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/health` |
+| **API Docs** | `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/docs` |
+
+### AWS Infrastructure
+
+| Resource | Value |
+|----------|-------|
+| **Region** | us-east-1 |
+| **ECS Cluster** | frontiermind-cluster |
+| **ECS Service** | frontiermind-backend |
+| **Load Balancer** | frontiermind-alb |
+| **ECR Repository** | frontiermind-backend |
+| **Log Group** | /ecs/frontiermind-backend |
+
+### AWS ECS Fargate
+
+**Why ECS Fargate:**
+- No request timeout limit (Cloud Run limited to 300s)
+- True scale-to-zero capability
+- Better networking control (VPC, security groups)
+- Consolidates infrastructure on AWS (S3 is already AWS)
+
+**Prerequisites:**
+- AWS CLI v2: `brew install awscli`
+- Docker installed and running
+- AWS credentials configured: `aws configure`
+
+**One-time Infrastructure Setup:**
+```bash
+cd python-backend
+./aws/infrastructure-setup.sh
+```
+
+This creates:
+- ECR repository
+- VPC with public subnets
+- Application Load Balancer
+- ECS cluster
+- IAM roles for task execution and S3 access
+- CloudWatch log group
+
+**Create Secrets in AWS Secrets Manager:**
+```bash
+aws secretsmanager create-secret --region us-east-1 --name frontiermind/backend/anthropic-api-key --secret-string "YOUR_KEY"
+aws secretsmanager create-secret --region us-east-1 --name frontiermind/backend/llama-api-key --secret-string "YOUR_KEY"
+aws secretsmanager create-secret --region us-east-1 --name frontiermind/backend/database-url --secret-string "YOUR_URL"
+aws secretsmanager create-secret --region us-east-1 --name frontiermind/backend/encryption-key --secret-string "YOUR_KEY"
+aws secretsmanager create-secret --region us-east-1 --name frontiermind/supabase-url --secret-string "YOUR_URL"
+```
+
+**IAM Policy for Secrets Manager Access:**
+
+The ECS task execution role needs permission to read secrets. Add this policy:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "secretsmanager:GetSecretValue"
+      ],
+      "Resource": [
+        "arn:aws:secretsmanager:us-east-1:*:secret:frontiermind/*"
+      ]
+    }
+  ]
+}
+```
+
+**Database Connection (Supabase):**
+
+Use the **Transaction Pooler** connection (port 6543), NOT the Direct Connection (port 5432):
+
+```
+postgresql://postgres.[project-ref]:[password]@aws-0-us-east-1.pooler.supabase.com:6543/postgres
+```
+
+- Transaction Pooler handles connection pooling automatically
+- Direct Connection can exhaust connection limits under load
+- Store the Transaction Pooler URL in `frontiermind/backend/database-url` secret
+
+**Deploy:**
+```bash
+cd python-backend
+source aws/infrastructure-config.env  # Load infrastructure variables
+./deploy-aws.sh
+```
+
+**Cost Management:**
+```bash
+# Scale down to save costs (~$18/month idle)
+aws ecs update-service --cluster frontiermind-cluster --service frontiermind-backend --desired-count 0
+
+# Scale up (30-60 second cold start)
+aws ecs update-service --cluster frontiermind-cluster --service frontiermind-backend --desired-count 1
+```
+
+**View Logs:**
+```bash
+aws logs tail /ecs/frontiermind-backend --follow
+```
+
+### Troubleshooting
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Task fails to start | Missing secrets or IAM permissions | Check `aws logs tail /ecs/frontiermind-backend` for errors; verify secrets exist and IAM policy is attached |
+| Database connection refused | Wrong connection string or port | Use Transaction Pooler (port 6543), not Direct Connection (port 5432) |
+| 503 Service Unavailable | Task not running or unhealthy | Check `aws ecs describe-services --cluster frontiermind-cluster --services frontiermind-backend` |
+| Secrets not found | Wrong region or name | Ensure secrets are in us-east-1 and use exact names (e.g., `frontiermind/backend/database-url`) |
+| Image pull fails | ECR authentication expired | Run `aws ecr get-login-password --region us-east-1 \| docker login --username AWS --password-stdin <account>.dkr.ecr.us-east-1.amazonaws.com` |
+
+**Debug Commands:**
+```bash
+# Check service status
+aws ecs describe-services --cluster frontiermind-cluster --services frontiermind-backend
+
+# Check task status
+aws ecs list-tasks --cluster frontiermind-cluster --service-name frontiermind-backend
+aws ecs describe-tasks --cluster frontiermind-cluster --tasks <task-arn>
+
+# View recent logs
+aws logs tail /ecs/frontiermind-backend --since 1h
+
+# Check secrets exist
+aws secretsmanager list-secrets --region us-east-1 --filter Key=name,Values=frontiermind
+```
 
 ## Implementation Plan
 
