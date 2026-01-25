@@ -358,11 +358,12 @@ This document tracks major schema versions and their associated changes.
 - **Added:** `generation_source` enum for audit trail (on_demand vs scheduled)
 
 **New Enum Types:**
-- `invoice_report_type` - (invoice_to_client, invoice_expected, invoice_received, invoice_comparison)
-- `export_file_format` - (csv, xlsx, json, pdf)
+- `report_type` - (invoice_to_client, invoice_expected, invoice_received, invoice_comparison)
+- `file_format` - (csv, xlsx, json, pdf)
 - `report_frequency` - (monthly, quarterly, annual, on_demand)
 - `report_status` - (pending, processing, completed, failed)
 - `generation_source` - (on_demand, scheduled)
+- `delivery_method` - (email, s3, both)
 
 **Invoice Report Types (4 focused types):**
 | Type | Description | Source Tables |
@@ -374,7 +375,7 @@ This document tracks major schema versions and their associated changes.
 
 **Table: report_template (simplified)**
 - Reusable report configurations with organization/project scoping
-- `report_type` uses new `invoice_report_type` enum
+- `report_type` uses new `report_type` enum
 - Template-specific settings: `include_charts`, `include_summary`, `include_line_items`
 - Default scope: `default_contract_id`
 - Branding: logo, header, footer text

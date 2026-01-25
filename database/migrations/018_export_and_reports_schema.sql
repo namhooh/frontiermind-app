@@ -1,163 +1,91 @@
 -- Migration: 018_export_and_reports_schema.sql
--- Description: Adds data export tracking and report generation schema
--- Version: v5.0
--- Date: 2026-01-22
+-- Description: Adds simplified report generation schema (invoice-focused)
+-- Version: v5.1
+-- Date: 2026-01-24
 -- Depends on: 017_core_table_rls.sql
--- Updated: 2026-01-23 - Fixed PG14 compatibility, added performance indexes
--- Updated: 2026-01-23 - Added null validation, timezone fixes, recipients CHECK, REVOKE FROM PUBLIC
+-- Updated: 2026-01-24 - Code review: RLS policies with TO role, iterative scheduler, index consolidation, COALESCE fix
+-- Updated: 2026-01-25 - Simplified enum names (report_type, file_format, delivery_method) for consistency
 
 -- =============================================================================
 -- SECTION 1: ENUMS
 -- =============================================================================
 
--- Export request status
-CREATE TYPE export_request_status AS ENUM (
-    'pending',         -- Request submitted, awaiting approval (for bulk)
-    'approved',        -- Approved, ready to process
-    'processing',      -- Export in progress
-    'completed',       -- Export completed, ready for download
-    'failed',          -- Export failed
-    'expired',         -- Download link expired
-    'cancelled'        -- Cancelled by user or admin
+-- Report types (invoice-focused)
+CREATE TYPE report_type AS ENUM (
+    'invoice_to_client',      -- Generated invoice to issue to paying client (invoice_header, invoice_line_item)
+    'invoice_expected',       -- Expected invoice from contractor (expected_invoice_header)
+    'invoice_received',       -- Received invoice from contractor (received_invoice_header)
+    'invoice_comparison'      -- Variance analysis (invoice_comparison, invoice_comparison_line_item)
 );
 
--- Export data types
-CREATE TYPE export_data_type AS ENUM (
-    'contract',
-    'clause',
-    'invoice_generated',
-    'invoice_received',
-    'expense',
-    'meter_data',
-    'financial_report',
-    'compliance_report',
-    'settlement_report',
-    'custom'
-);
-
--- Export file formats
-CREATE TYPE export_file_format AS ENUM (
+-- File formats for export
+CREATE TYPE file_format AS ENUM (
     'csv',
     'xlsx',
     'json',
     'pdf'
 );
 
--- Report frequency
+-- Report frequency (aligned with billing periods)
 CREATE TYPE report_frequency AS ENUM (
-    'daily',
-    'weekly',
     'monthly',
     'quarterly',
     'annual',
     'on_demand'
 );
 
--- Report types
-CREATE TYPE report_type AS ENUM (
-    'settlement',          -- Monthly settlement calculation
-    'compliance',          -- Compliance status report
-    'financial_summary',   -- Revenue/expense summary
-    'invoice_aging',       -- Invoice aging report
-    'expense_by_category', -- Expense breakdown
-    'generation_summary',  -- Generation data summary
-    'ld_summary',          -- Liquidated damages summary
-    'custom'               -- Custom report template
+-- Simplified report status lifecycle (no approval workflow)
+CREATE TYPE report_status AS ENUM (
+    'pending',      -- Queued for processing
+    'processing',   -- Currently generating
+    'completed',    -- Successfully generated
+    'failed'        -- Generation failed
+);
+
+-- Generation source for audit trail
+CREATE TYPE generation_source AS ENUM (
+    'on_demand',    -- User-initiated via UI/API
+    'scheduled'     -- Scheduler-initiated
+);
+
+-- Delivery method for scheduled reports
+CREATE TYPE delivery_method AS ENUM (
+    'email',
+    's3',
+    'both'
 );
 
 -- =============================================================================
--- SECTION 2: EXPORT REQUEST TABLE
--- =============================================================================
-
-CREATE TABLE export_request (
-    id BIGSERIAL PRIMARY KEY,
-    organization_id BIGINT NOT NULL REFERENCES public.organization(id) ON DELETE CASCADE,
-    requested_by UUID NOT NULL REFERENCES auth.users(id),
-    data_type export_data_type NOT NULL,
-    file_format export_file_format NOT NULL,
-    status export_request_status NOT NULL DEFAULT 'pending',
-
-    -- Filters and scope
-    project_id BIGINT REFERENCES public.project(id),
-    contract_id BIGINT REFERENCES public.contract(id),
-    date_from DATE,
-    date_to DATE,
-    filters JSONB,  -- Additional filters as key-value pairs
-
-    -- Record counts and approval
-    estimated_record_count INTEGER,
-    actual_record_count INTEGER,
-    requires_approval BOOLEAN NOT NULL DEFAULT false,
-    approved_by UUID REFERENCES auth.users(id),
-    approved_at TIMESTAMPTZ,
-    rejection_reason TEXT,
-
-    -- File details
-    file_path TEXT,  -- S3 path (no length limit)
-    file_size_bytes BIGINT,
-    file_hash VARCHAR(64),   -- SHA-256 for integrity
-    watermarked BOOLEAN DEFAULT false,
-    download_count INTEGER DEFAULT 0,
-    max_downloads INTEGER DEFAULT 5,
-    expires_at TIMESTAMPTZ,
-
-    -- Processing details
-    processing_started_at TIMESTAMPTZ,
-    processing_completed_at TIMESTAMPTZ,
-    processing_error TEXT,
-    processing_time_ms INTEGER,
-
-    -- Audit
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
--- Indexes
-CREATE INDEX idx_export_request_org ON export_request(organization_id);
-CREATE INDEX idx_export_request_status ON export_request(status);
-CREATE INDEX idx_export_request_user ON export_request(requested_by);
-CREATE INDEX idx_export_request_data_type ON export_request(data_type);
-CREATE INDEX idx_export_request_pending_approval ON export_request(organization_id, status)
-    WHERE status = 'pending' AND requires_approval = true;
-
--- Performance: Composite index for common queries
-CREATE INDEX idx_export_request_composite
-    ON export_request (requested_by, status, organization_id, created_at DESC);
-
--- Performance: GIN index for JSONB filters
-CREATE INDEX idx_export_request_filters ON export_request USING GIN (filters);
-
--- =============================================================================
--- SECTION 3: REPORT TEMPLATE TABLE
+-- SECTION 2: REPORT TEMPLATE TABLE
 -- =============================================================================
 
 CREATE TABLE report_template (
     id BIGSERIAL PRIMARY KEY,
-    organization_id BIGINT NOT NULL REFERENCES public.organization(id) ON DELETE CASCADE,
+    organization_id BIGINT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
 
     -- Template ownership/visibility scope
     -- NULL = org-wide template (visible to all org members)
     -- Set = project-specific template (visible only to project members)
-    project_id BIGINT REFERENCES public.project(id) ON DELETE CASCADE,
+    -- NOTE: ON DELETE CASCADE removes templates when project is deleted. If audit retention
+    -- is required, consider ON DELETE SET NULL instead.
+    project_id BIGINT REFERENCES project(id) ON DELETE CASCADE,
 
     name VARCHAR(255) NOT NULL,
     description TEXT,
     report_type report_type NOT NULL,
-    file_format export_file_format NOT NULL DEFAULT 'pdf',
+    file_format file_format NOT NULL DEFAULT 'pdf',
 
     -- Template configuration
-    template_config JSONB NOT NULL DEFAULT '{}',  -- Report-specific settings
+    template_config JSONB NOT NULL DEFAULT '{}',
     include_charts BOOLEAN DEFAULT true,
-    include_tables BOOLEAN DEFAULT true,
     include_summary BOOLEAN DEFAULT true,
+    include_line_items BOOLEAN DEFAULT true,
 
-    -- Default filters: Pre-fill values when generating reports (user can override)
-    -- NULL = no default, user must select
-    default_contract_id BIGINT REFERENCES public.contract(id),  -- Pre-select this contract
-    default_date_range_days INTEGER DEFAULT 30,          -- Pre-select this date range (days)
+    -- Default scope (user can override at generation time)
+    default_contract_id BIGINT REFERENCES contract(id),
 
     -- Branding
-    logo_path TEXT,  -- S3 path (no length limit)
+    logo_path TEXT,
     header_text TEXT,
     footer_text TEXT,
 
@@ -166,64 +94,61 @@ CREATE TABLE report_template (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by UUID REFERENCES auth.users(id),
     updated_by UUID REFERENCES auth.users(id)
-
-    -- NOTE: Unique constraint handled via partial indexes below (PG14 compatible)
 );
 
--- Unique template name per scope using partial indexes (PG14 compatible)
--- Replaces: CONSTRAINT report_template_scope_name_unique UNIQUE NULLS NOT DISTINCT (organization_id, project_id, name)
--- which requires PG15+
-
--- Org-wide templates (project_id IS NULL): unique (organization_id, name)
+-- Unique template name per scope (PG14 compatible partial indexes)
 CREATE UNIQUE INDEX ux_report_template_org_name
     ON report_template (organization_id, name)
     WHERE project_id IS NULL;
 
--- Project-specific templates (project_id IS NOT NULL): unique (organization_id, project_id, name)
 CREATE UNIQUE INDEX ux_report_template_project_name
     ON report_template (organization_id, project_id, name)
     WHERE project_id IS NOT NULL;
 
-CREATE INDEX idx_report_template_org ON report_template(organization_id, is_active);
+-- Primary lookup indexes
+CREATE INDEX idx_report_template_org_active ON report_template(organization_id, is_active);
 CREATE INDEX idx_report_template_type ON report_template(report_type);
-CREATE INDEX idx_report_template_project ON report_template(project_id) WHERE project_id IS NOT NULL;
-
--- Performance: GIN index for JSONB template_config
+CREATE INDEX idx_report_template_project ON report_template(project_id)
+    WHERE project_id IS NOT NULL;
 CREATE INDEX idx_report_template_config ON report_template USING GIN (template_config);
 
 -- =============================================================================
--- SECTION 4: SCHEDULED REPORT TABLE
+-- SECTION 3: SCHEDULED REPORT TABLE
 -- =============================================================================
 
 CREATE TABLE scheduled_report (
     id BIGSERIAL PRIMARY KEY,
-    organization_id BIGINT NOT NULL REFERENCES public.organization(id) ON DELETE CASCADE,
-    report_template_id BIGINT NOT NULL REFERENCES public.report_template(id) ON DELETE CASCADE,
+    organization_id BIGINT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
+    report_template_id BIGINT NOT NULL REFERENCES report_template(id) ON DELETE CASCADE,
     name VARCHAR(255) NOT NULL,
 
     -- Schedule configuration
     frequency report_frequency NOT NULL,
-    day_of_week INTEGER,  -- 0=Sunday, 6=Saturday (for weekly)
-    day_of_month INTEGER, -- 1-28 (for monthly/quarterly/annual)
+    day_of_month INTEGER,         -- 1-28 (for monthly/quarterly/annual)
     time_of_day TIME NOT NULL DEFAULT '06:00:00',
     timezone VARCHAR(50) NOT NULL DEFAULT 'UTC',
 
-    -- Filters override (if different from template)
-    project_id BIGINT REFERENCES public.project(id),
-    contract_id BIGINT REFERENCES public.contract(id),
-    date_range_days INTEGER,
+    -- Scope overrides (if different from template defaults)
+    project_id BIGINT REFERENCES project(id),
+    contract_id BIGINT REFERENCES contract(id),
 
-    -- Delivery
+    -- Billing period selection
+    -- NULL = auto-select most recent completed billing period at run time
+    -- Set = always use this specific billing period (for historical reruns)
+    billing_period_id BIGINT REFERENCES billing_period(id),
+
+    -- Delivery configuration
     -- recipients: Array of objects with email addresses
     -- Expected format: [{"email": "user@example.com", "name": "User Name"}, ...]
+    -- Note: Contains PII - ensure proper access controls
     recipients JSONB NOT NULL DEFAULT '[]',
-    delivery_method VARCHAR(20) NOT NULL DEFAULT 'email',  -- 'email', 's3', 'both'
-    s3_destination TEXT,  -- S3 prefix for automated storage (no length limit)
+    delivery_method delivery_method NOT NULL DEFAULT 'email',
+    s3_destination TEXT,
 
-    -- Status
+    -- Status tracking
     is_active BOOLEAN NOT NULL DEFAULT true,
     last_run_at TIMESTAMPTZ,
-    last_run_status VARCHAR(50),
+    last_run_status report_status,
     last_run_error TEXT,
     next_run_at TIMESTAMPTZ,
 
@@ -231,300 +156,347 @@ CREATE TABLE scheduled_report (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     created_by UUID REFERENCES auth.users(id),
 
-    -- CHECK constraints for schedule fields
-    CONSTRAINT chk_day_of_week_range
-        CHECK (day_of_week IS NULL OR (day_of_week BETWEEN 0 AND 6)),
+    -- Constraints
     CONSTRAINT chk_day_of_month_range
         CHECK (day_of_month IS NULL OR (day_of_month BETWEEN 1 AND 28)),
-    -- Validate recipients is a JSONB array
-    CONSTRAINT chk_recipients_is_array
-        CHECK (jsonb_typeof(recipients) = 'array')
+    -- Validate recipients is a JSONB array with valid email objects
+    CONSTRAINT chk_recipients_valid
+        CHECK (
+            jsonb_typeof(recipients) = 'array'
+            AND NOT EXISTS (
+                SELECT 1 FROM jsonb_array_elements(recipients) elem
+                WHERE jsonb_typeof(elem) <> 'object'
+                   OR (elem->>'email') IS NULL
+                   OR (elem->>'email') = ''
+            )
+        ),
+    CONSTRAINT chk_frequency_requires_day
+        CHECK (
+            frequency = 'on_demand'
+            OR (frequency IN ('monthly', 'quarterly', 'annual') AND day_of_month IS NOT NULL)
+        )
 );
 
-CREATE INDEX idx_scheduled_report_org ON scheduled_report(organization_id, is_active);
-CREATE INDEX idx_scheduled_report_next_run ON scheduled_report(next_run_at)
+-- Consolidated index for scheduler queries (covers active + next_run lookups)
+CREATE INDEX idx_scheduled_report_scheduler
+    ON scheduled_report (is_active, next_run_at, organization_id)
     WHERE is_active = true;
-
--- Performance: Composite index for scheduler queries
-CREATE INDEX idx_scheduled_report_active_next_run
-    ON scheduled_report (is_active, next_run_at)
-    WHERE is_active = true;
+CREATE INDEX idx_scheduled_report_template ON scheduled_report(report_template_id);
 
 -- =============================================================================
--- SECTION 5: GENERATED REPORT TABLE
+-- SECTION 4: GENERATED REPORT TABLE
 -- =============================================================================
 
 CREATE TABLE generated_report (
     id BIGSERIAL PRIMARY KEY,
-    organization_id BIGINT NOT NULL REFERENCES public.organization(id) ON DELETE CASCADE,
-    report_template_id BIGINT REFERENCES public.report_template(id),
-    scheduled_report_id BIGINT REFERENCES public.scheduled_report(id),
-    export_request_id BIGINT REFERENCES public.export_request(id),
+    organization_id BIGINT NOT NULL REFERENCES organization(id) ON DELETE CASCADE,
 
+    -- Traceability
+    report_template_id BIGINT REFERENCES report_template(id),
+    scheduled_report_id BIGINT REFERENCES scheduled_report(id),
+    generation_source generation_source NOT NULL,
+
+    -- Report details
     report_type report_type NOT NULL,
     name VARCHAR(255) NOT NULL,
+    status report_status NOT NULL DEFAULT 'pending',
 
     -- Scope
-    project_id BIGINT REFERENCES public.project(id),
-    contract_id BIGINT REFERENCES public.contract(id),
-    period_start DATE NOT NULL,
-    period_end DATE NOT NULL,
+    project_id BIGINT REFERENCES project(id),
+    contract_id BIGINT REFERENCES contract(id),
+    billing_period_id BIGINT REFERENCES billing_period(id),
 
     -- File details
-    file_format export_file_format NOT NULL,
-    file_path TEXT NOT NULL,  -- S3 path (no length limit)
+    file_format file_format NOT NULL,
+    file_path TEXT,                 -- S3 path (NULL until completed)
     file_size_bytes BIGINT,
+    file_hash VARCHAR(64),          -- SHA-256 hex (64 chars)
 
-    -- Generation details
-    generated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    generated_by UUID REFERENCES auth.users(id),
-    generation_time_ms INTEGER,
+    -- Processing details
+    requested_by UUID REFERENCES auth.users(id),
+    processing_started_at TIMESTAMPTZ,
+    processing_completed_at TIMESTAMPTZ,
+    processing_error TEXT,
+    processing_time_ms INTEGER,
 
-    -- Summary data (for quick display)
-    summary_data JSONB,  -- Key metrics from the report
+    -- Record counts
+    record_count INTEGER,
 
-    -- Retention
-    expires_at TIMESTAMPTZ,
+    -- Summary data (for quick display without re-downloading)
+    summary_data JSONB,
+
+    -- Download tracking (use atomic UPDATE ... SET download_count = download_count + 1)
+    download_count INTEGER NOT NULL DEFAULT 0,
+    expires_at TIMESTAMPTZ DEFAULT (now() + INTERVAL '90 days'),
+
+    -- Archival
     archived_at TIMESTAMPTZ,
-    archived_path TEXT,  -- Glacier path (no length limit)
+    archived_path TEXT,
 
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE INDEX idx_generated_report_org ON generated_report(organization_id);
+-- Consolidated indexes (removed redundant org-only index)
+CREATE INDEX idx_generated_report_org_created ON generated_report(organization_id, created_at DESC);
 CREATE INDEX idx_generated_report_type ON generated_report(report_type);
-CREATE INDEX idx_generated_report_period ON generated_report(period_start, period_end);
+CREATE INDEX idx_generated_report_status ON generated_report(status);
+CREATE INDEX idx_generated_report_billing_period ON generated_report(billing_period_id);
 CREATE INDEX idx_generated_report_template ON generated_report(report_template_id);
+CREATE INDEX idx_generated_report_schedule ON generated_report(scheduled_report_id);
+CREATE INDEX idx_generated_report_pending ON generated_report(status, created_at)
+    WHERE status IN ('pending', 'processing');
+CREATE INDEX idx_generated_report_expires ON generated_report(expires_at)
+    WHERE expires_at IS NOT NULL AND archived_at IS NULL;
 
 -- =============================================================================
--- SECTION 6: HELPER FUNCTIONS
+-- SECTION 5: HELPER FUNCTIONS
 -- =============================================================================
 
--- Function to check if export requires approval (bulk export threshold)
--- IMMUTABLE: Pure function of inputs only, no database access or now() calls
-CREATE OR REPLACE FUNCTION check_export_requires_approval(
-    p_data_type export_data_type,
-    p_estimated_count INTEGER,
-    p_bulk_threshold INTEGER DEFAULT 20
-)
-RETURNS BOOLEAN AS $$
-BEGIN
-    -- Handle null count explicitly - unknown count doesn't require approval
-    IF p_estimated_count IS NULL THEN
-        RETURN false;
-    END IF;
-
-    -- Bulk exports require dual approval
-    IF p_estimated_count > p_bulk_threshold THEN
-        RETURN true;
-    END IF;
-
-    -- PII-containing data types always require approval
-    IF p_data_type IN ('contract', 'invoice_generated', 'invoice_received', 'expense') THEN
-        RETURN p_estimated_count > 10;
-    END IF;
-
-    RETURN false;
-END;
-$$ LANGUAGE plpgsql IMMUTABLE;
-
--- Function to calculate next run time for scheduled report
--- STABLE: Uses now() default, reads timezone data (not IMMUTABLE)
-CREATE OR REPLACE FUNCTION calculate_next_run_time(
-    p_frequency report_frequency,
-    p_day_of_week INTEGER,
-    p_day_of_month INTEGER,
-    p_time_of_day TIME,
-    p_timezone VARCHAR,
-    p_from_time TIMESTAMPTZ DEFAULT now(),
-    p_depth INTEGER DEFAULT 0  -- Recursion guard
-)
-RETURNS TIMESTAMPTZ AS $$
+-- Get the most recent completed billing period
+-- Returns: billing_period.id or NULL if no completed periods exist
+CREATE OR REPLACE FUNCTION get_latest_completed_billing_period()
+RETURNS BIGINT AS $$
 DECLARE
-    v_local_from TIMESTAMP;  -- local timestamp (no tz)
-    v_local_next TIMESTAMP;  -- computed local next run
-    v_next TIMESTAMPTZ;
+    v_result BIGINT;
 BEGIN
-    -- Guard against infinite recursion (max 12 iterations covers all edge cases)
-    IF p_depth > 12 THEN
-        RAISE EXCEPTION 'calculate_next_run_time: recursion limit exceeded';
-    END IF;
+    SELECT id INTO v_result
+    FROM billing_period
+    WHERE end_date < CURRENT_DATE
+    ORDER BY end_date DESC
+    LIMIT 1;
 
-    -- Validate required parameters based on frequency
-    CASE p_frequency
-        WHEN 'weekly' THEN
-            IF p_day_of_week IS NULL THEN
-                RAISE EXCEPTION 'calculate_next_run_time: day_of_week required for weekly frequency';
-            END IF;
-        WHEN 'monthly', 'quarterly', 'annual' THEN
-            IF p_day_of_month IS NULL THEN
-                RAISE EXCEPTION 'calculate_next_run_time: day_of_month required for % frequency', p_frequency;
-            END IF;
-        ELSE
-            NULL;  -- daily and on_demand don't need these
-    END CASE;
-
-    -- Convert to local time explicitly (avoids DST edge cases in arithmetic)
-    v_local_from := (p_from_time AT TIME ZONE p_timezone);
-
-    -- All arithmetic in local time
-    CASE p_frequency
-        WHEN 'daily' THEN
-            v_local_next := date_trunc('day', v_local_from) + INTERVAL '1 day' + p_time_of_day;
-
-        WHEN 'weekly' THEN
-            -- Find next occurrence of day_of_week
-            v_local_next := date_trunc('day', v_local_from) + ((7 + p_day_of_week - EXTRACT(DOW FROM v_local_from)::INTEGER) % 7 + 1) * INTERVAL '1 day' + p_time_of_day;
-
-        WHEN 'monthly' THEN
-            -- Use day_of_month, capped at 28 for safety
-            v_local_next := DATE_TRUNC('month', v_local_from) + INTERVAL '1 month' + (LEAST(p_day_of_month, 28) - 1) * INTERVAL '1 day' + p_time_of_day;
-
-        WHEN 'quarterly' THEN
-            -- First day of next quarter + day_of_month
-            v_local_next := DATE_TRUNC('quarter', v_local_from) + INTERVAL '3 months' + (LEAST(p_day_of_month, 28) - 1) * INTERVAL '1 day' + p_time_of_day;
-
-        WHEN 'annual' THEN
-            -- First day of next year + day_of_month (as day of January)
-            v_local_next := DATE_TRUNC('year', v_local_from) + INTERVAL '1 year' + (LEAST(p_day_of_month, 28) - 1) * INTERVAL '1 day' + p_time_of_day;
-
-        ELSE
-            RETURN NULL;  -- on_demand reports don't have scheduled runs
-    END CASE;
-
-    -- Convert back to timestamptz at the end
-    v_next := v_local_next AT TIME ZONE p_timezone;
-
-    -- If calculated time is in the past, advance by one period
-    IF v_next <= p_from_time THEN
-        RETURN calculate_next_run_time(p_frequency, p_day_of_week, p_day_of_month, p_time_of_day, p_timezone, v_next, p_depth + 1);
-    END IF;
-
-    RETURN v_next;
+    -- Returns NULL if no completed billing period found
+    RETURN v_result;
 END;
 $$ LANGUAGE plpgsql STABLE;
 
--- Function to get export statistics
--- STABLE SECURITY DEFINER: Reads from tables, requires elevated access for RLS bypass
-CREATE OR REPLACE FUNCTION get_export_statistics(
+COMMENT ON FUNCTION get_latest_completed_billing_period() IS
+    'Returns the ID of the most recent billing period where end_date < CURRENT_DATE. Returns NULL if none found.';
+
+-- Calculate next run time for scheduled report (iterative, not recursive)
+CREATE OR REPLACE FUNCTION calculate_next_run_time(
+    p_frequency report_frequency,
+    p_day_of_month INTEGER,
+    p_time_of_day TIME,
+    p_timezone VARCHAR,
+    p_from_time TIMESTAMPTZ DEFAULT now()
+)
+RETURNS TIMESTAMPTZ AS $$
+DECLARE
+    v_local_from TIMESTAMP;
+    v_candidate TIMESTAMP;
+    v_next TIMESTAMPTZ;
+    v_time_interval INTERVAL;
+    v_iteration INTEGER := 0;
+    v_max_iterations INTEGER := 12;  -- Safety limit
+BEGIN
+    -- Validate parameters
+    IF p_frequency IN ('monthly', 'quarterly', 'annual') AND p_day_of_month IS NULL THEN
+        RAISE EXCEPTION 'calculate_next_run_time: day_of_month required for % frequency', p_frequency;
+    END IF;
+
+    -- on_demand reports have no scheduled runs
+    IF p_frequency = 'on_demand' THEN
+        RETURN NULL;
+    END IF;
+
+    -- Convert TIME to INTERVAL explicitly
+    v_time_interval := p_time_of_day::INTERVAL;
+
+    -- Convert to local time (strip timezone for arithmetic)
+    v_local_from := (p_from_time AT TIME ZONE p_timezone)::TIMESTAMP;
+
+    -- Iterative approach: find next valid candidate
+    LOOP
+        v_iteration := v_iteration + 1;
+        IF v_iteration > v_max_iterations THEN
+            RAISE EXCEPTION 'calculate_next_run_time: iteration limit exceeded';
+        END IF;
+
+        -- Calculate candidate for current or next period
+        CASE p_frequency
+            WHEN 'monthly' THEN
+                -- Try current month first, then next
+                IF v_iteration = 1 THEN
+                    v_candidate := DATE_TRUNC('month', v_local_from)::TIMESTAMP
+                                 + (LEAST(p_day_of_month, 28) - 1) * INTERVAL '1 day'
+                                 + v_time_interval;
+                ELSE
+                    v_candidate := v_candidate + INTERVAL '1 month';
+                END IF;
+
+            WHEN 'quarterly' THEN
+                IF v_iteration = 1 THEN
+                    v_candidate := DATE_TRUNC('quarter', v_local_from)::TIMESTAMP
+                                 + (LEAST(p_day_of_month, 28) - 1) * INTERVAL '1 day'
+                                 + v_time_interval;
+                ELSE
+                    v_candidate := v_candidate + INTERVAL '3 months';
+                END IF;
+
+            WHEN 'annual' THEN
+                IF v_iteration = 1 THEN
+                    v_candidate := DATE_TRUNC('year', v_local_from)::TIMESTAMP
+                                 + (LEAST(p_day_of_month, 28) - 1) * INTERVAL '1 day'
+                                 + v_time_interval;
+                ELSE
+                    v_candidate := v_candidate + INTERVAL '1 year';
+                END IF;
+        END CASE;
+
+        -- Convert back to timestamptz
+        v_next := v_candidate AT TIME ZONE p_timezone;
+
+        -- If candidate is in the future, we're done
+        IF v_next > p_from_time THEN
+            RETURN v_next;
+        END IF;
+    END LOOP;
+END;
+$$ LANGUAGE plpgsql STABLE;
+
+COMMENT ON FUNCTION calculate_next_run_time(report_frequency, INTEGER, TIME, VARCHAR, TIMESTAMPTZ) IS
+    'Computes next scheduled run time for monthly/quarterly/annual frequencies. Returns NULL for on_demand.';
+
+-- Get report statistics for an organization
+CREATE OR REPLACE FUNCTION get_report_statistics(
     p_organization_id BIGINT,
     p_days INTEGER DEFAULT 30
 )
 RETURNS TABLE(
-    total_exports BIGINT,
-    completed_exports BIGINT,
-    failed_exports BIGINT,
-    pending_approval BIGINT,
+    total_reports BIGINT,
+    completed_reports BIGINT,
+    failed_reports BIGINT,
+    pending_reports BIGINT,
     total_records_exported BIGINT,
-    avg_processing_time_ms NUMERIC
+    avg_processing_time_ms DOUBLE PRECISION
 ) AS $$
 BEGIN
     RETURN QUERY
     SELECT
         COUNT(*)::BIGINT,
-        COUNT(*) FILTER (WHERE status = 'completed')::BIGINT,
-        COUNT(*) FILTER (WHERE status = 'failed')::BIGINT,
-        COUNT(*) FILTER (WHERE status = 'pending' AND requires_approval)::BIGINT,
-        COALESCE(SUM(actual_record_count) FILTER (WHERE status = 'completed'), 0)::BIGINT,
-        AVG(processing_time_ms) FILTER (WHERE status = 'completed')
-    FROM public.export_request
-    WHERE organization_id = p_organization_id
-      AND created_at >= now() - (p_days || ' days')::INTERVAL;
+        COUNT(*) FILTER (WHERE gr.status = 'completed')::BIGINT,
+        COUNT(*) FILTER (WHERE gr.status = 'failed')::BIGINT,
+        COUNT(*) FILTER (WHERE gr.status IN ('pending', 'processing'))::BIGINT,
+        COALESCE(SUM(gr.record_count) FILTER (WHERE gr.status = 'completed'), 0)::BIGINT,
+        COALESCE(AVG(gr.processing_time_ms) FILTER (WHERE gr.status = 'completed'), 0.0)::DOUBLE PRECISION
+    FROM generated_report gr
+    WHERE gr.organization_id = p_organization_id
+      AND gr.created_at >= now() - (p_days || ' days')::INTERVAL;
 END;
 $$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
 
 -- =============================================================================
--- SECTION 7: ROW LEVEL SECURITY
+-- SECTION 6: ROW LEVEL SECURITY
 -- =============================================================================
 
-ALTER TABLE export_request ENABLE ROW LEVEL SECURITY;
 ALTER TABLE report_template ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scheduled_report ENABLE ROW LEVEL SECURITY;
 ALTER TABLE generated_report ENABLE ROW LEVEL SECURITY;
 
--- Export request policies
-DROP POLICY IF EXISTS export_request_org_policy ON export_request;
-CREATE POLICY export_request_org_policy ON export_request
-    FOR SELECT USING (is_org_member(organization_id));
-
-DROP POLICY IF EXISTS export_request_user_insert_policy ON export_request;
-CREATE POLICY export_request_user_insert_policy ON export_request
-    FOR INSERT WITH CHECK (is_org_member(organization_id) AND requested_by = auth.uid());
-
-DROP POLICY IF EXISTS export_request_admin_modify_policy ON export_request;
-CREATE POLICY export_request_admin_modify_policy ON export_request
-    FOR UPDATE USING (is_org_admin(organization_id));
-
-DROP POLICY IF EXISTS export_request_service_policy ON export_request;
-CREATE POLICY export_request_service_policy ON export_request
-    FOR ALL USING (auth.role() = 'service_role');
-
 -- Report template policies
-DROP POLICY IF EXISTS report_template_org_policy ON report_template;
-CREATE POLICY report_template_org_policy ON report_template
-    FOR SELECT USING (is_org_member(organization_id));
+-- SELECT: Org members can see org-wide templates; project members can see project-specific
+DROP POLICY IF EXISTS report_template_select_policy ON report_template;
+CREATE POLICY report_template_select_policy ON report_template
+    FOR SELECT TO authenticated
+    USING (
+        (project_id IS NULL AND is_org_member(organization_id))
+        OR (project_id IS NOT NULL AND is_project_member(project_id))
+    );
 
-DROP POLICY IF EXISTS report_template_admin_modify_policy ON report_template;
-CREATE POLICY report_template_admin_modify_policy ON report_template
-    FOR ALL USING (is_org_admin(organization_id));
+-- INSERT/UPDATE/DELETE: Org admins only
+DROP POLICY IF EXISTS report_template_admin_policy ON report_template;
+CREATE POLICY report_template_admin_policy ON report_template
+    FOR ALL TO authenticated
+    USING (is_org_admin(organization_id))
+    WITH CHECK (is_org_admin(organization_id));
 
+-- Service role: full access (bypasses RLS by default, but explicit for clarity)
 DROP POLICY IF EXISTS report_template_service_policy ON report_template;
 CREATE POLICY report_template_service_policy ON report_template
-    FOR ALL USING (auth.role() = 'service_role');
+    FOR ALL TO service_role
+    USING (true)
+    WITH CHECK (true);
 
 -- Scheduled report policies
-DROP POLICY IF EXISTS scheduled_report_org_policy ON scheduled_report;
-CREATE POLICY scheduled_report_org_policy ON scheduled_report
-    FOR SELECT USING (is_org_member(organization_id));
+-- SELECT: Org members can see org-wide schedules; project members can see project-specific
+DROP POLICY IF EXISTS scheduled_report_select_policy ON scheduled_report;
+CREATE POLICY scheduled_report_select_policy ON scheduled_report
+    FOR SELECT TO authenticated
+    USING (
+        (project_id IS NULL AND is_org_member(organization_id))
+        OR (project_id IS NOT NULL AND is_project_member(project_id))
+    );
 
-DROP POLICY IF EXISTS scheduled_report_admin_modify_policy ON scheduled_report;
-CREATE POLICY scheduled_report_admin_modify_policy ON scheduled_report
-    FOR ALL USING (is_org_admin(organization_id));
+-- INSERT/UPDATE/DELETE: Org admins only
+DROP POLICY IF EXISTS scheduled_report_admin_policy ON scheduled_report;
+CREATE POLICY scheduled_report_admin_policy ON scheduled_report
+    FOR ALL TO authenticated
+    USING (is_org_admin(organization_id))
+    WITH CHECK (is_org_admin(organization_id));
 
+-- Service role: full access
 DROP POLICY IF EXISTS scheduled_report_service_policy ON scheduled_report;
 CREATE POLICY scheduled_report_service_policy ON scheduled_report
-    FOR ALL USING (auth.role() = 'service_role');
+    FOR ALL TO service_role
+    USING (true)
+    WITH CHECK (true);
 
 -- Generated report policies
-DROP POLICY IF EXISTS generated_report_org_policy ON generated_report;
-CREATE POLICY generated_report_org_policy ON generated_report
-    FOR SELECT USING (is_org_member(organization_id));
+-- SELECT: Org members can view
+DROP POLICY IF EXISTS generated_report_select_policy ON generated_report;
+CREATE POLICY generated_report_select_policy ON generated_report
+    FOR SELECT TO authenticated
+    USING (is_org_member(organization_id));
 
+-- INSERT: Org members can create
 DROP POLICY IF EXISTS generated_report_insert_policy ON generated_report;
 CREATE POLICY generated_report_insert_policy ON generated_report
-    FOR INSERT WITH CHECK (is_org_member(organization_id));
+    FOR INSERT TO authenticated
+    WITH CHECK (is_org_member(organization_id));
 
+-- UPDATE: Admins or the requester can update
+DROP POLICY IF EXISTS generated_report_update_policy ON generated_report;
+CREATE POLICY generated_report_update_policy ON generated_report
+    FOR UPDATE TO authenticated
+    USING (is_org_admin(organization_id) OR requested_by = (SELECT auth.uid()));
+
+-- Service role: full access
 DROP POLICY IF EXISTS generated_report_service_policy ON generated_report;
 CREATE POLICY generated_report_service_policy ON generated_report
-    FOR ALL USING (auth.role() = 'service_role');
+    FOR ALL TO service_role
+    USING (true)
+    WITH CHECK (true);
 
 -- =============================================================================
--- SECTION 8: TRIGGERS
+-- SECTION 7: TRIGGERS
 -- =============================================================================
 
--- Update timestamp trigger for export_request
-CREATE OR REPLACE FUNCTION update_export_request_timestamp()
+-- Update timestamp trigger for report_template (handles both INSERT and UPDATE)
+CREATE OR REPLACE FUNCTION update_report_template_timestamp()
 RETURNS TRIGGER AS $$
 BEGIN
-    NEW.updated_at = now();
+    IF TG_OP = 'UPDATE' THEN
+        NEW.updated_at = now();
+    END IF;
+    -- On INSERT, updated_at uses DEFAULT now() which is already set
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS export_request_updated_at ON export_request;
-CREATE TRIGGER export_request_updated_at
-    BEFORE UPDATE ON export_request
+DROP TRIGGER IF EXISTS report_template_updated_at ON report_template;
+CREATE TRIGGER report_template_updated_at
+    BEFORE INSERT OR UPDATE ON report_template
     FOR EACH ROW
-    EXECUTE FUNCTION update_export_request_timestamp();
+    EXECUTE FUNCTION update_report_template_timestamp();
 
 -- Trigger to calculate next run time when scheduled report is created/updated
 CREATE OR REPLACE FUNCTION update_scheduled_report_next_run()
 RETURNS TRIGGER AS $$
 BEGIN
-    IF NEW.is_active THEN
+    IF NEW.is_active AND NEW.frequency != 'on_demand' THEN
         NEW.next_run_at := calculate_next_run_time(
             NEW.frequency,
-            NEW.day_of_week,
             NEW.day_of_month,
             NEW.time_of_day,
             NEW.timezone,
@@ -533,7 +505,11 @@ BEGIN
     ELSE
         NEW.next_run_at := NULL;
     END IF;
-    NEW.updated_at := now();
+
+    IF TG_OP = 'UPDATE' THEN
+        NEW.updated_at := now();
+    END IF;
+
     RETURN NEW;
 END;
 $$ LANGUAGE plpgsql;
@@ -544,61 +520,158 @@ CREATE TRIGGER scheduled_report_next_run
     FOR EACH ROW
     EXECUTE FUNCTION update_scheduled_report_next_run();
 
+-- Trigger to update processing timestamps on status change
+CREATE OR REPLACE FUNCTION update_generated_report_timestamps()
+RETURNS TRIGGER AS $$
+DECLARE
+    v_start_time TIMESTAMPTZ;
+BEGIN
+    IF TG_OP = 'INSERT' THEN
+        -- Set processing_started_at if inserting with status 'processing'
+        IF NEW.status = 'processing' AND NEW.processing_started_at IS NULL THEN
+            NEW.processing_started_at = now();
+        END IF;
+    ELSIF TG_OP = 'UPDATE' THEN
+        -- Transition to processing
+        IF NEW.status = 'processing' AND COALESCE(OLD.status, 'pending') = 'pending' THEN
+            NEW.processing_started_at = now();
+        -- Transition to completed/failed
+        ELSIF NEW.status IN ('completed', 'failed') AND COALESCE(OLD.status, 'pending') = 'processing' THEN
+            NEW.processing_completed_at = now();
+            -- Use COALESCE to handle case where NEW doesn't include start time
+            v_start_time := COALESCE(NEW.processing_started_at, OLD.processing_started_at);
+            IF v_start_time IS NOT NULL THEN
+                NEW.processing_time_ms = ROUND(
+                    EXTRACT(EPOCH FROM (NEW.processing_completed_at - v_start_time)) * 1000
+                )::INTEGER;
+            END IF;
+        END IF;
+    END IF;
+
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS generated_report_timestamps ON generated_report;
+CREATE TRIGGER generated_report_timestamps
+    BEFORE INSERT OR UPDATE ON generated_report
+    FOR EACH ROW
+    EXECUTE FUNCTION update_generated_report_timestamps();
+
 -- =============================================================================
--- SECTION 9: SEED DEFAULT REPORT TEMPLATES
+-- SECTION 8: SEED DEFAULT REPORT TEMPLATES
 -- =============================================================================
 
--- Seed default report templates for each organization (org-wide templates with project_id = NULL)
--- Using WHERE NOT EXISTS instead of ON CONFLICT due to partial unique indexes
-INSERT INTO public.report_template (organization_id, project_id, name, description, report_type, file_format, template_config)
+-- Seed invoice-focused report templates for each organization
+INSERT INTO report_template (
+    organization_id, project_id, name, description, report_type, file_format, template_config
+)
 SELECT
     o.id,
     NULL,  -- org-wide template
     template.name,
     template.description,
     template.report_type::report_type,
-    template.file_format::export_file_format,
+    template.file_format::file_format,
     template.config::JSONB
-FROM public.organization o
+FROM organization o
 CROSS JOIN (VALUES
-    ('Monthly Settlement Report', 'Calculates monthly settlement based on meter data and contract terms', 'settlement', 'pdf',
-     '{"include_meter_data": true, "include_pricing": true, "include_adjustments": true}'),
-    ('Compliance Status Report', 'Shows compliance status against all contract obligations', 'compliance', 'pdf',
-     '{"include_breaches": true, "include_cured": true, "include_upcoming": true}'),
-    ('Financial Summary', 'Revenue and expense summary for the period', 'financial_summary', 'xlsx',
-     '{"include_revenue": true, "include_expenses": true, "include_projections": false}'),
-    ('Invoice Aging Report', 'Outstanding invoices by age bucket', 'invoice_aging', 'pdf',
-     '{"buckets": [30, 60, 90, 120], "include_details": true}'),
-    ('Expense by Category', 'O&M expense breakdown by category', 'expense_by_category', 'xlsx',
-     '{"include_trends": true, "include_variance": true}'),
-    ('LD Summary Report', 'Liquidated damages summary and trends', 'ld_summary', 'pdf',
-     '{"include_cured": true, "include_projections": false}')
+    (
+        'Invoice to Client Report',
+        'Generated invoice ready to issue to paying client for a billing period',
+        'invoice_to_client',
+        'pdf',
+        '{"include_line_items": true, "include_meter_summary": true, "include_adjustments": true}'
+    ),
+    (
+        'Expected Invoice Report',
+        'Expected invoice from contractor based on contract terms and meter data',
+        'invoice_expected',
+        'pdf',
+        '{"include_line_items": true, "include_calculation_details": true}'
+    ),
+    (
+        'Received Invoice Report',
+        'Received invoice from contractor for review and comparison',
+        'invoice_received',
+        'pdf',
+        '{"include_line_items": true, "include_scanned_document": false}'
+    ),
+    (
+        'Invoice Comparison Report',
+        'Variance analysis between expected and received invoices',
+        'invoice_comparison',
+        'pdf',
+        '{"include_variance_breakdown": true, "include_line_item_matching": true, "highlight_discrepancies": true}'
+    )
 ) AS template(name, description, report_type, file_format, config)
 WHERE NOT EXISTS (
-    SELECT 1 FROM public.report_template rt
+    SELECT 1 FROM report_template rt
     WHERE rt.organization_id = o.id
       AND rt.project_id IS NULL
       AND rt.name = template.name
 );
 
 -- =============================================================================
--- SECTION 10: GRANT PERMISSIONS
+-- SECTION 9: GRANT PERMISSIONS
 -- =============================================================================
 
--- Revoke default public access (follows pattern from migration 017)
-REVOKE EXECUTE ON FUNCTION check_export_requires_approval FROM PUBLIC;
+-- Revoke default public access from all functions
+REVOKE EXECUTE ON FUNCTION get_latest_completed_billing_period FROM PUBLIC;
 REVOKE EXECUTE ON FUNCTION calculate_next_run_time FROM PUBLIC;
-REVOKE EXECUTE ON FUNCTION get_export_statistics FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION get_report_statistics FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION update_report_template_timestamp FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION update_scheduled_report_next_run FROM PUBLIC;
+REVOKE EXECUTE ON FUNCTION update_generated_report_timestamps FROM PUBLIC;
 
 -- Grant to specific roles
-GRANT EXECUTE ON FUNCTION check_export_requires_approval TO authenticated;
-GRANT EXECUTE ON FUNCTION check_export_requires_approval TO service_role;
+GRANT EXECUTE ON FUNCTION get_latest_completed_billing_period TO authenticated;
+GRANT EXECUTE ON FUNCTION get_latest_completed_billing_period TO service_role;
 
 GRANT EXECUTE ON FUNCTION calculate_next_run_time TO authenticated;
 GRANT EXECUTE ON FUNCTION calculate_next_run_time TO service_role;
 
-GRANT EXECUTE ON FUNCTION get_export_statistics TO authenticated;
-GRANT EXECUTE ON FUNCTION get_export_statistics TO service_role;
+GRANT EXECUTE ON FUNCTION get_report_statistics TO authenticated;
+GRANT EXECUTE ON FUNCTION get_report_statistics TO service_role;
+
+-- Trigger functions only need service_role (called internally by trigger)
+GRANT EXECUTE ON FUNCTION update_report_template_timestamp TO service_role;
+GRANT EXECUTE ON FUNCTION update_scheduled_report_next_run TO service_role;
+GRANT EXECUTE ON FUNCTION update_generated_report_timestamps TO service_role;
+
+-- =============================================================================
+-- SECTION 10: HELPER FUNCTION FOR PROJECT MEMBER CHECK
+-- =============================================================================
+
+-- Add is_project_member function if it doesn't exist (required for RLS policies)
+-- This checks if the current user is a member of the project's organization
+-- IMPORTANT: Relies on is_org_member() which must be:
+--   - SECURITY DEFINER
+--   - STABLE
+--   - Use (SELECT auth.uid()) pattern internally
+--   - REVOKE EXECUTE FROM PUBLIC with grants to authenticated/service_role
+-- Verify these properties exist from migration 017_core_table_rls.sql
+CREATE OR REPLACE FUNCTION is_project_member(p_project_id BIGINT)
+RETURNS BOOLEAN AS $$
+DECLARE
+    v_org_id BIGINT;
+BEGIN
+    -- Use SELECT to help query planner
+    SELECT organization_id INTO v_org_id
+    FROM project
+    WHERE id = p_project_id;
+
+    IF v_org_id IS NULL THEN
+        RETURN false;
+    END IF;
+
+    RETURN is_org_member(v_org_id);
+END;
+$$ LANGUAGE plpgsql STABLE SECURITY DEFINER;
+
+REVOKE EXECUTE ON FUNCTION is_project_member FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION is_project_member TO authenticated;
+GRANT EXECUTE ON FUNCTION is_project_member TO service_role;
 
 -- =============================================================================
 -- VERIFICATION
@@ -608,13 +681,46 @@ DO $$
 DECLARE
     v_count INTEGER;
 BEGIN
+    -- Check tables exist
     SELECT COUNT(*) INTO v_count
     FROM information_schema.tables
-    WHERE table_name IN ('export_request', 'report_template', 'scheduled_report', 'generated_report');
+    WHERE table_schema = 'public'
+      AND table_name IN ('report_template', 'scheduled_report', 'generated_report');
 
-    IF v_count < 4 THEN
-        RAISE EXCEPTION 'Not all tables were created. Expected 4, found %', v_count;
+    IF v_count < 3 THEN
+        RAISE EXCEPTION 'Not all tables were created. Expected 3, found %', v_count;
     END IF;
 
-    RAISE NOTICE 'Migration 018_export_and_reports_schema completed successfully';
+    -- Check all enums exist
+    PERFORM 1 FROM pg_type WHERE typname = 'report_type';
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'report_type enum not found';
+    END IF;
+
+    PERFORM 1 FROM pg_type WHERE typname = 'file_format';
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'file_format enum not found';
+    END IF;
+
+    PERFORM 1 FROM pg_type WHERE typname = 'report_frequency';
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'report_frequency enum not found';
+    END IF;
+
+    PERFORM 1 FROM pg_type WHERE typname = 'report_status';
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'report_status enum not found';
+    END IF;
+
+    PERFORM 1 FROM pg_type WHERE typname = 'generation_source';
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'generation_source enum not found';
+    END IF;
+
+    PERFORM 1 FROM pg_type WHERE typname = 'delivery_method';
+    IF NOT FOUND THEN
+        RAISE EXCEPTION 'delivery_method enum not found';
+    END IF;
+
+    RAISE NOTICE 'Migration 018_export_and_reports_schema (v5.1 simplified) completed successfully';
 END $$;
