@@ -42,7 +42,8 @@ class LookupService:
         with self._cache_lock:
             self._load_clause_types()  # Deprecated but kept for backward compat
             self._load_clause_categories()
-            # Don't cache responsible_party - it grows dynamically
+            self._load_contract_types()  # For contract metadata extraction
+            # Don't cache responsible_party or counterparty - they grow dynamically
 
     def _load_clause_types(self):
         """Load all clause types."""
@@ -324,3 +325,319 @@ class LookupService:
         with self._cache_lock:
             self._load_clause_types()
             self._load_clause_categories()
+            self._load_contract_types()
+
+    def _load_contract_types(self):
+        """Load all contract types for metadata extraction."""
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute("SELECT id, code FROM contract_type")
+                    rows = cursor.fetchall()
+                    self._cache['contract_type'] = {
+                        row['code'].upper(): row['id']
+                        for row in rows
+                    }
+                    logger.info(f"Loaded {len(self._cache['contract_type'])} contract types")
+        except Exception as e:
+            logger.error(f"Failed to load contract types: {e}")
+            self._cache['contract_type'] = {}
+
+    # =========================================================================
+    # CONTRACT METADATA EXTRACTION METHODS
+    # =========================================================================
+
+    def get_contract_type_id(self, type_code: str) -> Optional[int]:
+        """
+        Map contract type code to database ID.
+
+        Args:
+            type_code: Contract type code (e.g., "PPA", "O_M", "EPC")
+
+        Returns:
+            Database ID or None if not found
+        """
+        if not type_code:
+            return None
+
+        # Normalize code
+        normalized = type_code.upper().strip().replace(" ", "_").replace("-", "_")
+
+        # Handle common aliases
+        aliases = {
+            "O&M": "O_M",
+            "OM": "O_M",
+            "OPERATIONS_MAINTENANCE": "O_M",
+            "INTERCONNECTION": "IA",
+            "FINANCIAL_PPA": "VPPA",
+            "STORAGE": "ESA",
+        }
+
+        if normalized in aliases:
+            normalized = aliases[normalized]
+
+        # Ensure cache is loaded
+        if 'contract_type' not in self._cache:
+            self._load_contract_types()
+
+        # Check cache
+        if normalized in self._cache.get('contract_type', {}):
+            return self._cache['contract_type'][normalized]
+
+        logger.warning(f"Contract type not found: '{type_code}' (normalized: '{normalized}')")
+        return None
+
+    def get_all_counterparties(self) -> List[dict]:
+        """
+        Get all counterparties for fuzzy matching.
+
+        Returns:
+            List of dicts with 'id' and 'name' keys
+        """
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT id, name FROM counterparty ORDER BY name"
+                    )
+                    return [dict(row) for row in cursor.fetchall()]
+        except Exception as e:
+            logger.error(f"Failed to get counterparties: {e}")
+            return []
+
+    def match_counterparty(
+        self,
+        name: str,
+        threshold: float = 80.0
+    ) -> Optional[Dict]:
+        """
+        Fuzzy match counterparty name to existing records.
+
+        Uses rapidfuzz library for efficient fuzzy string matching.
+        Matches against company names with common variations handled.
+
+        Args:
+            name: Counterparty name to match (e.g., "SolarCo Energy LLC")
+            threshold: Minimum match score (0-100). Default 80.
+
+        Returns:
+            Dict with 'id', 'name', 'score' if match found above threshold, None otherwise
+        """
+        if not name or not name.strip():
+            return None
+
+        try:
+            from rapidfuzz import fuzz, process
+        except ImportError:
+            logger.warning("rapidfuzz not installed, falling back to exact match")
+            return self._exact_counterparty_match(name)
+
+        # Get all counterparties
+        counterparties = self.get_all_counterparties()
+        if not counterparties:
+            logger.warning("No counterparties in database for matching")
+            return None
+
+        # Normalize search name
+        search_name = self._normalize_company_name(name)
+
+        # Build choices dict: normalized_name -> original record
+        choices = {}
+        for cp in counterparties:
+            normalized = self._normalize_company_name(cp['name'])
+            choices[normalized] = cp
+
+        # Find best match using token_set_ratio (handles word order variations)
+        result = process.extractOne(
+            search_name,
+            choices.keys(),
+            scorer=fuzz.token_set_ratio
+        )
+
+        if result:
+            matched_name, score, _ = result
+            if score >= threshold:
+                matched_record = choices[matched_name]
+                logger.info(
+                    f"Counterparty matched: '{name}' -> '{matched_record['name']}' "
+                    f"(score: {score:.1f})"
+                )
+                return {
+                    'id': matched_record['id'],
+                    'name': matched_record['name'],
+                    'score': score / 100.0  # Normalize to 0-1 range
+                }
+
+        logger.info(f"No counterparty match found for '{name}' above threshold {threshold}")
+        return None
+
+    def _normalize_company_name(self, name: str) -> str:
+        """
+        Normalize company name for matching.
+
+        Handles common variations:
+        - Case normalization
+        - Suffix variations (LLC, Inc., Corp., etc.)
+        - Punctuation removal
+        """
+        if not name:
+            return ""
+
+        # Lowercase
+        normalized = name.lower().strip()
+
+        # Remove common punctuation
+        for char in ['.', ',', "'", '"']:
+            normalized = normalized.replace(char, '')
+
+        # Normalize common suffixes (keep them but standardize)
+        suffix_map = {
+            'llc': 'llc',
+            'l l c': 'llc',
+            'limited liability company': 'llc',
+            'inc': 'inc',
+            'incorporated': 'inc',
+            'corp': 'corp',
+            'corporation': 'corp',
+            'co': 'co',
+            'company': 'co',
+            'ltd': 'ltd',
+            'limited': 'ltd',
+            'lp': 'lp',
+            'limited partnership': 'lp',
+        }
+
+        for old, new in suffix_map.items():
+            if normalized.endswith(old):
+                normalized = normalized[:-len(old)] + new
+
+        # Collapse multiple spaces
+        normalized = ' '.join(normalized.split())
+
+        return normalized
+
+    def _exact_counterparty_match(self, name: str) -> Optional[Dict]:
+        """
+        Exact case-insensitive counterparty match (fallback when rapidfuzz unavailable).
+        """
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT id, name FROM counterparty WHERE LOWER(name) = LOWER(%s)",
+                        (name.strip(),)
+                    )
+                    result = cursor.fetchone()
+                    if result:
+                        return {
+                            'id': result['id'],
+                            'name': result['name'],
+                            'score': 1.0
+                        }
+        except Exception as e:
+            logger.error(f"Exact counterparty match failed: {e}")
+        return None
+
+    # =========================================================================
+    # FK VALIDATION METHODS
+    # =========================================================================
+
+    def validate_organization_id(self, org_id: int) -> bool:
+        """
+        Check if organization exists in database.
+
+        Args:
+            org_id: Organization ID to validate
+
+        Returns:
+            True if organization exists, False otherwise
+        """
+        if not org_id:
+            return False
+
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT 1 FROM organization WHERE id = %s",
+                        (org_id,)
+                    )
+                    return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Failed to validate organization_id {org_id}: {e}")
+            return False
+
+    def validate_project_id(self, project_id: int) -> bool:
+        """
+        Check if project exists in database.
+
+        Args:
+            project_id: Project ID to validate
+
+        Returns:
+            True if project exists, False otherwise
+        """
+        if not project_id:
+            return False
+
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT 1 FROM project WHERE id = %s",
+                        (project_id,)
+                    )
+                    return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Failed to validate project_id {project_id}: {e}")
+            return False
+
+    def validate_counterparty_id(self, counterparty_id: int) -> bool:
+        """
+        Check if counterparty exists in database.
+
+        Args:
+            counterparty_id: Counterparty ID to validate
+
+        Returns:
+            True if counterparty exists, False otherwise
+        """
+        if not counterparty_id:
+            return False
+
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT 1 FROM counterparty WHERE id = %s",
+                        (counterparty_id,)
+                    )
+                    return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Failed to validate counterparty_id {counterparty_id}: {e}")
+            return False
+
+    def validate_contract_type_id(self, contract_type_id: int) -> bool:
+        """
+        Check if contract type exists in database.
+
+        Args:
+            contract_type_id: Contract type ID to validate
+
+        Returns:
+            True if contract type exists, False otherwise
+        """
+        if not contract_type_id:
+            return False
+
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT 1 FROM contract_type WHERE id = %s",
+                        (contract_type_id,)
+                    )
+                    return cursor.fetchone() is not None
+        except Exception as e:
+            logger.error(f"Failed to validate contract_type_id {contract_type_id}: {e}")
+            return False

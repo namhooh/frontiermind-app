@@ -47,3 +47,55 @@ export {
   type CureDefaultResult,
   type APIClientConfig,
 } from './contractsClient'
+
+// Ingest Client
+export {
+  IngestClient,
+  IngestAPIError,
+  type PresignedUrlRequest,
+  type PresignedUrlResponse,
+  type IngestionStatusResponse,
+  type IngestClientConfig,
+} from './ingestClient'
+
+// Reports Client
+export {
+  // Main Client Class
+  ReportsClient,
+
+  // Error Class
+  ReportsAPIError,
+
+  // Standalone Functions (backward compatibility)
+  listTemplates,
+  generateReport,
+  getReport,
+  listReports,
+
+  // Types - Enums
+  type InvoiceReportType,
+  type FileFormat,
+  type ReportStatus,
+  type ReportFrequency,
+  type GenerationSource,
+  type DeliveryMethod,
+
+  // Types - Entities
+  type ReportTemplate,
+  type GeneratedReport,
+  type ScheduledReport,
+  type RecipientInfo,
+  type FormatInfo,
+  type ReportTypeInfo,
+
+  // Types - Requests
+  type GenerateReportRequest,
+  type CreateTemplateRequest,
+  type UpdateTemplateRequest,
+  type CreateScheduleRequest,
+  type UpdateScheduleRequest,
+  type ReportFilters,
+
+  // Types - Config
+  type ReportsClientConfig,
+} from './reportsClient'

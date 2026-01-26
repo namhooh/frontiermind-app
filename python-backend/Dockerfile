@@ -3,10 +3,11 @@ FROM python:3.12-slim as builder
 
 WORKDIR /app
 
-# Install build dependencies
+# Install build dependencies (including WeasyPrint build deps)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libpq-dev \
+    libffi-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements first for layer caching
@@ -20,10 +21,16 @@ FROM python:3.12-slim
 
 WORKDIR /app
 
-# Install runtime dependencies only
+# Install runtime dependencies (including WeasyPrint runtime deps for PDF generation)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
+    libpango-1.0-0 \
+    libpangocairo-1.0-0 \
+    libgdk-pixbuf-2.0-0 \
+    libffi8 \
+    shared-mime-info \
+    fonts-dejavu-core \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy installed packages from builder

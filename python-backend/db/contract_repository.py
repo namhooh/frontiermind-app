@@ -401,11 +401,36 @@ class ContractRepository:
                     clause_id = cursor.fetchone()['id']
                     clause_ids.append(clause_id)
 
-                logger.info(
-                    f"Stored {len(clause_ids)} clauses for contract {contract_id} "
-                    f"(project_id={project_id})"
+            # Explicit commit before exiting connection context
+            conn.commit()
+            logger.info(
+                f"Inserted {len(clause_ids)} clauses for contract {contract_id}, "
+                f"commit successful (project_id={project_id})"
+            )
+
+        # Verify clauses were actually persisted (separate transaction)
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    "SELECT COUNT(*) as cnt FROM clause WHERE contract_id = %s",
+                    (contract_id,)
                 )
-                return clause_ids
+                actual_count = cursor.fetchone()['cnt']
+                if actual_count != len(clause_ids):
+                    logger.error(
+                        f"Clause verification FAILED for contract {contract_id}: "
+                        f"inserted {len(clause_ids)}, found {actual_count}"
+                    )
+                    raise Exception(
+                        f"Clause storage verification failed for contract {contract_id}: "
+                        f"expected {len(clause_ids)}, found {actual_count}"
+                    )
+                logger.info(
+                    f"Verified {actual_count} clauses persisted for contract {contract_id}"
+                )
+
+        # Return AFTER context managers have closed and verification passed
+        return clause_ids
 
     def get_contract(self, contract_id: int) -> Optional[Dict[str, Any]]:
         """
@@ -642,3 +667,91 @@ class ContractRepository:
                     f"(confidence < {confidence_threshold})"
                 )
                 return clauses
+
+    def update_contract_metadata(
+        self,
+        contract_id: int,
+        contract_type_id: Optional[int] = None,
+        counterparty_id: Optional[int] = None,
+        effective_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        extraction_metadata: Optional[Dict[str, Any]] = None
+    ) -> bool:
+        """
+        Update contract with AI-extracted metadata.
+
+        This method is called after metadata extraction to update the contract
+        record with resolved FKs and store extraction details for audit.
+
+        Args:
+            contract_id: Contract ID to update
+            contract_type_id: Resolved contract_type FK (or None if not matched)
+            counterparty_id: Resolved counterparty FK (or None if not matched)
+            effective_date: Extracted effective date (YYYY-MM-DD format)
+            end_date: Extracted end date (YYYY-MM-DD format)
+            extraction_metadata: JSONB metadata including:
+                - seller_name: Extracted seller name
+                - buyer_name: Extracted buyer name
+                - counterparty_match_confidence: Match confidence (0-1)
+                - counterparty_matched: Boolean if matched
+                - contract_type_extracted: Original extracted type code
+                - extraction_timestamp: When extraction occurred
+                - extraction_notes: Any notes from extraction
+
+        Returns:
+            True if update succeeded, False otherwise
+
+        Raises:
+            psycopg2.Error: If database operation fails
+        """
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # Build dynamic UPDATE query based on provided fields
+                updates = []
+                params = []
+
+                if contract_type_id is not None:
+                    updates.append("contract_type_id = %s")
+                    params.append(contract_type_id)
+
+                if counterparty_id is not None:
+                    updates.append("counterparty_id = %s")
+                    params.append(counterparty_id)
+
+                if effective_date is not None:
+                    updates.append("effective_date = %s")
+                    params.append(effective_date)
+
+                if end_date is not None:
+                    updates.append("end_date = %s")
+                    params.append(end_date)
+
+                if extraction_metadata is not None:
+                    updates.append("extraction_metadata = %s")
+                    params.append(Json(extraction_metadata))
+
+                if not updates:
+                    logger.warning(f"No metadata fields to update for contract {contract_id}")
+                    return False
+
+                # Add updated_at timestamp
+                updates.append("updated_at = NOW()")
+
+                # Build and execute query
+                params.append(contract_id)
+                query = f"UPDATE contract SET {', '.join(updates)} WHERE id = %s"
+
+                cursor.execute(query, params)
+                rows_affected = cursor.rowcount
+
+                if rows_affected == 0:
+                    logger.warning(f"Contract {contract_id} not found for metadata update")
+                    return False
+
+                logger.info(
+                    f"Updated contract {contract_id} metadata: "
+                    f"contract_type_id={contract_type_id}, "
+                    f"counterparty_id={counterparty_id}, "
+                    f"effective_date={effective_date}"
+                )
+                return True

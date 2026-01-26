@@ -40,7 +40,22 @@
       "Bash(done)",
       "mcp__figma__get_screenshot",
       "mcp__figma__get_design_context",
-      "Bash(wc:*)"
+      "Bash(wc:*)",
+      "Bash(tree:*)",
+      "Bash(docker build:*)",
+      "Bash(docker run:*)",
+      "Bash(docker rmi:*)",
+      "Bash(pkill:*)",
+      "Bash(aws logs tail:*)",
+      "Bash(aws elbv2 describe-load-balancers:*)",
+      "Bash(aws elbv2 modify-load-balancer-attributes:*)",
+      "Bash(pip3 install:*)",
+      "Bash(textutil:*)",
+      "Bash(cupsfilter:*)",
+      "Bash(pip3 show:*)",
+      "Bash(npm run lint:*)",
+      "Bash(source aws/infrastructure-config.env)",
+      "Bash(./deploy-aws.sh)"
     ]
   }
 }

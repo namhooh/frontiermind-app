@@ -841,6 +841,420 @@ aws secretsmanager create-secret \
 
 ---
 
+---
+
+## 15. Implementation Workplan
+
+*This section provides a prioritized checklist of sub-tasks to implement the report generation system defined in Sections 1-14. Complete these tasks in order to build out the full workflow.*
+
+---
+
+### 15.1 Prerequisites
+
+Before starting implementation, ensure the following dependencies and configurations are in place.
+
+#### Dependencies to Add
+
+Add to `python-backend/requirements.txt`:
+
+| Package | Version | Purpose |
+|---------|---------|---------|
+| `weasyprint` | >=60.0 | HTML-to-PDF rendering |
+| `jinja2` | >=3.1.0 | HTML templating (may already be installed via FastAPI) |
+| `openpyxl` | >=3.1.0 | Excel XLSX generation |
+| `apscheduler` | >=3.10.0 | Background job scheduling |
+
+#### System Dependencies (Docker/ECS)
+
+Add WeasyPrint system dependencies to `python-backend/Dockerfile`:
+
+| Package | Purpose |
+|---------|---------|
+| `libpango-1.0-0` | Text layout and rendering |
+| `libpangocairo-1.0-0` | Cairo rendering backend for Pango |
+| `libgdk-pixbuf2.0-0` | Image loading library |
+| `libffi-dev` | Foreign function interface |
+| `shared-mime-info` | MIME type detection |
+
+#### Environment Variables
+
+| Variable | Purpose | Location |
+|----------|---------|----------|
+| `REPORTS_S3_BUCKET` | S3 bucket for report storage | `.env` or Secrets Manager |
+| `REPORTS_PRESIGNED_URL_EXPIRY` | Presigned URL expiry (seconds) | `.env` |
+| `AWS_SES_REGION` | AWS region for SES | `.env` |
+| `SES_FROM_EMAIL` | Sender email address | Secrets Manager |
+| `SES_REPLY_TO_EMAIL` | Reply-to email address | Secrets Manager |
+| `SCHEDULER_ENABLED` | Enable/disable scheduler | `.env` |
+| `SCHEDULER_CHECK_INTERVAL_SECONDS` | Scheduler polling interval | `.env` |
+
+#### AWS Secrets to Create
+
+| Secret Name | Purpose |
+|-------------|---------|
+| `frontiermind/reports/ses-config` | SES email configuration |
+
+---
+
+### 15.2 Phase 1: Core Foundation
+
+Priority-ordered tasks for foundational components that all other phases depend on.
+
+| Task ID | Task | File to Create | Purpose | References |
+|---------|------|----------------|---------|------------|
+| 1.1 | Create report Pydantic models | `models/reports.py` | Define enums, request/response types matching Section 6 | Section 6 (Schema Details) |
+| 1.2 | Create report repository | `db/report_repository.py` | CRUD operations for `report_template`, `scheduled_report`, `generated_report` | Section 2 (Core Tables) |
+| 1.3 | Create invoice repository | `db/invoice_repository.py` | Invoice data extraction queries for all 4 report types | Section 5 (Data Extraction) |
+
+#### Task 1.1: Report Pydantic Models
+
+Create Pydantic models for:
+- Enums: `InvoiceReportType`, `ExportFileFormat`, `ReportFrequency`, `ReportStatus`, `GenerationSource`
+- Request models: `GenerateReportRequest`, `CreateTemplateRequest`, `CreateScheduleRequest`
+- Response models: `ReportTemplateResponse`, `GeneratedReportResponse`, `ScheduledReportResponse`
+- Internal models: `ReportConfig`, `ExtractedData`
+
+#### Task 1.2: Report Repository
+
+Implement repository methods:
+- `get_template(template_id)` - Fetch template by ID with organization filter
+- `list_templates(org_id, project_id=None)` - List templates visible to user
+- `create_template(template)` - Create new custom template
+- `update_template(template_id, updates)` - Update template settings
+- `create_generated_report(report)` - Create pending report record
+- `update_report_status(report_id, status, file_path=None, error=None)` - Update generation status
+- `get_generated_report(report_id)` - Fetch generated report with presigned URL
+- `list_generated_reports(org_id, filters)` - List reports with pagination
+- `create_scheduled_report(schedule)` - Create new schedule
+- `get_due_schedules()` - Get schedules where `next_run_at <= now()` and `is_active = true`
+- `update_schedule_next_run(schedule_id)` - Calculate and set next run time
+
+#### Task 1.3: Invoice Repository
+
+Implement data extraction queries from Section 5.3:
+- `get_invoice_to_client_data(billing_period_id, contract_id=None, project_id=None)` - Query from Section 5.3.1
+- `get_invoice_expected_data(billing_period_id, contract_id=None, project_id=None)` - Query from Section 5.3.2
+- `get_invoice_received_data(billing_period_id, contract_id=None, project_id=None)` - Query from Section 5.3.3
+- `get_invoice_comparison_data(billing_period_id, contract_id=None, project_id=None)` - Query from Section 5.3.4
+
+---
+
+### 15.3 Phase 2: Data Extractors
+
+Implement type-specific data extraction classes following the pattern established in Section 5.
+
+| Task ID | Task | File to Create | Report Type | References |
+|---------|------|----------------|-------------|------------|
+| 2.1 | Create base extractor interface | `services/reports/extractors/base.py` | Abstract interface | Section 5.1 |
+| 2.2 | Implement invoice_to_client extractor | `services/reports/extractors/invoice_to_client.py` | `invoice_to_client` | Section 5.3.1 |
+| 2.3 | Implement invoice_expected extractor | `services/reports/extractors/invoice_expected.py` | `invoice_expected` | Section 5.3.2 |
+| 2.4 | Implement invoice_received extractor | `services/reports/extractors/invoice_received.py` | `invoice_received` | Section 5.3.3 |
+| 2.5 | Implement invoice_comparison extractor | `services/reports/extractors/invoice_comparison.py` | `invoice_comparison` | Section 5.3.4 |
+
+#### Task 2.1: Base Extractor Interface
+
+Define abstract base class with:
+- `extract(billing_period_id, contract_id=None, project_id=None, org_id=None) -> ExtractedData`
+- `validate_params(...)` - Validate filter parameters
+- `get_report_type() -> InvoiceReportType` - Return report type enum
+
+#### Tasks 2.2-2.5: Type-Specific Extractors
+
+Each extractor:
+- Inherits from `BaseExtractor`
+- Uses `InvoiceRepository` for data queries
+- Transforms raw query results into `ExtractedData` model
+- Handles empty result sets gracefully
+- Applies organization security boundary filter
+
+---
+
+### 15.4 Phase 3: Output Formatters
+
+Implement format-specific output generators supporting all 4 export formats from Section 6.
+
+| Task ID | Task | File to Create | Format | References |
+|---------|------|----------------|--------|------------|
+| 3.1 | Create base formatter interface | `services/reports/formatters/base.py` | Abstract interface | Section 6 |
+| 3.2 | Implement JSON formatter | `services/reports/formatters/json_formatter.py` | JSON | Section 6 |
+| 3.3 | Implement CSV formatter | `services/reports/formatters/csv_formatter.py` | CSV | Section 6 |
+| 3.4 | Implement XLSX formatter | `services/reports/formatters/xlsx_formatter.py` | Excel XLSX | Section 6 |
+| 3.5 | Implement PDF formatter | `services/reports/formatters/pdf_formatter.py` | PDF (WeasyPrint) | Section 6, 14.1 |
+| 3.6 | Create Jinja2 HTML templates | `services/reports/templates/*.html` | PDF templates | Section 14.3 |
+| 3.7 | Create PDF stylesheet | `services/reports/templates/styles.css` | PDF styling | Section 14.3 |
+
+#### Task 3.1: Base Formatter Interface
+
+Define abstract base class with:
+- `format(extracted_data: ExtractedData, template_config: dict) -> bytes`
+- `get_content_type() -> str` - Return MIME type
+- `get_file_extension() -> str` - Return file extension
+
+#### Task 3.2: JSON Formatter
+
+- Serialize `ExtractedData` to JSON
+- Support pretty-printing option in `template_config`
+- Handle datetime serialization
+
+#### Task 3.3: CSV Formatter
+
+- Flatten hierarchical data to rows
+- Handle header row generation
+- Support custom delimiter option
+
+#### Task 3.4: XLSX Formatter
+
+- Use `openpyxl` to create workbook
+- Create separate sheets for header and line items
+- Apply basic formatting (headers bold, currency formatting)
+- Support `template_config` options for styling
+
+#### Task 3.5: PDF Formatter
+
+- Load Jinja2 template based on report type
+- Render HTML with `ExtractedData` context
+- Convert to PDF using WeasyPrint
+- Apply `styles.css` for consistent styling
+
+#### Task 3.6: Jinja2 HTML Templates
+
+Create templates for each report type:
+- `base.html` - Common layout, header, footer
+- `invoice_to_client.html` - Client invoice format with line items
+- `invoice_expected.html` - Expected invoice format
+- `invoice_received.html` - Received invoice format
+- `invoice_comparison.html` - Variance analysis with highlighting
+
+#### Task 3.7: PDF Stylesheet
+
+Create `styles.css` with:
+- Page layout (A4, margins)
+- Typography (fonts, sizes)
+- Table styling (borders, alternating rows)
+- Variance highlighting (green/red for over/under)
+
+---
+
+### 15.5 Phase 4: Generator & Storage
+
+Implement the main orchestrator and file storage components.
+
+| Task ID | Task | File to Create | Purpose | References |
+|---------|------|----------------|---------|------------|
+| 4.1 | Implement report generator | `services/reports/generator.py` | Main orchestrator (extractor → formatter → storage) | Section 5.1, 14.3 |
+| 4.2 | Implement S3 storage service | `services/reports/storage.py` | S3 upload, presigned URL generation | Section 11 |
+
+#### Task 4.1: Report Generator
+
+Implement `ReportGenerator` class with:
+- `generate(generated_report_id: int) -> str` - Main entry point returning file path
+  1. Load `generated_report` record from database
+  2. Load associated `report_template` for config
+  3. Select extractor based on `report_type`
+  4. Extract data for specified filters
+  5. Select formatter based on `file_format`
+  6. Format extracted data to output bytes
+  7. Upload to S3 via storage service
+  8. Update `generated_report` with file path and status
+  9. Return S3 file path
+- `generate_async(generated_report_id: int)` - Background task wrapper
+- Error handling: catch exceptions, update status to `failed`, store error message
+
+#### Task 4.2: S3 Storage Service
+
+Implement `ReportStorage` class with:
+- `upload(content: bytes, org_id: int, filename: str) -> str` - Upload to S3, return full path
+- `get_presigned_url(file_path: str, expiry: int = 300) -> str` - Generate download URL
+- `delete(file_path: str)` - Remove file (for cleanup)
+- `archive(file_path: str)` - Move to Glacier (lifecycle policy)
+
+S3 path format: `reports/{org_id}/{year}/{month}/{filename}`
+
+---
+
+### 15.6 Phase 5: API Layer
+
+Implement REST endpoints following the API design from Section 10.
+
+| Task ID | Task | File to Create/Modify | Purpose | References |
+|---------|------|----------------------|---------|------------|
+| 5.1 | Create reports API router | `api/reports.py` | REST endpoints from Section 10 | Section 10 |
+| 5.2 | Register router in main app | `main.py` | Add reports router to FastAPI app | - |
+
+#### Task 5.1: Reports API Router
+
+Implement endpoints from Section 10:
+
+**Template Endpoints:**
+- `GET /api/reports/templates` - List available templates
+- `POST /api/reports/templates` - Create custom template (admin)
+- `GET /api/reports/templates/{id}` - Get template details
+- `PUT /api/reports/templates/{id}` - Update template (admin)
+- `DELETE /api/reports/templates/{id}` - Deactivate template (admin)
+
+**Generation Endpoints:**
+- `POST /api/reports/generate` - Generate report on-demand
+  - Accepts: `template_id`, `billing_period_id`, `contract_id` (optional), `file_format` (optional)
+  - Creates `generated_report` with `status='pending'`
+  - Triggers async generation task
+  - Returns report ID and status
+- `GET /api/reports/generated` - List generated reports with pagination and filters
+- `GET /api/reports/generated/{id}` - Get report details including download URL
+- `GET /api/reports/generated/{id}/download` - Redirect to presigned S3 URL
+
+**Schedule Endpoints:**
+- `GET /api/reports/scheduled` - List scheduled reports
+- `POST /api/reports/scheduled` - Create schedule (admin)
+- `PUT /api/reports/scheduled/{id}` - Update schedule (admin)
+- `DELETE /api/reports/scheduled/{id}` - Disable schedule (admin)
+
+#### Task 5.2: Register Router
+
+Add to `main.py`:
+- Import reports router
+- Call `app.include_router(reports.router, prefix="/api/reports", tags=["reports"])`
+
+---
+
+### 15.7 Phase 6: Automation (Deferrable)
+
+Tasks for scheduled reports and email notifications. This phase can be deferred after Phases 1-5 deliver a working on-demand MVP.
+
+| Task ID | Task | File to Create | Purpose | References |
+|---------|------|----------------|---------|------------|
+| 6.1 | Implement background scheduler | `services/reports/scheduler.py` | APScheduler for scheduled_report execution | Section 3.2 |
+| 6.2 | Implement email service | `services/email_service.py` | AWS SES for report delivery | Section 14.1 |
+
+#### Task 6.1: Background Scheduler
+
+Implement `ReportScheduler` class with:
+- `start()` - Initialize APScheduler with persistent job store
+- `stop()` - Graceful shutdown
+- `check_due_schedules()` - Periodic job that:
+  1. Query `scheduled_report` where `next_run_at <= now()` and `is_active = true`
+  2. For each due schedule:
+     - Create `generated_report` with `generation_source='scheduled'`
+     - If `billing_period_id` is NULL, call `get_latest_completed_billing_period()`
+     - Trigger async generation
+     - Update `scheduled_report.next_run_at` using `calculate_next_run_time()`
+     - Update `scheduled_report.last_run_at`
+
+Integration with FastAPI:
+- Add startup event to call `scheduler.start()`
+- Add shutdown event to call `scheduler.stop()`
+- Configure interval from `SCHEDULER_CHECK_INTERVAL_SECONDS`
+
+#### Task 6.2: Email Service
+
+Implement `EmailService` class with:
+- `send_report_email(recipients: list[str], report_path: str, report_name: str)` - Send report notification
+- `send_report_failure_notification(admin_email: str, schedule_id: int, error: str)` - Alert on failure
+
+Email templates:
+- Report delivery: Subject, body with download link, expiry notice
+- Failure notification: Error details, schedule info
+
+---
+
+### 15.8 Testing Checklist
+
+Create test files for each component layer to ensure correctness.
+
+#### Unit Tests
+
+| Test File | Tests | Priority |
+|-----------|-------|----------|
+| `tests/unit/models/test_report_models.py` | Pydantic model validation, enum values | High |
+| `tests/unit/extractors/test_base_extractor.py` | Interface contract | High |
+| `tests/unit/extractors/test_invoice_to_client.py` | Client invoice extraction with mock data | High |
+| `tests/unit/extractors/test_invoice_expected.py` | Expected invoice extraction with mock data | High |
+| `tests/unit/extractors/test_invoice_received.py` | Received invoice extraction with mock data | High |
+| `tests/unit/extractors/test_invoice_comparison.py` | Variance analysis extraction with mock data | High |
+| `tests/unit/formatters/test_json_formatter.py` | JSON serialization | Medium |
+| `tests/unit/formatters/test_csv_formatter.py` | CSV generation, delimiter handling | Medium |
+| `tests/unit/formatters/test_xlsx_formatter.py` | Excel workbook creation | Medium |
+| `tests/unit/formatters/test_pdf_formatter.py` | HTML rendering, WeasyPrint integration | Medium |
+| `tests/unit/services/test_generator.py` | Orchestration logic, error handling | High |
+| `tests/unit/services/test_storage.py` | S3 upload/download with mocked boto3 | High |
+
+#### Integration Tests
+
+| Test File | Tests | Priority |
+|-----------|-------|----------|
+| `tests/integration/test_invoice_repository.py` | SQL query correctness with test database | High |
+| `tests/integration/test_report_repository.py` | CRUD operations, status transitions | High |
+| `tests/integration/test_report_pipeline.py` | Full generation: extract → format → store | High |
+
+#### API Tests
+
+| Test File | Tests | Priority |
+|-----------|-------|----------|
+| `tests/api/test_reports_templates.py` | Template CRUD endpoints | Medium |
+| `tests/api/test_reports_generate.py` | Generation endpoint, async behavior | High |
+| `tests/api/test_reports_scheduled.py` | Schedule CRUD endpoints | Medium |
+| `tests/api/test_reports_download.py` | Download redirect, presigned URL | High |
+
+---
+
+### 15.9 Deployment Checklist
+
+Pre-deployment verification steps to ensure the system is production-ready.
+
+#### Infrastructure Setup
+
+- [ ] Add Python dependencies to `requirements.txt`
+- [ ] Add WeasyPrint system dependencies to `Dockerfile`
+- [ ] Create S3 bucket `frontiermind-reports` with:
+  - [ ] Lifecycle policy: 90 days Standard, then Glacier
+  - [ ] CORS configuration for presigned URL downloads
+  - [ ] Bucket policy for ECS task role access
+- [ ] Configure AWS SES:
+  - [ ] Verify sending domain
+  - [ ] Request production access (if still in sandbox)
+  - [ ] Create email templates
+- [ ] Add secrets to AWS Secrets Manager:
+  - [ ] `frontiermind/reports/ses-config`
+
+#### Database Verification
+
+- [ ] Verify migration 018 applied successfully
+- [ ] Confirm `get_latest_completed_billing_period()` function works
+- [ ] Confirm `calculate_next_run_time()` function works
+- [ ] Verify pre-seeded templates exist for test organization
+
+#### Code Verification
+
+- [ ] All unit tests pass
+- [ ] All integration tests pass
+- [ ] All API tests pass
+- [ ] Linting passes (`ruff check`, `mypy`)
+
+#### Deployment Steps
+
+- [ ] Build and push Docker image to ECR
+- [ ] Update ECS task definition with new image
+- [ ] Deploy to staging environment
+- [ ] Run smoke tests:
+  - [ ] `GET /api/reports/templates` returns templates
+  - [ ] `POST /api/reports/generate` creates pending report
+  - [ ] Report generation completes successfully
+  - [ ] `GET /api/reports/generated/{id}/download` returns valid presigned URL
+  - [ ] PDF download renders correctly
+- [ ] Deploy to production
+- [ ] Monitor CloudWatch logs for errors
+
+#### Post-Deployment Verification
+
+- [ ] Generate test report via API
+- [ ] Download and verify PDF output
+- [ ] Download and verify XLSX output
+- [ ] Download and verify CSV output
+- [ ] Download and verify JSON output
+- [ ] Verify S3 file stored in correct path
+- [ ] Verify `generated_report` record status is `completed`
+
+---
+
 ## Related Documentation
 
 - **Schema Changes:** `database/SCHEMA_CHANGES.md` (v5.1 section)

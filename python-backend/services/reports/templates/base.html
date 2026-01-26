@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{{ report_type_label }} Report</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="page">
+        <!-- Header -->
+        <header class="report-header">
+            {% if logo_path %}
+            <img src="{{ logo_path }}" alt="Logo" class="logo">
+            {% endif %}
+            <div class="header-content">
+                <h1>{{ header_text }}</h1>
+                <p class="report-type">{{ report_type_label }}</p>
+            </div>
+        </header>
+
+        <!-- Report Info -->
+        <section class="report-info">
+            <div class="info-row">
+                <span class="label">Generated:</span>
+                <span class="value">{{ generated_at|format_date('%Y-%m-%d %H:%M') }} UTC</span>
+            </div>
+            {% if billing_period %}
+            <div class="info-row">
+                <span class="label">Billing Period:</span>
+                <span class="value">{{ billing_period.start_date|format_date }} to {{ billing_period.end_date|format_date }}</span>
+            </div>
+            {% endif %}
+            {% if metadata.contract_names %}
+            <div class="info-row">
+                <span class="label">Contracts:</span>
+                <span class="value">{{ metadata.contract_names|join(', ') }}</span>
+            </div>
+            {% endif %}
+        </section>
+
+        {% block content %}
+        <!-- Summary Section -->
+        {% if include_summary %}
+        <section class="summary">
+            <h2>Summary</h2>
+            <div class="summary-grid">
+                <div class="summary-item">
+                    <span class="summary-label">Total Records</span>
+                    <span class="summary-value">{{ metadata.record_count }}</span>
+                </div>
+                {% if metadata.total_amount %}
+                <div class="summary-item">
+                    <span class="summary-label">Total Amount</span>
+                    <span class="summary-value">{{ metadata.total_amount|format_currency }}</span>
+                </div>
+                {% endif %}
+            </div>
+        </section>
+        {% endif %}
+
+        <!-- Invoices Table -->
+        {% if headers %}
+        <section class="invoices">
+            <h2>Invoices</h2>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Contract</th>
+                        <th>Amount</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for header in headers %}
+                    <tr>
+                        <td>{{ header.id }}</td>
+                        <td>{{ header.contract_name or '-' }}</td>
+                        <td class="amount">{{ header.total_amount|format_currency if header.total_amount else '-' }}</td>
+                        <td>{{ header.status or '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+        {% endif %}
+
+        <!-- Line Items Table -->
+        {% if include_line_items and line_items %}
+        <section class="line-items">
+            <h2>Line Items</h2>
+            <table class="data-table">
+                <thead>
+                    <tr>
+                        <th>Description</th>
+                        <th>Quantity</th>
+                        <th>Unit Price</th>
+                        <th>Amount</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in line_items %}
+                    <tr>
+                        <td>{{ item.description or '-' }}</td>
+                        <td class="number">{{ item.quantity|format_number if item.quantity else '-' }}</td>
+                        <td class="amount">{{ item.line_unit_price|format_currency if item.line_unit_price else '-' }}</td>
+                        <td class="amount">{{ item.line_total_amount|format_currency if item.line_total_amount else '-' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </section>
+        {% endif %}
+        {% endblock %}
+
+        <!-- Footer -->
+        <footer class="report-footer">
+            <p>{{ footer_text }}</p>
+            <p class="page-number">Page <span class="page-num"></span></p>
+        </footer>
+    </div>
+</body>
+</html>

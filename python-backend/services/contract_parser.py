@@ -24,6 +24,29 @@ from llama_parse import LlamaParse
 from anthropic import Anthropic
 
 from services.pii_detector import PIIDetector, PIIDetectionError
+
+
+class StreamingResponseWrapper:
+    """Wrapper to make streaming response compatible with parsing methods."""
+
+    def __init__(self, text: str):
+        self.content = [type('ContentBlock', (), {'text': text})()]
+
+
+def _collect_streaming_response(stream) -> str:
+    """
+    Collect a streaming response into a single text string.
+
+    This helper avoids the 10-minute timeout issue with long Claude API calls
+    by using streaming mode internally while returning the complete response.
+    """
+    collected_text = []
+    for event in stream:
+        if hasattr(event, 'type'):
+            if event.type == 'content_block_delta':
+                if hasattr(event.delta, 'text'):
+                    collected_text.append(event.delta.text)
+    return ''.join(collected_text)
 from services.prompts import build_extraction_prompt
 from services.prompts.discovery_prompt import build_chunk_discovery_prompt
 from services.prompts.categorization_prompt import build_categorization_prompt
@@ -39,6 +62,10 @@ from services.prompts.payload_enrichment_prompt import (
 from services.prompts.validation_prompt import (
     build_validation_prompt,
     parse_validation_response,
+)
+from services.prompts.metadata_extraction_prompt import (
+    build_metadata_extraction_prompt,
+    parse_metadata_response,
 )
 from models.contract import (
     PIIEntity,
@@ -57,17 +84,18 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 # TOKEN BUDGET CONFIGURATION
 # =============================================================================
-# Increased token budgets to prevent response truncation and improve extraction
-# quality. Original values were: main=16000, discovery=16000, categorization=16000,
-# targeted=8000, enrichment=8000
+# Token budgets configured for Claude 3.5 Haiku (max 8192 output tokens).
+# To restore Sonnet budgets: main=32000, discovery=24000, categorization=32000,
+# targeted=16000, enrichment=12000, validation=16000
 
 TOKEN_BUDGETS = {
-    "main_extraction": 32000,      # Single-pass extraction (was 16000)
-    "discovery": 24000,            # Two-pass: discovery phase (was 16000)
-    "categorization": 32000,       # Two-pass: categorization phase (was 16000)
-    "targeted": 16000,             # Targeted extraction per category (was 8000)
-    "enrichment": 12000,           # Payload enrichment (was 8000)
-    "validation": 16000,           # Validation pass (new)
+    "main_extraction": 8000,       # Haiku limit (Sonnet: 32000)
+    "discovery": 8000,             # Haiku limit (Sonnet: 24000)
+    "categorization": 8000,        # Haiku limit (Sonnet: 32000)
+    "targeted": 8000,              # Haiku limit (Sonnet: 16000)
+    "enrichment": 8000,            # Haiku limit (Sonnet: 12000)
+    "validation": 8000,            # Haiku limit (Sonnet: 16000)
+    "metadata": 2000,              # Contract metadata extraction (lightweight)
 }
 
 
@@ -187,6 +215,41 @@ class ContractParser:
         except Exception as e:
             logger.error(f"Failed to initialize ContractParser: {str(e)}")
             raise ContractParserError(f"Initialization failed: {str(e)}") from e
+
+    def _call_claude_streaming(
+        self,
+        model: str,
+        max_tokens: int,
+        system: str,
+        messages: list,
+        temperature: float = 0.0
+    ) -> StreamingResponseWrapper:
+        """
+        Call Claude API with streaming to avoid 10-minute timeout.
+
+        The Anthropic SDK requires streaming for operations that may take longer
+        than 10 minutes. This method handles streaming internally and returns
+        a response wrapper compatible with existing parsing methods.
+
+        Args:
+            model: Model ID to use
+            max_tokens: Maximum tokens in response
+            system: System prompt
+            messages: User messages
+            temperature: Sampling temperature
+
+        Returns:
+            StreamingResponseWrapper with collected response text
+        """
+        with self.claude.messages.stream(
+            model=model,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            system=system,
+            messages=messages,
+        ) as stream:
+            text = _collect_streaming_response(stream)
+            return StreamingResponseWrapper(text)
 
     def process_contract(
         self,
@@ -330,6 +393,25 @@ class ContractParser:
                 "anonymized_text": anonymized_result.anonymized_text
             }
             self.repository.store_pii_mapping(contract_id, pii_mapping, user_id)
+
+            # Step 4.5: Extract contract metadata (type, parties, dates)
+            logger.info("Step 4.5: Extracting contract metadata")
+            contract_metadata = self._extract_contract_metadata(anonymized_result.anonymized_text)
+
+            # Update contract record with extracted metadata
+            if contract_metadata:
+                self.repository.update_contract_metadata(
+                    contract_id=contract_id,
+                    contract_type_id=contract_metadata.get('contract_type_id'),
+                    counterparty_id=contract_metadata.get('counterparty_id'),
+                    effective_date=contract_metadata.get('effective_date'),
+                    end_date=contract_metadata.get('end_date'),
+                    extraction_metadata=contract_metadata.get('extraction_metadata')
+                )
+                logger.info(
+                    f"Contract metadata updated: type_id={contract_metadata.get('contract_type_id')}, "
+                    f"counterparty_id={contract_metadata.get('counterparty_id')}"
+                )
 
             # Step 5: Extract clauses with Claude API (anonymized text only)
             logger.info("Step 5: Extracting clauses with Claude API (13-category structure)")
@@ -618,11 +700,10 @@ class ContractParser:
                     valid_categories=valid_categories
                 )
 
-                # Call Claude API
-                response = self.claude.messages.create(
-                    model="claude-sonnet-4-20250514",  # TEMP: Testing Sonnet
+                # Call Claude API with streaming to avoid timeout
+                response = self._call_claude_streaming(
+                    model="claude-3-5-haiku-20241022",
                     max_tokens=TOKEN_BUDGETS["main_extraction"],
-                    temperature=0.0,
                     system=prompts['system'],
                     messages=[{"role": "user", "content": prompts['user']}],
                 )
@@ -778,10 +859,9 @@ class ContractParser:
                     contract_type_hint="PPA"  # Could be detected from content
                 )
 
-                response = self.claude.messages.create(
-                    model="claude-sonnet-4-20250514",
+                response = self._call_claude_streaming(
+                    model="claude-3-5-haiku-20241022",
                     max_tokens=TOKEN_BUDGETS["discovery"],
-                    temperature=0.0,
                     system=prompts['system'],
                     messages=[{"role": "user", "content": prompts['user']}],
                 )
@@ -831,10 +911,9 @@ class ContractParser:
                     include_examples=True
                 )
 
-                response = self.claude.messages.create(
-                    model="claude-sonnet-4-20250514",
+                response = self._call_claude_streaming(
+                    model="claude-3-5-haiku-20241022",
                     max_tokens=TOKEN_BUDGETS["categorization"],
-                    temperature=0.0,
                     system=prompts['system'],
                     messages=[{"role": "user", "content": prompts['user']}],
                 )
@@ -1194,11 +1273,10 @@ Remember: Return ONLY the JSON object, no additional text."""
                             existing_clauses=existing_clause_refs
                         )
 
-                        # Call Claude API
-                        response = self.claude.messages.create(
-                            model="claude-sonnet-4-20250514",
+                        # Call Claude API with streaming
+                        response = self._call_claude_streaming(
+                            model="claude-3-5-haiku-20241022",
                             max_tokens=TOKEN_BUDGETS["targeted"],
-                            temperature=0.0,
                             system=prompts['system'],
                             messages=[{"role": "user", "content": prompts['user']}],
                         )
@@ -1237,11 +1315,10 @@ Remember: Return ONLY the JSON object, no additional text."""
                     # Build batch enrichment prompt
                     prompts = build_batch_enrichment_prompt(candidates)
 
-                    # Call Claude API
-                    response = self.claude.messages.create(
-                        model="claude-sonnet-4-20250514",
+                    # Call Claude API with streaming
+                    response = self._call_claude_streaming(
+                        model="claude-3-5-haiku-20241022",
                         max_tokens=TOKEN_BUDGETS["enrichment"],
-                        temperature=0.0,
                         system=prompts['system'],
                         messages=[{"role": "user", "content": prompts['user']}],
                     )
@@ -1282,11 +1359,10 @@ Remember: Return ONLY the JSON object, no additional text."""
                     extracted_clauses=clause_dicts
                 )
 
-                # Call Claude API
-                response = self.claude.messages.create(
-                    model="claude-sonnet-4-20250514",
+                # Call Claude API with streaming
+                response = self._call_claude_streaming(
+                    model="claude-3-5-haiku-20241022",
                     max_tokens=TOKEN_BUDGETS["validation"],
-                    temperature=0.0,
                     system=prompts['system'],
                     messages=[{"role": "user", "content": prompts['user']}],
                 )
@@ -1395,3 +1471,144 @@ Remember: Return ONLY the JSON object, no additional text."""
         except json.JSONDecodeError as e:
             logger.warning(f"Failed to parse enrichment response: {e}")
             return []
+
+    def _extract_contract_metadata(self, anonymized_text: str) -> dict:
+        """
+        Extract contract-level metadata (type, parties, dates) using Claude API.
+
+        This is a lightweight extraction pass that runs before clause extraction.
+        It extracts:
+        - contract_type: Classification (PPA, O&M, EPC, etc.)
+        - seller_name: Legal name of seller/provider
+        - buyer_name: Legal name of buyer/offtaker
+        - effective_date: When contract becomes effective
+        - end_date: When contract terminates
+        - term_years: Duration in years
+
+        The extracted metadata is then:
+        1. Matched against existing database records (counterparty, contract_type)
+        2. Stored in contract.extraction_metadata for audit
+
+        Args:
+            anonymized_text: Contract text with PII redacted
+
+        Returns:
+            Dict with extracted and resolved metadata:
+            {
+                'contract_type_id': int or None,
+                'counterparty_id': int or None,
+                'effective_date': str or None,
+                'end_date': str or None,
+                'extraction_metadata': {
+                    'seller_name': str,
+                    'buyer_name': str,
+                    'counterparty_match_confidence': float,
+                    'counterparty_matched': bool,
+                    'contract_type_extracted': str,
+                    'contract_type_confidence': float,
+                    'extraction_timestamp': str,
+                    'extraction_notes': list
+                }
+            }
+        """
+        from datetime import datetime
+
+        logger.info("Extracting contract metadata")
+
+        result = {
+            'contract_type_id': None,
+            'counterparty_id': None,
+            'effective_date': None,
+            'end_date': None,
+            'extraction_metadata': {
+                'extraction_timestamp': datetime.utcnow().isoformat(),
+                'counterparty_matched': False,
+            }
+        }
+
+        try:
+            # Build metadata extraction prompt
+            prompts = build_metadata_extraction_prompt(anonymized_text)
+
+            # Call Claude API with streaming
+            response = self._call_claude_streaming(
+                model="claude-3-5-haiku-20241022",
+                max_tokens=TOKEN_BUDGETS["metadata"],
+                system=prompts['system'],
+                messages=[{"role": "user", "content": prompts['user']}],
+            )
+
+            # Parse response
+            metadata = parse_metadata_response(response.content[0].text)
+
+            # Store raw extraction in metadata
+            result['extraction_metadata'].update({
+                'seller_name': metadata.get('seller_name'),
+                'buyer_name': metadata.get('buyer_name'),
+                'contract_type_extracted': metadata.get('contract_type'),
+                'contract_type_confidence': metadata.get('contract_type_confidence', 0),
+                'project_name': metadata.get('project_name'),
+                'facility_location': metadata.get('facility_location'),
+                'capacity_mw': metadata.get('capacity_mw'),
+                'term_years': metadata.get('term_years'),
+                'extraction_notes': metadata.get('extraction_notes', []),
+                'overall_confidence': metadata.get('overall_confidence', 0),
+            })
+
+            # Extract dates
+            result['effective_date'] = metadata.get('effective_date')
+            result['end_date'] = metadata.get('end_date')
+
+            # Resolve contract_type to FK
+            if self.lookup_service and metadata.get('contract_type'):
+                contract_type_id = self.lookup_service.get_contract_type_id(
+                    metadata['contract_type']
+                )
+                if contract_type_id:
+                    result['contract_type_id'] = contract_type_id
+                    logger.info(
+                        f"Contract type matched: {metadata['contract_type']} -> ID {contract_type_id}"
+                    )
+                else:
+                    logger.warning(
+                        f"Contract type not matched: {metadata['contract_type']}"
+                    )
+
+            # Match counterparty (prefer seller for counterparty FK)
+            # In most PPAs, the "seller" is the counterparty from buyer's perspective
+            if self.lookup_service:
+                # Try to match seller first, then buyer
+                for party_key in ['seller_name', 'buyer_name']:
+                    party_name = metadata.get(party_key)
+                    if party_name:
+                        match_result = self.lookup_service.match_counterparty(party_name)
+                        if match_result:
+                            result['counterparty_id'] = match_result['id']
+                            result['extraction_metadata']['counterparty_matched'] = True
+                            result['extraction_metadata']['counterparty_match_confidence'] = match_result['score']
+                            result['extraction_metadata']['counterparty_matched_from'] = party_key
+                            logger.info(
+                                f"Counterparty matched: {party_name} -> {match_result['name']} "
+                                f"(ID {match_result['id']}, confidence {match_result['score']:.2f})"
+                            )
+                            break
+
+                if not result['counterparty_id']:
+                    logger.info(
+                        f"No counterparty match found. "
+                        f"Seller: '{metadata.get('seller_name')}', "
+                        f"Buyer: '{metadata.get('buyer_name')}'"
+                    )
+
+            logger.info(
+                f"Metadata extraction complete: "
+                f"type={metadata.get('contract_type')}, "
+                f"seller={metadata.get('seller_name')}, "
+                f"buyer={metadata.get('buyer_name')}"
+            )
+
+        except Exception as e:
+            logger.error(f"Metadata extraction failed: {e}")
+            result['extraction_metadata']['extraction_error'] = str(e)
+
+        return result

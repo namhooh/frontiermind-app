@@ -26,6 +26,7 @@ from api.contracts import router as contracts_router
 from api.rules import router as rules_router
 from api.ingest import router as ingest_router
 from api.ontology import router as ontology_router
+from api.reports import router as reports_router
 
 # Import rate limiting middleware
 from middleware.rate_limiter import setup_rate_limiting, limiter, limit_health
@@ -65,6 +66,7 @@ app.include_router(contracts_router)
 app.include_router(rules_router)
 app.include_router(ingest_router)
 app.include_router(ontology_router)
+app.include_router(reports_router)
 
 
 @app.get("/", response_model=Dict[str, str])

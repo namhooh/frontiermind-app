@@ -21,7 +21,12 @@ export default function ClausesList({ clauses }: ClausesListProps) {
         Extracted Clauses ({clauses.length})
       </h3>
 
-      {clauses.map((clause, idx) => (
+      {clauses.map((clause, idx) => {
+        // Use new fields with fallbacks to deprecated ones
+        const confidence = clause.extraction_confidence ?? clause.confidence_score ?? 0
+        const category = clause.category || clause.clause_category || 'Unknown'
+
+        return (
         <details
           key={idx}
           className="border border-slate-200 rounded-lg p-4 bg-white group"
@@ -31,7 +36,7 @@ export default function ClausesList({ clauses }: ClausesListProps) {
               {clause.section_reference && `${clause.section_reference} - `}
               {clause.clause_name}
               <span className="ml-2 text-sm text-slate-500">
-                ({Math.round(clause.confidence_score * 100)}% confidence)
+                ({Math.round(confidence * 100)}% confidence)
               </span>
             </span>
             <span className="text-slate-400 group-open:rotate-180 transition-transform duration-200">
@@ -49,12 +54,8 @@ export default function ClausesList({ clauses }: ClausesListProps) {
 
             <div className="grid grid-cols-2 gap-4 text-sm">
               <div>
-                <span className="text-slate-500">Type:</span>
-                <span className="ml-2 text-slate-900">{clause.clause_type}</span>
-              </div>
-              <div>
                 <span className="text-slate-500">Category:</span>
-                <span className="ml-2 text-slate-900">{clause.clause_category}</span>
+                <span className="ml-2 text-slate-900">{category}</span>
               </div>
               <div>
                 <span className="text-slate-500">Responsible Party:</span>
@@ -89,7 +90,8 @@ export default function ClausesList({ clauses }: ClausesListProps) {
             )}
           </div>
         </details>
-      ))}
+        )
+      })}
     </div>
   )
 }

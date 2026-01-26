@@ -1,0 +1,123 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Variance Summary Section -->
+{% if comparison_data %}
+<section class="summary variance-summary">
+    <h2>Variance Summary</h2>
+    <div class="summary-grid">
+        <div class="summary-item">
+            <span class="summary-label">Total Expected</span>
+            <span class="summary-value">{{ comparison_data.total_expected|format_currency }}</span>
+        </div>
+        <div class="summary-item">
+            <span class="summary-label">Total Received</span>
+            <span class="summary-value">{{ comparison_data.total_received|format_currency }}</span>
+        </div>
+        <div class="summary-item {% if comparison_data.total_variance > 0 %}variance-positive{% elif comparison_data.total_variance < 0 %}variance-negative{% endif %}">
+            <span class="summary-label">Net Variance</span>
+            <span class="summary-value">{{ comparison_data.total_variance|format_currency }}</span>
+        </div>
+        <div class="summary-item">
+            <span class="summary-label">Variance %</span>
+            <span class="summary-value">{{ "%.2f"|format(comparison_data.variance_percentage|float) }}%</span>
+        </div>
+    </div>
+
+    <div class="status-breakdown">
+        <h3>Status Breakdown</h3>
+        <div class="status-grid">
+            <div class="status-item status-matched">
+                <span class="status-count">{{ comparison_data.matched_count or 0 }}</span>
+                <span class="status-label">Matched</span>
+            </div>
+            <div class="status-item status-overbilled">
+                <span class="status-count">{{ comparison_data.overbilled_count or 0 }}</span>
+                <span class="status-label">Overbilled</span>
+            </div>
+            <div class="status-item status-underbilled">
+                <span class="status-count">{{ comparison_data.underbilled_count or 0 }}</span>
+                <span class="status-label">Underbilled</span>
+            </div>
+        </div>
+    </div>
+</section>
+{% endif %}
+
+<!-- Comparison Table -->
+{% if headers %}
+<section class="invoices">
+    <h2>Invoice Comparisons</h2>
+    <table class="data-table comparison-table">
+        <thead>
+            <tr>
+                <th>Contract</th>
+                <th>Project</th>
+                <th class="amount-col">Expected</th>
+                <th class="amount-col">Received</th>
+                <th class="amount-col">Variance</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for header in headers %}
+            <tr class="comparison-row status-row-{{ header.comparison_status|lower if header.comparison_status else 'unchecked' }}">
+                <td>{{ header.contract_name or '-' }}</td>
+                <td>{{ header.project_name or '-' }}</td>
+                <td class="amount">{{ header.expected_total_amount|format_currency if header.expected_total_amount else '-' }}</td>
+                <td class="amount">{{ header.received_total_amount|format_currency if header.received_total_amount else '-' }}</td>
+                <td class="amount {% if header.header_variance and header.header_variance > 0 %}variance-positive{% elif header.header_variance and header.header_variance < 0 %}variance-negative{% endif %}">
+                    {{ header.header_variance|format_currency if header.header_variance else '-' }}
+                </td>
+                <td class="status status-{{ header.comparison_status|lower if header.comparison_status else 'unchecked' }}">
+                    {{ header.comparison_status or 'Unchecked' }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr class="total-row">
+                <td colspan="2"><strong>Totals</strong></td>
+                <td class="amount"><strong>{{ comparison_data.total_expected|format_currency }}</strong></td>
+                <td class="amount"><strong>{{ comparison_data.total_received|format_currency }}</strong></td>
+                <td class="amount {% if comparison_data.total_variance > 0 %}variance-positive{% elif comparison_data.total_variance < 0 %}variance-negative{% endif %}">
+                    <strong>{{ comparison_data.total_variance|format_currency }}</strong>
+                </td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+</section>
+{% endif %}
+
+<!-- Line Item Comparisons -->
+{% if include_line_items and line_items %}
+<section class="line-items">
+    <h2>Line Item Variances</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Expected Description</th>
+                <th class="amount-col">Expected Amt</th>
+                <th>Received Description</th>
+                <th class="amount-col">Received Amt</th>
+                <th class="amount-col">Variance</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in line_items %}
+            <tr>
+                <td>{{ item.expected_description or '-' }}</td>
+                <td class="amount">{{ item.expected_line_amount|format_currency if item.expected_line_amount else '-' }}</td>
+                <td>{{ item.received_description or '-' }}</td>
+                <td class="amount">{{ item.received_line_amount|format_currency if item.received_line_amount else '-' }}</td>
+                <td class="amount {% if item.variance_amount and item.variance_amount > 0 %}variance-positive{% elif item.variance_amount and item.variance_amount < 0 %}variance-negative{% endif %}">
+                    {{ item.variance_amount|format_currency if item.variance_amount else '-' }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+{% endblock %}

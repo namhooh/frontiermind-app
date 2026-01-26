@@ -5,7 +5,7 @@ These models define the data structures used throughout the contract
 digitization pipeline.
 """
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, field_validator
 from typing import List, Dict, Optional, Any
 from datetime import datetime
 from decimal import Decimal
@@ -128,7 +128,7 @@ class ExtractedClause(BaseModel):
     # Content fields
     raw_text: str = Field(..., description="Original clause text")
     summary: Optional[str] = Field(None, description="Brief summary of the clause")
-    responsible_party: str = Field(..., description="Party responsible for this clause")
+    responsible_party: str = Field(default="Unknown", description="Party responsible for this clause")
     beneficiary_party: Optional[str] = Field(None, description="Beneficiary party, if applicable")
     normalized_payload: Optional[Dict[str, Any]] = Field(
         default_factory=dict,
@@ -159,6 +159,12 @@ class ExtractedClause(BaseModel):
         ge=0.0,
         le=1.0
     )
+
+    @field_validator('responsible_party', mode='before')
+    @classmethod
+    def set_responsible_party_default(cls, v):
+        """Convert None to 'Unknown' for responsible_party."""
+        return v if v is not None else "Unknown"
 
     model_config = ConfigDict(
         json_schema_extra={

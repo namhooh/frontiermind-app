@@ -3,7 +3,7 @@
 
 Quick links: [Directory Structure](#directory-structure) | [Workflows](#common-workflows) | [Scripts](#scripts-reference) | [Troubleshooting](#troubleshooting)
 
-Last updated: 2026-01-24
+Last updated: 2026-01-26
 
 ---
 
@@ -61,6 +61,7 @@ database/
 │   ├── 017_core_table_rls.sql             # Phase 4.1: RLS policies for core tables
 │   ├── 018_export_and_reports_schema.sql  # Phase 5: Export and report generation
 │   ├── 019_invoice_comparison_final_amount.sql  # Phase 5.2: Invoice reconciliation columns
+│   ├── 020_contract_extraction_metadata.sql     # Phase 5.4: Contract metadata extraction
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -874,6 +875,8 @@ database/
 ├── migrations/016_audit_log.sql            # Security audit logging
 ├── migrations/017_core_table_rls.sql       # RLS for core tables
 ├── migrations/018_export_and_reports_schema.sql  # Export and reports
+├── migrations/019_invoice_comparison_final_amount.sql  # Invoice reconciliation
+├── migrations/020_contract_extraction_metadata.sql     # Contract metadata extraction
 ├── diagrams/entity_diagram_v1.0.drawio     # Manual diagram v1.0
 ├── seed/reference/00_reference.sql         # Production lookup data
 ├── seed/fixtures/01_test_orgs.sql          # Test organizations
@@ -951,6 +954,25 @@ database/
 - Enhanced: `invoice_comparison` table with `final_amount` and `adjustment_amount` columns
 - New index: `idx_invoice_comparison_final_amount` (partial index for reconciled invoices)
 - **Workflow:** Track final reconciled payment amount after variance review
+
+**v5.4 (Contract Metadata Extraction)** - Completed
+- Migration: `020_contract_extraction_metadata.sql`
+- New column: `contract.extraction_metadata` JSONB for AI-extracted metadata
+- New index: `idx_contract_extraction_metadata` GIN index for JSONB querying
+- Seeded: `contract_type` lookup table with 9 energy contract types (PPA, O&M, EPC, LEASE, IA, ESA, VPPA, TOLLING, OTHER)
+- New function: `get_contracts_needing_counterparty_review()` - Find contracts needing manual counterparty assignment
+- **Features:**
+  - AI extracts contract type, party names, dates from uploaded contracts
+  - Counterparty fuzzy matching with `rapidfuzz` library (80% threshold)
+  - FK validation for `organization_id`, `project_id` at upload time
+  - Extraction metadata stored for audit trail
+- **Python Backend:**
+  - `services/prompts/metadata_extraction_prompt.py` - New Claude prompt
+  - `db/lookup_service.py` - Counterparty matching, FK validation
+  - `db/contract_repository.py` - `update_contract_metadata()` method
+  - `services/contract_parser.py` - Step 4.5 metadata extraction
+  - `api/contracts.py` - FK validation at upload
+- Reference: `contract-digitization/docs/IMPLEMENTATION_GUIDE.md`
 
 ---
 

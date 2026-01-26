@@ -494,6 +494,75 @@ This document tracks major schema versions and their associated changes.
 
 ---
 
+### v5.4 - 2026-01-26 (Contract Metadata Extraction)
+
+**Description:** Added extraction_metadata JSONB column to contract table and seeded contract_type lookup table for AI-extracted contract metadata.
+
+**Reference:** `IMPLEMENTATION_GUIDE.md` - Contract Metadata Extraction section
+
+**Migrations:**
+- `database/migrations/020_contract_extraction_metadata.sql` - Add extraction_metadata column and seed contract_type
+
+**Changes:**
+
+**Enhanced contract table:**
+- `extraction_metadata` - JSONB - AI-extracted metadata including:
+  - `seller_name` - Extracted seller legal name
+  - `buyer_name` - Extracted buyer legal name
+  - `counterparty_matched` - Boolean if matched to existing record
+  - `counterparty_match_confidence` - Match confidence score (0-1)
+  - `contract_type_extracted` - Original extracted type code
+  - `contract_type_confidence` - Extraction confidence
+  - `extraction_timestamp` - When extraction occurred
+  - `extraction_notes` - Notes from extraction process
+
+**New Index:**
+- `idx_contract_extraction_metadata` - GIN index for JSONB querying
+
+**Seeded contract_type table:**
+| Code | Name | Description |
+|------|------|-------------|
+| PPA | Power Purchase Agreement | Agreement for purchase of electricity |
+| O_M | Operations & Maintenance | Facility O&M services agreement |
+| EPC | Engineering Procurement Construction | Facility construction agreement |
+| LEASE | Lease Agreement | Land or equipment lease |
+| IA | Interconnection Agreement | Grid interconnection with utility |
+| ESA | Energy Storage Agreement | Battery/storage services |
+| VPPA | Virtual Power Purchase Agreement | Financial PPA |
+| TOLLING | Tolling Agreement | Offtaker provides fuel |
+| OTHER | Other | Unclassified contract type |
+
+**New Helper Function:**
+- `get_contracts_needing_counterparty_review(p_limit)` - Returns contracts where counterparty was extracted but not matched to existing records
+
+**Python Backend Integration:**
+- `python-backend/services/prompts/metadata_extraction_prompt.py` - New metadata extraction prompt
+- `python-backend/db/lookup_service.py` - Added counterparty matching with rapidfuzz, FK validation
+- `python-backend/db/contract_repository.py` - Added `update_contract_metadata()` method
+- `python-backend/services/contract_parser.py` - Added metadata extraction step in pipeline
+- `python-backend/api/contracts.py` - Added FK validation at upload
+
+**Dependencies:**
+- `rapidfuzz>=3.6.0` - Fuzzy string matching for counterparty matching
+
+**Workflow:**
+1. Contract uploaded via API
+2. FK validation (organization_id, project_id if provided)
+3. Document parsed and PII anonymized
+4. Metadata extracted (Step 4.5): contract type, parties, dates
+5. Counterparty fuzzy matched to existing records
+6. Contract record updated with resolved FKs and extraction_metadata
+7. Clauses extracted and stored
+
+**Design Notes:**
+- Metadata extraction uses truncated text (~15k chars) since metadata is in first sections
+- Counterparty matching uses token_set_ratio (handles word order variations)
+- Match threshold of 80% required for automatic counterparty resolution
+- Unmatched counterparties stored in extraction_metadata for manual review
+- FK validation prevents orphan contract records with invalid references
+
+---
+
 ### v4.1 - 2026-01-20 (Security Hardening)
 
 **Description:** Comprehensive security hardening based on Security & Privacy Assessment cross-reference analysis. Implements audit logging, enhanced RLS, and access controls.

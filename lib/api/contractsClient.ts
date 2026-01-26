@@ -37,16 +37,27 @@ export interface PIIEntity {
 
 /** Extracted clause from contract */
 export interface ExtractedClause {
+  clause_id?: string
   clause_name: string
   section_reference: string
-  clause_type: string
-  clause_category: string
+
+  // NEW fields (use these)
+  category: string
+  category_code: string
+  category_confidence?: number
+
+  // DEPRECATED fields (nullable for backward compat)
+  clause_type?: string | null
+  clause_category?: string | null
+
   raw_text: string
-  summary: string
+  summary?: string | null
   responsible_party: string
-  beneficiary_party?: string
+  beneficiary_party?: string | null
   normalized_payload: Record<string, unknown>
-  confidence_score: number
+  extraction_confidence?: number
+  confidence_score?: number // deprecated
+  notes?: string | null
 }
 
 /** Clause from database with additional fields */

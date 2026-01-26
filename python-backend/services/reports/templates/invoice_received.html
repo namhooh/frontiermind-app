@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Summary Section -->
+{% if include_summary %}
+<section class="summary">
+    <h2>Summary</h2>
+    <div class="summary-grid">
+        <div class="summary-item">
+            <span class="summary-label">Received Invoices</span>
+            <span class="summary-value">{{ metadata.record_count }}</span>
+        </div>
+        {% if metadata.total_amount %}
+        <div class="summary-item">
+            <span class="summary-label">Total Received Amount</span>
+            <span class="summary-value total-highlight">{{ metadata.total_amount|format_currency }}</span>
+        </div>
+        {% endif %}
+    </div>
+</section>
+{% endif %}
+
+<!-- Received Invoices Table -->
+{% if headers %}
+<section class="invoices">
+    <h2>Received Invoices from Contractors</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Vendor Invoice #</th>
+                <th>Contract</th>
+                <th>Project</th>
+                <th>Invoice Date</th>
+                <th>Due Date</th>
+                <th>Received</th>
+                <th class="amount-col">Amount</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for header in headers %}
+            <tr>
+                <td class="invoice-number">{{ header.vendor_invoice_number or header.id }}</td>
+                <td>{{ header.contract_name or '-' }}</td>
+                <td>{{ header.project_name or '-' }}</td>
+                <td>{{ header.invoice_date|format_date if header.invoice_date else '-' }}</td>
+                <td>{{ header.due_date|format_date if header.due_date else '-' }}</td>
+                <td>{{ header.received_date|format_date if header.received_date else '-' }}</td>
+                <td class="amount">{{ header.total_amount|format_currency if header.total_amount else '-' }}</td>
+                <td class="status status-{{ header.status|lower if header.status else 'unknown' }}">
+                    {{ header.status or '-' }}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr class="total-row">
+                <td colspan="6"><strong>Total Received</strong></td>
+                <td class="amount"><strong>{{ metadata.total_amount|format_currency }}</strong></td>
+                <td></td>
+            </tr>
+        </tfoot>
+    </table>
+</section>
+{% endif %}
+
+<!-- Line Items Table -->
+{% if include_line_items and line_items %}
+<section class="line-items">
+    <h2>Received Line Items</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Invoice ID</th>
+                <th>Description</th>
+                <th>Type</th>
+                <th class="amount-col">Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in line_items %}
+            <tr>
+                <td>{{ item.received_invoice_header_id }}</td>
+                <td>{{ item.description or '-' }}</td>
+                <td>{{ item.line_item_type or '-' }}</td>
+                <td class="amount">{{ item.line_total_amount|format_currency if item.line_total_amount else '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+{% endblock %}

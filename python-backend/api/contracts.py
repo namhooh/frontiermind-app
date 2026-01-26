@@ -22,6 +22,7 @@ from services.contract_parser import (
 from models.contract import ExtractedClause, ContractParseResult
 from db.contract_repository import ContractRepository
 from db.database import init_connection_pool
+from db.lookup_service import LookupService
 
 logger = logging.getLogger(__name__)
 
@@ -35,16 +36,18 @@ router = APIRouter(
     },
 )
 
-# Initialize database connection pool and repository (Phase 2)
+# Initialize database connection pool, repository, and lookup service (Phase 2)
 # This is optional - endpoints will work without it (in-memory mode)
 try:
     init_connection_pool()
     repository = ContractRepository()
-    logger.info("Database repository initialized for API endpoints")
+    lookup_service = LookupService()
+    logger.info("Database repository and lookup service initialized for API endpoints")
     USE_DATABASE = True
 except Exception as e:
     logger.warning(f"Database not available, running in in-memory mode: {e}")
     repository = None
+    lookup_service = None
     USE_DATABASE = False
 
 
@@ -260,47 +263,101 @@ async def parse_contract(
         )
 
     try:
+        # CRITICAL: Require database for contract processing
+        # In-memory mode should only be used for testing, not production
+        if not USE_DATABASE or not repository:
+            logger.error("Contract parsing attempted but database is unavailable")
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail={
+                    "success": False,
+                    "error": "DatabaseNotAvailable",
+                    "message": "Database unavailable. Contract processing requires database storage.",
+                    "details": "Server running in in-memory mode. Clauses would not be persisted.",
+                },
+            )
 
-        # Initialize parser (with database if available)
+        # Initialize parser (with database)
         logger.info(f"Initializing ContractParser (database: {USE_DATABASE})")
         parser = ContractParser(use_database=USE_DATABASE)
+
+        # Validate foreign keys before processing
+        # This prevents creating orphan records with invalid FK references
+        if lookup_service:
+            if organization_id and not lookup_service.validate_organization_id(organization_id):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "success": False,
+                        "error": "InvalidOrganizationId",
+                        "message": f"Organization with ID {organization_id} does not exist",
+                        "details": "Please provide a valid organization_id or omit this parameter",
+                    },
+                )
+
+            if project_id and not lookup_service.validate_project_id(project_id):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "success": False,
+                        "error": "InvalidProjectId",
+                        "message": f"Project with ID {project_id} does not exist",
+                        "details": "Please provide a valid project_id or omit this parameter",
+                    },
+                )
+
+            if counterparty_id and not lookup_service.validate_counterparty_id(counterparty_id):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "success": False,
+                        "error": "InvalidCounterpartyId",
+                        "message": f"Counterparty with ID {counterparty_id} does not exist",
+                        "details": "Please provide a valid counterparty_id or omit this parameter",
+                    },
+                )
+
+            if contract_type_id and not lookup_service.validate_contract_type_id(contract_type_id):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail={
+                        "success": False,
+                        "error": "InvalidContractTypeId",
+                        "message": f"Contract type with ID {contract_type_id} does not exist",
+                        "details": "Please provide a valid contract_type_id or omit this parameter",
+                    },
+                )
 
         # Process contract
         logger.info(f"Processing contract: {file.filename}")
 
-        if USE_DATABASE and repository:
-            # Phase 2: Store contract record with metadata
-            contract_id = repository.store_contract(
-                name=file.filename,
-                file_location=f"/uploads/{file.filename}",  # Placeholder - actual file upload TBD
-                description="Contract uploaded via API",
-                project_id=project_id,  # NEW
-                organization_id=organization_id,  # NEW
-                counterparty_id=counterparty_id,  # NEW
-                contract_type_id=contract_type_id,  # NEW
-                contract_status_id=contract_status_id,  # NEW
-            )
-            logger.info(
-                f"Created contract record: id={contract_id}, "
-                f"project_id={project_id}, org_id={organization_id}"
-            )
+        # Store contract record with metadata
+        contract_id = repository.store_contract(
+            name=file.filename,
+            file_location=f"/uploads/{file.filename}",  # Placeholder - actual file upload TBD
+            description="Contract uploaded via API",
+            project_id=project_id,
+            organization_id=organization_id,
+            counterparty_id=counterparty_id,
+            contract_type_id=contract_type_id,
+            contract_status_id=contract_status_id,
+        )
+        logger.info(
+            f"Created contract record: id={contract_id}, "
+            f"project_id={project_id}, org_id={organization_id}"
+        )
 
-            # Process and store in database
-            result: ContractParseResult = parser.process_and_store_contract(
-                contract_id=contract_id,
-                file_bytes=file_bytes,
-                filename=file.filename
-            )
-        else:
-            # Phase 1: In-memory processing only
-            result: ContractParseResult = parser.process_contract(
-                file_bytes, file.filename
-            )
+        # Process and store in database
+        result: ContractParseResult = parser.process_and_store_contract(
+            contract_id=contract_id,
+            file_bytes=file_bytes,
+            filename=file.filename
+        )
 
         # Build success response
         response = ParseContractResponse(
             success=True,
-            contract_id=result.contract_id,  # 0 for Phase 1
+            contract_id=result.contract_id,
             clauses_extracted=len(result.clauses),
             pii_detected=result.pii_detected,
             pii_anonymized=result.pii_anonymized,

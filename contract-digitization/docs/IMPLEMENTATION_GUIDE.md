@@ -54,6 +54,15 @@
 │     • Store encrypted PII mapping for later                 │
 │     • Create anonymized version of text                     │
 │                                                              │
+│  Step 4.5: Contract Metadata Extraction (NEW - v5.4)        │
+│     • Extract contract-level metadata with Claude API       │
+│     • Contract type (PPA, O&M, EPC, etc.) → FK resolution   │
+│     • Counterparty names → Fuzzy match to existing records  │
+│     • Effective date, end date, term years                  │
+│     • Store extraction_metadata JSONB for audit             │
+│     • Update contract record with resolved FKs              │
+│     • Cost: ~$0.05 per contract (lightweight extraction)    │
+│                                                              │
 │  Step 5: Clause Extraction (Claude API)                     │
 │     • Send ONLY anonymized text to Claude 3.5 Sonnet        │
 │     • Claude NEVER sees original PII                        │
@@ -67,7 +76,7 @@
 │     • Normalize to standard JSON schema                     │
 │     • Cost: $0.50-1.00 per contract                        │
 │                                                              │
-│  Step 5.5: Cross-Verification (NEW)                        │
+│  Step 5.5: Cross-Verification                        │
 │     • Validate clause_type against DB lookup table          │
 │     • Validate clause_category against DB lookup table      │
 │     • If code NOT in DB:                                    │
@@ -1887,6 +1896,136 @@ aws secretsmanager get-secret-value --region us-east-1 --secret-id frontiermind/
 aws ecs describe-services --cluster frontiermind-cluster --services frontiermind-backend
 aws ecs update-service --cluster frontiermind-cluster --service frontiermind-backend --desired-count 1  # Scale up
 aws ecs update-service --cluster frontiermind-cluster --service frontiermind-backend --desired-count 0  # Scale down
+```
+
+---
+
+### Contract Metadata Extraction (v5.4) - January 2026
+
+**Purpose:** Automatically extract and store contract-level metadata (type, counterparty, dates) from uploaded contracts using AI, with automatic FK resolution.
+
+**Key Features:**
+
+| Feature | Description |
+|---------|-------------|
+| **Contract Type Detection** | AI classifies contract as PPA, O&M, EPC, LEASE, IA, ESA, VPPA, TOLLING, or OTHER |
+| **Counterparty Matching** | Fuzzy match extracted party names to existing `counterparty` records (80% threshold) |
+| **FK Validation** | Validates `organization_id`, `project_id` at upload time (400 error if invalid) |
+| **Extraction Metadata** | Stores full extraction details in JSONB for audit and manual review |
+
+**Database Schema (migration 020):**
+
+```sql
+-- New column on contract table
+ALTER TABLE contract ADD COLUMN extraction_metadata JSONB;
+
+-- GIN index for JSONB querying
+CREATE INDEX idx_contract_extraction_metadata ON contract USING GIN (extraction_metadata);
+
+-- Seeded contract_type lookup with 9 types
+INSERT INTO contract_type (name, code, description) VALUES
+  ('Power Purchase Agreement', 'PPA', '...'),
+  ('Operations & Maintenance', 'O_M', '...'),
+  ...
+```
+
+**extraction_metadata JSONB Structure:**
+
+```json
+{
+  "seller_name": "SolarCo Energy LLC",
+  "buyer_name": "City of Greenville",
+  "counterparty_matched": true,
+  "counterparty_match_confidence": 0.92,
+  "counterparty_matched_from": "seller_name",
+  "contract_type_extracted": "PPA",
+  "contract_type_confidence": 0.95,
+  "project_name": "Greenville Solar Project",
+  "facility_location": "Greenville County, SC",
+  "capacity_mw": 50.0,
+  "term_years": 20,
+  "extraction_timestamp": "2026-01-26T12:00:00Z",
+  "extraction_notes": ["20-year term with extension options"]
+}
+```
+
+**Pipeline Integration:**
+
+Metadata extraction runs as **Step 4.5** in the contract parsing pipeline:
+
+```
+Step 1: Document Upload
+Step 2: Document Parsing (LlamaParse)
+Step 3: PII Detection (Presidio)
+Step 4: PII Anonymization + Storage
+Step 4.5: Contract Metadata Extraction ← NEW
+Step 5: Clause Extraction (Claude)
+Step 5.5: Cross-Verification
+Step 6: Database Storage
+Step 7: Relationship Detection
+```
+
+**API Changes:**
+
+```python
+# FK validation at upload (400 error if invalid)
+POST /api/contracts/parse?organization_id=1&project_id=2
+
+# If organization_id=999 doesn't exist:
+{
+  "success": false,
+  "error": "InvalidOrganizationId",
+  "message": "Organization with ID 999 does not exist"
+}
+```
+
+**Files Created/Modified:**
+
+| File | Status | Purpose |
+|------|--------|---------|
+| `database/migrations/020_contract_extraction_metadata.sql` | NEW | Add extraction_metadata column, seed contract_type |
+| `python-backend/services/prompts/metadata_extraction_prompt.py` | NEW | Claude prompt for metadata extraction |
+| `python-backend/db/lookup_service.py` | MODIFIED | Counterparty matching, FK validation methods |
+| `python-backend/db/contract_repository.py` | MODIFIED | `update_contract_metadata()` method |
+| `python-backend/services/contract_parser.py` | MODIFIED | Step 4.5, `_extract_contract_metadata()` |
+| `python-backend/api/contracts.py` | MODIFIED | FK validation at upload |
+| `python-backend/requirements.txt` | MODIFIED | Added `rapidfuzz>=3.6.0` |
+
+**Counterparty Matching Logic:**
+
+```python
+# Uses rapidfuzz for fuzzy string matching
+from rapidfuzz import fuzz, process
+
+# Match against all existing counterparties
+result = process.extractOne(
+    normalized_name,
+    choices,
+    scorer=fuzz.token_set_ratio  # Handles word order variations
+)
+
+# Only match if score >= 80%
+if result and result[1] >= 80:
+    return {'id': matched_id, 'name': matched_name, 'score': result[1] / 100}
+```
+
+**Verification Queries:**
+
+```sql
+-- Find contracts needing counterparty review
+SELECT * FROM get_contracts_needing_counterparty_review(100);
+
+-- Check extraction metadata for a contract
+SELECT id, name, extraction_metadata
+FROM contract
+WHERE id = <contract_id>;
+
+-- Find all contracts with unmatched counterparties
+SELECT id, name,
+       extraction_metadata->>'seller_name' AS seller,
+       extraction_metadata->>'buyer_name' AS buyer
+FROM contract
+WHERE (extraction_metadata->>'counterparty_matched')::BOOLEAN = FALSE;
 ```
 
 ---

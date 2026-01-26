@@ -1,0 +1,85 @@
+{% extends "base.html" %}
+
+{% block content %}
+<!-- Summary Section -->
+{% if include_summary %}
+<section class="summary">
+    <h2>Summary</h2>
+    <div class="summary-grid">
+        <div class="summary-item">
+            <span class="summary-label">Expected Invoices</span>
+            <span class="summary-value">{{ metadata.record_count }}</span>
+        </div>
+        {% if metadata.total_amount %}
+        <div class="summary-item">
+            <span class="summary-label">Total Expected Amount</span>
+            <span class="summary-value total-highlight">{{ metadata.total_amount|format_currency }}</span>
+        </div>
+        {% endif %}
+    </div>
+</section>
+{% endif %}
+
+<!-- Expected Invoices Table -->
+{% if headers %}
+<section class="invoices">
+    <h2>Expected Invoices from Contractors</h2>
+    <p class="section-note">Based on contract terms and meter data for the billing period.</p>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Contract</th>
+                <th>Project</th>
+                <th>Created</th>
+                <th class="amount-col">Expected Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for header in headers %}
+            <tr>
+                <td>{{ header.id }}</td>
+                <td>{{ header.contract_name or '-' }}</td>
+                <td>{{ header.project_name or '-' }}</td>
+                <td>{{ header.created_at|format_date if header.created_at else '-' }}</td>
+                <td class="amount">{{ header.expected_total_amount|format_currency if header.expected_total_amount else '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+        <tfoot>
+            <tr class="total-row">
+                <td colspan="4"><strong>Total Expected</strong></td>
+                <td class="amount"><strong>{{ metadata.total_amount|format_currency }}</strong></td>
+            </tr>
+        </tfoot>
+    </table>
+</section>
+{% endif %}
+
+<!-- Line Items Table -->
+{% if include_line_items and line_items %}
+<section class="line-items">
+    <h2>Expected Line Items</h2>
+    <table class="data-table">
+        <thead>
+            <tr>
+                <th>Invoice ID</th>
+                <th>Description</th>
+                <th>Type</th>
+                <th class="amount-col">Expected Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in line_items %}
+            <tr>
+                <td>{{ item.expected_invoice_header_id }}</td>
+                <td>{{ item.description or '-' }}</td>
+                <td>{{ item.line_item_type or '-' }}</td>
+                <td class="amount">{{ item.line_total_amount|format_currency if item.line_total_amount else '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</section>
+{% endif %}
+{% endblock %}
