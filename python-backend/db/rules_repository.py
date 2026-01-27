@@ -247,6 +247,76 @@ class RulesRepository:
             logger.error(f"Failed to create rule_output: {e}")
             return None
 
+    def create_rule_output_simple(
+        self,
+        default_event_id: int,
+        project_id: int,
+        ld_amount: Decimal,
+        metadata: Dict[str, Any]
+    ) -> Optional[int]:
+        """
+        Create a rule output record from invoice workflow.
+
+        Simplified version that doesn't require clause_id (used for
+        availability-based LD calculated on the frontend).
+
+        Args:
+            default_event_id: Parent default event ID
+            project_id: Project ID
+            ld_amount: Liquidated damages amount
+            metadata: JSONB with calculation details
+
+        Returns:
+            rule_output.id or None on failure
+        """
+        rule_type = metadata.get('rule_type', 'availability_guarantee')
+        calculated = metadata.get('calculated_value', 0)
+        threshold = metadata.get('threshold_value', 0)
+        description = f"Availability: {calculated:.2f}% (target: {threshold}%)"
+
+        query = """
+            INSERT INTO rule_output (
+                default_event_id,
+                project_id,
+                rule_output_type_id,
+                currency_id,
+                description,
+                metadata_detail,
+                ld_amount,
+                breach,
+                created_at
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, NOW())
+            RETURNING id
+        """
+
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        query,
+                        (
+                            default_event_id,
+                            project_id,
+                            1,  # rule_output_type_id = 1 (Liquidated Damages)
+                            1,  # currency_id = 1 (USD)
+                            description,
+                            Json(metadata),
+                            ld_amount,
+                            True,  # breach
+                        )
+                    )
+                    rule_output_id = cursor.fetchone()['id']
+
+            logger.info(
+                f"Created rule_output {rule_output_id} for default_event {default_event_id} (simple)"
+            )
+            return rule_output_id
+
+        except Exception as e:
+            logger.error(f"Failed to create rule_output (simple): {e}")
+            return None
+
     def create_notification(
         self,
         project_id: int,

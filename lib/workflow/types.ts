@@ -73,6 +73,10 @@ export interface WorkflowState {
   // Current step
   currentStep: WorkflowStep
 
+  // Step 1: Project/Organization Selection
+  projectId: number | null
+  organizationId: number | null
+
   // Step 1: Contract Upload
   contractFile: File | null
   parseResult: ContractParseResult | null
@@ -92,6 +96,8 @@ export interface WorkflowState {
   invoicePreview: InvoicePreview | null
   ruleEvaluationResult: RuleEvaluationResult | null
   isGeneratingInvoice: boolean
+  savedInvoiceId: number | null
+  isSavingInvoice: boolean
 
   // Step 5: Report Generation
   reportData: GeneratedReport | null
@@ -107,6 +113,8 @@ export interface WorkflowState {
 
 export type WorkflowAction =
   | { type: 'SET_STEP'; step: WorkflowStep }
+  | { type: 'SET_PROJECT_ID'; projectId: number | null }
+  | { type: 'SET_ORGANIZATION_ID'; organizationId: number | null }
   | { type: 'SET_CONTRACT_FILE'; file: File | null }
   | { type: 'SET_PARSE_RESULT'; result: ContractParseResult | null }
   | { type: 'SET_UPLOADING'; isUploading: boolean }
@@ -119,6 +127,8 @@ export type WorkflowAction =
   | { type: 'SET_INVOICE_PREVIEW'; preview: InvoicePreview | null }
   | { type: 'SET_RULE_EVALUATION_RESULT'; result: RuleEvaluationResult | null }
   | { type: 'SET_GENERATING_INVOICE'; isGenerating: boolean }
+  | { type: 'SET_SAVED_INVOICE_ID'; invoiceId: number | null }
+  | { type: 'SET_SAVING_INVOICE'; isSaving: boolean }
   | { type: 'SET_REPORT_DATA'; report: GeneratedReport | null }
   | { type: 'SET_GENERATING_REPORT'; isGenerating: boolean }
   | { type: 'SET_REPORT_ERROR'; error: string | null }
@@ -134,7 +144,11 @@ export type WorkflowAction =
 export const initialWorkflowState: WorkflowState = {
   currentStep: 1,
 
-  // Step 1
+  // Step 1: Project/Organization
+  projectId: null,
+  organizationId: null,
+
+  // Step 1: Contract Upload
   contractFile: null,
   parseResult: null,
   isUploading: false,
@@ -158,6 +172,8 @@ export const initialWorkflowState: WorkflowState = {
   invoicePreview: null,
   ruleEvaluationResult: null,
   isGeneratingInvoice: false,
+  savedInvoiceId: null,
+  isSavingInvoice: false,
 
   // Step 5
   reportData: null,

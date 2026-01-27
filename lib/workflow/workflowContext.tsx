@@ -28,6 +28,12 @@ function workflowReducer(state: WorkflowState, action: WorkflowAction): Workflow
     case 'SET_STEP':
       return { ...state, currentStep: action.step }
 
+    case 'SET_PROJECT_ID':
+      return { ...state, projectId: action.projectId }
+
+    case 'SET_ORGANIZATION_ID':
+      return { ...state, organizationId: action.organizationId }
+
     case 'SET_CONTRACT_FILE':
       return { ...state, contractFile: action.file }
 
@@ -63,6 +69,12 @@ function workflowReducer(state: WorkflowState, action: WorkflowAction): Workflow
 
     case 'SET_GENERATING_INVOICE':
       return { ...state, isGeneratingInvoice: action.isGenerating }
+
+    case 'SET_SAVED_INVOICE_ID':
+      return { ...state, savedInvoiceId: action.invoiceId }
+
+    case 'SET_SAVING_INVOICE':
+      return { ...state, isSavingInvoice: action.isSaving }
 
     case 'SET_REPORT_DATA':
       return { ...state, reportData: action.report }
@@ -108,6 +120,10 @@ interface WorkflowContextValue {
   goToPreviousStep: () => void
   canProceedToStep: (step: WorkflowStep) => boolean
 
+  // Step 1: Project/Organization Selection
+  setProjectId: (projectId: number | null) => void
+  setOrganizationId: (organizationId: number | null) => void
+
   // Step 1: Contract Upload
   setContractFile: (file: File | null) => void
   setParseResult: (result: ContractParseResult | null) => void
@@ -127,6 +143,8 @@ interface WorkflowContextValue {
   setInvoicePreview: (preview: InvoicePreview | null) => void
   setRuleEvaluationResult: (result: RuleEvaluationResult | null) => void
   setGeneratingInvoice: (isGenerating: boolean) => void
+  setSavedInvoiceId: (invoiceId: number | null) => void
+  setSavingInvoice: (isSaving: boolean) => void
 
   // Step 5: Report
   setReportData: (report: GeneratedReport | null) => void
@@ -173,6 +191,15 @@ export function WorkflowProvider({ children }: WorkflowProviderProps) {
       dispatch({ type: 'SET_STEP', step: (state.currentStep - 1) as WorkflowStep })
     }
   }, [state.currentStep])
+
+  // Step 1: Project/Organization Selection
+  const setProjectId = useCallback((projectId: number | null) => {
+    dispatch({ type: 'SET_PROJECT_ID', projectId })
+  }, [])
+
+  const setOrganizationId = useCallback((organizationId: number | null) => {
+    dispatch({ type: 'SET_ORGANIZATION_ID', organizationId })
+  }, [])
 
   const canProceedToStep = useCallback(
     (step: WorkflowStep): boolean => {
@@ -250,6 +277,14 @@ export function WorkflowProvider({ children }: WorkflowProviderProps) {
     dispatch({ type: 'SET_GENERATING_INVOICE', isGenerating })
   }, [])
 
+  const setSavedInvoiceId = useCallback((invoiceId: number | null) => {
+    dispatch({ type: 'SET_SAVED_INVOICE_ID', invoiceId })
+  }, [])
+
+  const setSavingInvoice = useCallback((isSaving: boolean) => {
+    dispatch({ type: 'SET_SAVING_INVOICE', isSaving })
+  }, [])
+
   // Step 5: Report
   const setReportData = useCallback((report: GeneratedReport | null) => {
     dispatch({ type: 'SET_REPORT_DATA', report })
@@ -287,6 +322,8 @@ export function WorkflowProvider({ children }: WorkflowProviderProps) {
       goToNextStep,
       goToPreviousStep,
       canProceedToStep,
+      setProjectId,
+      setOrganizationId,
       setContractFile,
       setParseResult,
       setUploading,
@@ -299,6 +336,8 @@ export function WorkflowProvider({ children }: WorkflowProviderProps) {
       setInvoicePreview,
       setRuleEvaluationResult,
       setGeneratingInvoice,
+      setSavedInvoiceId,
+      setSavingInvoice,
       setReportData,
       setGeneratingReport,
       setReportError,
@@ -313,6 +352,8 @@ export function WorkflowProvider({ children }: WorkflowProviderProps) {
       goToNextStep,
       goToPreviousStep,
       canProceedToStep,
+      setProjectId,
+      setOrganizationId,
       setContractFile,
       setParseResult,
       setUploading,
@@ -325,6 +366,8 @@ export function WorkflowProvider({ children }: WorkflowProviderProps) {
       setInvoicePreview,
       setRuleEvaluationResult,
       setGeneratingInvoice,
+      setSavedInvoiceId,
+      setSavingInvoice,
       setReportData,
       setGeneratingReport,
       setReportError,

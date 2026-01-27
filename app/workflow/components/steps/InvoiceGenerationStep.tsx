@@ -7,7 +7,7 @@
  * Calls rules evaluation API and generates client-side invoice.
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import {
   Receipt,
   Loader2,
@@ -20,7 +20,7 @@ import {
 } from 'lucide-react'
 import { useWorkflow } from '@/lib/workflow'
 import { generateInvoicePreview } from '@/lib/workflow/invoiceGenerator'
-import { APIClient, ContractsAPIError } from '@/lib/api'
+import { APIClient, ContractsAPIError, InvoicesClient, InvoicesAPIError } from '@/lib/api'
 import { Button } from '@/app/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card'
 import { Badge } from '@/app/components/ui/badge'
@@ -32,13 +32,15 @@ export function InvoiceGenerationStep() {
     setInvoicePreview,
     setRuleEvaluationResult,
     setGeneratingInvoice,
+    setSavedInvoiceId,
+    setSavingInvoice,
     goToPreviousStep,
     goToNextStep,
     resetWorkflow,
   } = useWorkflow()
 
   const [error, setError] = useState<string | null>(null)
-  const [evaluationAttempted, setEvaluationAttempted] = useState(false)
+  const hasInitiated = useRef(false)
 
   const apiClient = useMemo(
     () =>
@@ -48,7 +50,15 @@ export function InvoiceGenerationStep() {
     []
   )
 
-  const { parseResult, meterDataSummary, invoicePreview, isGeneratingInvoice } = state
+  const invoicesClient = useMemo(
+    () =>
+      new InvoicesClient({
+        enableLogging: process.env.NODE_ENV === 'development',
+      }),
+    []
+  )
+
+  const { parseResult, meterDataSummary, invoicePreview, isGeneratingInvoice, isSavingInvoice, savedInvoiceId } = state
 
   const handleGenerateInvoice = async () => {
     if (!parseResult?.clauses || !meterDataSummary) {
@@ -58,7 +68,6 @@ export function InvoiceGenerationStep() {
 
     setGeneratingInvoice(true)
     setError(null)
-    setEvaluationAttempted(true)
 
     try {
       // Try to evaluate rules if we have a contract_id
@@ -104,14 +113,100 @@ export function InvoiceGenerationStep() {
   const handleRegenerate = () => {
     setInvoicePreview(null)
     setRuleEvaluationResult(null)
+    setSavedInvoiceId(null)
     setError(null)
-    setEvaluationAttempted(false)
+    hasInitiated.current = false
+  }
+
+  const handleSaveAndProceed = async () => {
+    // If already saved, just proceed
+    if (savedInvoiceId) {
+      goToNextStep()
+      return
+    }
+
+    if (!invoicePreview || !parseResult || !state.projectId || !state.organizationId) {
+      setError('Missing required data to save invoice')
+      return
+    }
+
+    setSavingInvoice(true)
+    setError(null)
+
+    try {
+      // Convert invoice preview to API format
+      const lineItems = invoicePreview.lineItems.map((item) => ({
+        description: item.description,
+        quantity: item.quantity,
+        unit: item.unit,
+        rate: item.rate,
+        amount: item.amount,
+      }))
+
+      // Add LD adjustments as line items if any
+      if (invoicePreview.ldAdjustments && invoicePreview.ldAdjustments.length > 0) {
+        invoicePreview.ldAdjustments.forEach((adj) => {
+          lineItems.push({
+            description: adj.description,
+            quantity: 1,
+            unit: 'LD',
+            rate: adj.amount,
+            amount: adj.amount,
+          })
+        })
+      }
+
+      // Build default events for availability-based LD (only frontend-calculated ones)
+      const defaultEvents = invoicePreview.ldAdjustments
+        ?.filter((adj) => adj.ruleType === 'availability_guarantee')
+        .map((adj) => ({
+          description: adj.description,
+          rule_type: adj.ruleType,
+          calculated_value: meterDataSummary.availabilityPercentage,
+          threshold_value: 95, // Standard availability threshold
+          shortfall: 95 - meterDataSummary.availabilityPercentage,
+          ld_amount: Math.abs(adj.amount),
+          time_start: meterDataSummary.dateRange.start,
+          time_end: meterDataSummary.dateRange.end,
+        }))
+
+      const result = await invoicesClient.createInvoice({
+        project_id: state.projectId,
+        organization_id: state.organizationId,
+        contract_id: parseResult.contract_id,
+        billing_period_id: 1, // TODO: Add billing period selection
+        invoice_data: {
+          invoice_number: invoicePreview.invoiceNumber,
+          invoice_date: invoicePreview.invoiceDate,
+          total_amount: invoicePreview.totalAmount,
+          status: 'draft',
+        },
+        line_items: lineItems,
+        default_events: defaultEvents && defaultEvents.length > 0 ? defaultEvents : undefined,
+      })
+
+      setSavedInvoiceId(result.invoice_id)
+      goToNextStep()
+    } catch (err) {
+      if (err instanceof InvoicesAPIError) {
+        setError(`Failed to save invoice: ${err.message}`)
+      } else if (err instanceof Error) {
+        setError(`Failed to save invoice: ${err.message}`)
+      } else {
+        setError('Failed to save invoice')
+      }
+    } finally {
+      setSavingInvoice(false)
+    }
   }
 
   // Auto-generate on mount if not already generated
-  if (!invoicePreview && !isGeneratingInvoice && !error && !evaluationAttempted) {
-    handleGenerateInvoice()
-  }
+  useEffect(() => {
+    if (!invoicePreview && !isGeneratingInvoice && !error && !hasInitiated.current) {
+      hasInitiated.current = true
+      handleGenerateInvoice()
+    }
+  }, [invoicePreview, isGeneratingInvoice, error])
 
   // Missing prerequisites
   if (!parseResult || !meterDataSummary) {
@@ -206,7 +301,7 @@ export function InvoiceGenerationStep() {
             </div>
 
             {/* Rule Evaluation Results */}
-            {state.ruleEvaluationResult && (
+            {(state.ruleEvaluationResult || (invoicePreview?.ldAdjustments && invoicePreview.ldAdjustments.length > 0)) && (
               <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
                 <h4 className="font-medium text-blue-900 mb-2">
                   Compliance Check Results
@@ -215,14 +310,34 @@ export function InvoiceGenerationStep() {
                   <div>
                     <span className="text-blue-600">Default Events:</span>{' '}
                     <span className="font-medium">
-                      {state.ruleEvaluationResult.default_events.length}
+                      {state.ruleEvaluationResult?.default_events?.length ?? 0}
+                      {invoicePreview?.ldAdjustments && invoicePreview.ldAdjustments.length > 0 &&
+                        !state.ruleEvaluationResult?.default_events?.length &&
+                        ` (${invoicePreview.ldAdjustments.length} from availability)`}
                     </span>
                   </div>
                   <div>
                     <span className="text-blue-600">Total LD:</span>{' '}
                     <span className="font-medium text-red-600">
-                      ${state.ruleEvaluationResult.ld_total.toLocaleString()}
+                      ${(invoicePreview?.ldTotal ?? state.ruleEvaluationResult?.ld_total ?? 0).toLocaleString()}
                     </span>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Saved Invoice Indicator */}
+            {savedInvoiceId && (
+              <div className="p-4 bg-blue-50 border border-blue-200 rounded-lg">
+                <div className="flex items-center gap-3">
+                  <Check className="w-6 h-6 text-blue-500" />
+                  <div>
+                    <p className="font-medium text-blue-900">
+                      Invoice Saved Successfully
+                    </p>
+                    <p className="text-sm text-blue-700">
+                      Invoice ID: {savedInvoiceId} - Ready for report generation
+                    </p>
                   </div>
                 </div>
               </div>
@@ -244,9 +359,27 @@ export function InvoiceGenerationStep() {
               Start New Workflow
             </Button>
             {invoicePreview && (
-              <Button variant="emerald" onClick={goToNextStep}>
-                Generate Report
-                <FileText className="w-4 h-4 ml-2" />
+              <Button
+                variant="emerald"
+                onClick={handleSaveAndProceed}
+                disabled={isSavingInvoice}
+              >
+                {isSavingInvoice ? (
+                  <>
+                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                    Saving Invoice...
+                  </>
+                ) : savedInvoiceId ? (
+                  <>
+                    Generate Report
+                    <FileText className="w-4 h-4 ml-2" />
+                  </>
+                ) : (
+                  <>
+                    Save & Generate Report
+                    <ArrowRight className="w-4 h-4 ml-2" />
+                  </>
+                )}
               </Button>
             )}
           </div>

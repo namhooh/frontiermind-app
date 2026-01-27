@@ -99,3 +99,24 @@ export {
   // Types - Config
   type ReportsClientConfig,
 } from './reportsClient'
+
+// Invoices Client
+export {
+  // Main Client Class
+  InvoicesClient,
+
+  // Error Class
+  InvoicesAPIError,
+
+  // Standalone Functions
+  createInvoice,
+
+  // Types - Requests/Responses
+  type InvoiceLineItemRequest,
+  type InvoiceDataRequest,
+  type CreateInvoiceRequest,
+  type CreateInvoiceResponse,
+
+  // Types - Config
+  type InvoicesClientConfig,
+} from './invoicesClient'
