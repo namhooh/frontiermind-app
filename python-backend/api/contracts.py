@@ -6,7 +6,7 @@ Phase 1 implementation focuses on in-memory processing without database persiste
 """
 
 import logging
-from fastapi import APIRouter, UploadFile, File, HTTPException, status, Query, Request
+from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -183,11 +183,11 @@ async def parse_contract(
         description="Contract file to parse (PDF or DOCX)",
         media_type="application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document",
     ),
-    project_id: Optional[int] = Query(None, description="Project ID for this contract"),
-    organization_id: Optional[int] = Query(None, description="Organization ID"),
-    counterparty_id: Optional[int] = Query(None, description="Counterparty ID"),
-    contract_type_id: Optional[int] = Query(None, description="Contract type ID"),
-    contract_status_id: Optional[int] = Query(None, description="Contract status ID"),
+    project_id: Optional[str] = Form(None, description="Project ID for this contract"),
+    organization_id: Optional[str] = Form(None, description="Organization ID"),
+    counterparty_id: Optional[str] = Form(None, description="Counterparty ID"),
+    contract_type_id: Optional[str] = Form(None, description="Contract type ID"),
+    contract_status_id: Optional[str] = Form(None, description="Contract status ID"),
 ) -> ParseContractResponse:
     """
     Parse a contract file and extract structured clauses with PII protection.
@@ -207,6 +207,17 @@ async def parse_contract(
         HTTPException: For validation errors, processing failures, or unsupported formats
     """
     logger.info(f"Received contract parsing request: {file.filename}")
+    logger.info(f"Form data received (raw) - project_id: {project_id}, organization_id: {organization_id}, "
+                f"counterparty_id: {counterparty_id}, contract_type_id: {contract_type_id}")
+
+    # Convert string form fields to integers (Form fields come as strings from multipart/form-data)
+    project_id_int: Optional[int] = int(project_id) if project_id else None
+    organization_id_int: Optional[int] = int(organization_id) if organization_id else None
+    counterparty_id_int: Optional[int] = int(counterparty_id) if counterparty_id else None
+    contract_type_id_int: Optional[int] = int(contract_type_id) if contract_type_id else None
+    contract_status_id_int: Optional[int] = int(contract_status_id) if contract_status_id else None
+
+    logger.info(f"Form data received (converted) - project_id: {project_id_int}, organization_id: {organization_id_int}")
 
     # Validate file format
     if not file.filename:
@@ -284,46 +295,46 @@ async def parse_contract(
         # Validate foreign keys before processing
         # This prevents creating orphan records with invalid FK references
         if lookup_service:
-            if organization_id and not lookup_service.validate_organization_id(organization_id):
+            if organization_id_int and not lookup_service.validate_organization_id(organization_id_int):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
                         "success": False,
                         "error": "InvalidOrganizationId",
-                        "message": f"Organization with ID {organization_id} does not exist",
+                        "message": f"Organization with ID {organization_id_int} does not exist",
                         "details": "Please provide a valid organization_id or omit this parameter",
                     },
                 )
 
-            if project_id and not lookup_service.validate_project_id(project_id):
+            if project_id_int and not lookup_service.validate_project_id(project_id_int):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
                         "success": False,
                         "error": "InvalidProjectId",
-                        "message": f"Project with ID {project_id} does not exist",
+                        "message": f"Project with ID {project_id_int} does not exist",
                         "details": "Please provide a valid project_id or omit this parameter",
                     },
                 )
 
-            if counterparty_id and not lookup_service.validate_counterparty_id(counterparty_id):
+            if counterparty_id_int and not lookup_service.validate_counterparty_id(counterparty_id_int):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
                         "success": False,
                         "error": "InvalidCounterpartyId",
-                        "message": f"Counterparty with ID {counterparty_id} does not exist",
+                        "message": f"Counterparty with ID {counterparty_id_int} does not exist",
                         "details": "Please provide a valid counterparty_id or omit this parameter",
                     },
                 )
 
-            if contract_type_id and not lookup_service.validate_contract_type_id(contract_type_id):
+            if contract_type_id_int and not lookup_service.validate_contract_type_id(contract_type_id_int):
                 raise HTTPException(
                     status_code=status.HTTP_400_BAD_REQUEST,
                     detail={
                         "success": False,
                         "error": "InvalidContractTypeId",
-                        "message": f"Contract type with ID {contract_type_id} does not exist",
+                        "message": f"Contract type with ID {contract_type_id_int} does not exist",
                         "details": "Please provide a valid contract_type_id or omit this parameter",
                     },
                 )
@@ -336,15 +347,15 @@ async def parse_contract(
             name=file.filename,
             file_location=f"/uploads/{file.filename}",  # Placeholder - actual file upload TBD
             description="Contract uploaded via API",
-            project_id=project_id,
-            organization_id=organization_id,
-            counterparty_id=counterparty_id,
-            contract_type_id=contract_type_id,
-            contract_status_id=contract_status_id,
+            project_id=project_id_int,
+            organization_id=organization_id_int,
+            counterparty_id=counterparty_id_int,
+            contract_type_id=contract_type_id_int,
+            contract_status_id=contract_status_id_int,
         )
         logger.info(
             f"Created contract record: id={contract_id}, "
-            f"project_id={project_id}, org_id={organization_id}"
+            f"project_id={project_id_int}, org_id={organization_id_int}"
         )
 
         # Process and store in database

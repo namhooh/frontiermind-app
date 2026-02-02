@@ -1594,11 +1594,32 @@ Remember: Return ONLY the JSON object, no additional text."""
                             break
 
                 if not result['counterparty_id']:
-                    logger.info(
-                        f"No counterparty match found. "
-                        f"Seller: '{metadata.get('seller_name')}', "
-                        f"Buyer: '{metadata.get('buyer_name')}'"
-                    )
+                    # Auto-create counterparty from seller_name (or buyer_name as fallback)
+                    party_name = metadata.get('seller_name') or metadata.get('buyer_name')
+                    party_type = 'seller' if metadata.get('seller_name') else 'buyer'
+
+                    if party_name:
+                        logger.info(
+                            f"No counterparty match found. Auto-creating from {party_type}: '{party_name}'"
+                        )
+                        new_id = self.lookup_service.create_counterparty(
+                            party_name,
+                            counterparty_type=party_type
+                        )
+                        if new_id:
+                            result['counterparty_id'] = new_id
+                            result['extraction_metadata']['counterparty_matched'] = False
+                            result['extraction_metadata']['counterparty_auto_created'] = True
+                            result['extraction_metadata']['counterparty_created_from'] = party_type + '_name'
+                            logger.info(
+                                f"Counterparty auto-created: '{party_name}' -> ID {new_id}"
+                            )
+                    else:
+                        logger.info(
+                            f"No counterparty match found and no party names to create from. "
+                            f"Seller: '{metadata.get('seller_name')}', "
+                            f"Buyer: '{metadata.get('buyer_name')}'"
+                        )
 
             logger.info(
                 f"Metadata extraction complete: "

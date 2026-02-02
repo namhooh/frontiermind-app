@@ -413,11 +413,12 @@ async def generate_report(
         # Create generated_report record
         report_id = report_repository.create_generated_report(
             org_id=org_id,
-            template_id=report_request.template_id,
             report_type=report_type.value if isinstance(report_type, InvoiceReportType) else report_type,
             name=report_name,
             file_format=file_format.value if isinstance(file_format, FileFormat) else file_format,
+            generation_source="on_demand",
             billing_period_id=report_request.billing_period_id,
+            template_id=report_request.template_id,
             contract_id=report_request.contract_id,
             project_id=report_request.project_id,
         )
@@ -493,7 +494,7 @@ async def list_generated_reports(
         if billing_period_id:
             filters["billing_period_id"] = billing_period_id
 
-        reports = report_repository.list_generated_reports(
+        reports, total = report_repository.list_generated_reports(
             org_id=org_id,
             filters=filters,
             limit=limit,
@@ -513,7 +514,7 @@ async def list_generated_reports(
         return GeneratedReportListResponse(
             success=True,
             reports=[GeneratedReportResponse(**r) for r in reports],
-            total=len(reports),
+            total=total,
         )
 
     except Exception as e:
@@ -619,11 +620,11 @@ async def get_download_url(
                 },
             )
 
-        # Generate presigned URL
+        # Generate presigned URL - use actual filename with extension from S3 path
         download_url = storage.get_presigned_url(
             file_path=file_path,
             expiry=expiry,
-            filename_override=report.get("name"),
+            filename_override=file_path.split("/")[-1],
         )
 
         # Increment download count

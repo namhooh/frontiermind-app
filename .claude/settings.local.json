@@ -55,7 +55,21 @@
       "Bash(pip3 show:*)",
       "Bash(npm run lint:*)",
       "Bash(source aws/infrastructure-config.env)",
-      "Bash(./deploy-aws.sh)"
+      "Bash(./deploy-aws.sh)",
+      "Bash(ssh-add:*)",
+      "Bash(git remote set-url:*)",
+      "Bash(export:*)",
+      "Bash(aws logs filter-log-events:*)",
+      "Bash(aws secretsmanager update-secret:*)",
+      "Bash(aws ecs update-service:*)",
+      "Bash(aws s3:*)",
+      "Bash(aws iam list-attached-role-policies:*)",
+      "Bash(aws iam list-role-policies:*)",
+      "Bash(aws iam get-role-policy:*)",
+      "Bash(aws iam put-role-policy:*)",
+      "Bash(git stash:*)",
+      "Bash(sort:*)",
+      "Bash(uniq:*)"
     ]
   }
 }

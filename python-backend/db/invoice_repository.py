@@ -84,8 +84,8 @@ class InvoiceRepository:
                         ilit.code AS line_item_type_code,
                         -- Meter data (for energy invoices)
                         ili.meter_aggregate_id,
-                        ma.aggregation_type,
-                        ma.total_value AS metered_value,
+                        ma.period_type AS aggregation_type,
+                        ma.total_production AS metered_value,
                         ma.unit
                     FROM invoice_header ih
                     JOIN billing_period bp ON bp.id = ih.billing_period_id
@@ -720,6 +720,116 @@ class InvoiceRepository:
             f"variance={total_variance}"
         )
         return result
+
+    # =========================================================================
+    # INVOICE CREATION METHODS
+    # =========================================================================
+
+    def create_invoice(
+        self,
+        org_id: int,
+        project_id: int,
+        contract_id: int,
+        billing_period_id: int,
+        invoice_data: Dict[str, Any],
+        line_items: List[Dict[str, Any]]
+    ) -> int:
+        """
+        Create an invoice header and line items from workflow data.
+
+        Args:
+            org_id: Organization ID (security filter)
+            project_id: Project ID
+            contract_id: Contract ID
+            billing_period_id: Billing period ID
+            invoice_data: Invoice header data including:
+                - invoice_number: str
+                - invoice_date: str (ISO format)
+                - due_date: str (optional)
+                - total_amount: Decimal
+                - status: str (defaults to 'draft')
+            line_items: List of line item dicts with:
+                - description: str
+                - quantity: Decimal
+                - unit: str
+                - rate: Decimal (line_unit_price)
+                - amount: Decimal (line_total_amount)
+                - invoice_line_item_type_id: int (optional)
+                - meter_aggregate_id: int (optional)
+
+        Returns:
+            Created invoice_header ID
+
+        Raises:
+            psycopg2.Error: If database operation fails
+        """
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                # Insert invoice header
+                cursor.execute(
+                    """
+                    INSERT INTO invoice_header (
+                        invoice_number,
+                        billing_period_id,
+                        invoice_date,
+                        due_date,
+                        total_amount,
+                        status,
+                        contract_id,
+                        project_id,
+                        created_at
+                    ) VALUES (
+                        %s, %s, %s, %s, %s, %s, %s, %s, NOW()
+                    )
+                    RETURNING id
+                    """,
+                    (
+                        invoice_data.get('invoice_number', f'INV-{billing_period_id}-{contract_id}'),
+                        billing_period_id,
+                        invoice_data.get('invoice_date'),
+                        invoice_data.get('due_date'),
+                        invoice_data.get('total_amount', Decimal('0')),
+                        invoice_data.get('status', 'draft'),
+                        contract_id,
+                        project_id,
+                    )
+                )
+                invoice_id = cursor.fetchone()['id']
+
+                # Insert line items
+                for item in line_items:
+                    cursor.execute(
+                        """
+                        INSERT INTO invoice_line_item (
+                            invoice_header_id,
+                            description,
+                            quantity,
+                            line_unit_price,
+                            line_total_amount,
+                            invoice_line_item_type_id,
+                            meter_aggregate_id,
+                            created_at
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, NOW()
+                        )
+                        """,
+                        (
+                            invoice_id,
+                            item.get('description', ''),
+                            item.get('quantity', 1),
+                            item.get('rate', item.get('line_unit_price', Decimal('0'))),
+                            item.get('amount', item.get('line_total_amount', Decimal('0'))),
+                            item.get('invoice_line_item_type_id'),
+                            item.get('meter_aggregate_id'),
+                        )
+                    )
+
+                logger.info(
+                    f"Created invoice {invoice_id} with {len(line_items)} line items "
+                    f"for contract {contract_id}, project {project_id}"
+                )
+
+                return invoice_id
 
     # =========================================================================
     # ADDITIONAL HELPER METHODS

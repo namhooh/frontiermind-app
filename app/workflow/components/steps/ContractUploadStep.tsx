@@ -5,10 +5,11 @@
  *
  * Step 1: Upload and parse a contract document.
  * Wraps the existing ContractUpload component with workflow integration.
+ * Includes project/organization selection before file upload.
  */
 
-import { useState, useCallback, useRef, useMemo } from 'react'
-import { Upload, FileText, Loader2, AlertCircle, Check } from 'lucide-react'
+import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
+import { Upload, FileText, Loader2, AlertCircle, Check, Building2, FolderKanban } from 'lucide-react'
 import { useWorkflow } from '@/lib/workflow'
 import {
   APIClient,
@@ -18,6 +19,25 @@ import {
 import { Button } from '@/app/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/card'
 import { cn } from '@/app/components/ui/cn'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/app/components/ui/select'
+import { Label } from '@/app/components/ui/label'
+
+interface Organization {
+  id: number
+  name: string
+}
+
+interface Project {
+  id: number
+  name: string
+  organization_id: number
+}
 
 type ProcessingStage =
   | 'idle'
@@ -72,6 +92,8 @@ export function ContractUploadStep() {
     setParseResult,
     setUploading,
     setUploadError,
+    setProjectId,
+    setOrganizationId,
     goToNextStep,
   } = useWorkflow()
 
@@ -82,6 +104,13 @@ export function ContractUploadStep() {
   const [localFile, setLocalFile] = useState<File | null>(state.contractFile)
   const [isDragActive, setIsDragActive] = useState(false)
 
+  // Organization/Project state
+  const [organizations, setOrganizations] = useState<Organization[]>([])
+  const [projects, setProjects] = useState<Project[]>([])
+  const [loadingOrgs, setLoadingOrgs] = useState(true)
+  const [loadingProjects, setLoadingProjects] = useState(false)
+  const [orgLoadError, setOrgLoadError] = useState<string | null>(null)
+
   const apiClient = useMemo(
     () =>
       new APIClient({
@@ -89,6 +118,68 @@ export function ContractUploadStep() {
       }),
     []
   )
+
+  // Fetch organizations on mount
+  useEffect(() => {
+    const fetchOrganizations = async () => {
+      try {
+        setLoadingOrgs(true)
+        setOrgLoadError(null)
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000'}/api/organizations`
+        )
+        if (response.ok) {
+          const data = await response.json()
+          setOrganizations(data.organizations || [])
+        } else {
+          setOrgLoadError('Failed to load organizations')
+        }
+      } catch (err) {
+        console.error('Failed to fetch organizations:', err)
+        setOrgLoadError('Backend unavailable. Please ensure the Python backend is running.')
+      } finally {
+        setLoadingOrgs(false)
+      }
+    }
+    fetchOrganizations()
+  }, [])
+
+  // Fetch projects when organization changes
+  useEffect(() => {
+    const fetchProjects = async () => {
+      if (!state.organizationId) {
+        setProjects([])
+        return
+      }
+      try {
+        setLoadingProjects(true)
+        const response = await fetch(
+          `${process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000'}/api/projects?organization_id=${state.organizationId}`
+        )
+        if (response.ok) {
+          const data = await response.json()
+          setProjects(data.projects || [])
+        }
+      } catch (err) {
+        console.error('Failed to fetch projects:', err)
+      } finally {
+        setLoadingProjects(false)
+      }
+    }
+    fetchProjects()
+  }, [state.organizationId])
+
+  const handleOrganizationChange = (value: string) => {
+    const orgId = parseInt(value, 10)
+    setOrganizationId(orgId)
+    // Reset project when org changes
+    setProjectId(null)
+  }
+
+  const handleProjectChange = (value: string) => {
+    const projectId = parseInt(value, 10)
+    setProjectId(projectId)
+  }
 
   const validateFile = (file: File): string | null => {
     const allowedExtensions = ['.pdf', '.docx']
@@ -175,7 +266,7 @@ export function ContractUploadStep() {
   )
 
   const handleUpload = async () => {
-    if (!localFile) return
+    if (!localFile || !state.projectId || !state.organizationId) return
 
     try {
       setStage('uploading')
@@ -184,6 +275,8 @@ export function ContractUploadStep() {
 
       const data = await apiClient.uploadContract({
         file: localFile,
+        project_id: state.projectId,
+        organization_id: state.organizationId,
         onProgress: (progress: UploadProgress) => {
           const uiStage = progressStageMap[progress.stage]
           if (uiStage) {
@@ -287,26 +380,123 @@ export function ContractUploadStep() {
     )
   }
 
+  const isProjectSelected = state.projectId !== null
+
   return (
     <Card>
       <CardHeader>
         <CardTitle>Upload Contract</CardTitle>
       </CardHeader>
       <CardContent className="space-y-6">
-        {/* Upload Area */}
+        {/* Project/Organization Selection */}
+        <div className="space-y-4 p-4 bg-slate-50 border border-slate-200 rounded-lg">
+          <h4 className="font-medium text-slate-900 flex items-center gap-2">
+            <Building2 className="w-4 h-4" />
+            Select Project
+          </h4>
+          <p className="text-sm text-slate-600">
+            Choose the organization and project for this contract.
+          </p>
+
+          {orgLoadError && (
+            <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+              <p>{orgLoadError}</p>
+              <p className="mt-1 text-xs">Start the backend with: <code className="bg-amber-100 px-1 rounded">cd python-backend && python main.py</code></p>
+            </div>
+          )}
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label htmlFor="organization">Organization</Label>
+              <Select
+                value={state.organizationId?.toString() || ''}
+                onValueChange={handleOrganizationChange}
+                disabled={loadingOrgs || organizations.length === 0}
+              >
+                <SelectTrigger id="organization" className="bg-white">
+                  <SelectValue placeholder={loadingOrgs ? 'Loading...' : 'Select organization'} />
+                </SelectTrigger>
+                <SelectContent>
+                  {organizations.map((org) => (
+                    <SelectItem key={org.id} value={org.id.toString()}>
+                      {org.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!loadingOrgs && !orgLoadError && organizations.length === 0 && (
+                <div className="p-3 bg-slate-100 border border-slate-200 rounded-lg text-sm text-slate-600">
+                  <p className="font-medium">No organizations found in database.</p>
+                  <p className="mt-1 text-xs">
+                    Run seed data: <code className="bg-slate-200 px-1 rounded">psql $DATABASE_URL -f database/seed/fixtures/dummy_data.sql</code>
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="project">Project</Label>
+              <Select
+                value={state.projectId?.toString() || ''}
+                onValueChange={handleProjectChange}
+                disabled={!state.organizationId || loadingProjects || (!!state.organizationId && projects.length === 0)}
+              >
+                <SelectTrigger id="project" className="bg-white">
+                  <SelectValue
+                    placeholder={
+                      !state.organizationId
+                        ? 'Select organization first'
+                        : loadingProjects
+                          ? 'Loading...'
+                          : 'Select project'
+                    }
+                  />
+                </SelectTrigger>
+                <SelectContent>
+                  {projects.map((project) => (
+                    <SelectItem key={project.id} value={project.id.toString()}>
+                      {project.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {state.organizationId && !loadingProjects && projects.length === 0 && (
+                <div className="p-3 bg-slate-100 border border-slate-200 rounded-lg text-sm text-slate-600">
+                  <p className="font-medium">No projects found for this organization.</p>
+                  <p className="mt-1 text-xs">
+                    Create a project in the database or run seed data to add sample projects.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {state.projectId && (
+            <div className="flex items-center gap-2 text-sm text-emerald-600">
+              <Check className="w-4 h-4" />
+              Project selected. You can now upload a contract.
+            </div>
+          )}
+        </div>
+
+        {/* Upload Area - only enabled after project is selected */}
         {(stage === 'idle' || stage === 'error') && (
           <>
             <div
-              onDragEnter={handleDragEnter}
-              onDragOver={handleDragOver}
-              onDragLeave={handleDragLeave}
-              onDrop={handleDrop}
-              onClick={() => fileInputRef.current?.click()}
+              onDragEnter={isProjectSelected ? handleDragEnter : undefined}
+              onDragOver={isProjectSelected ? handleDragOver : undefined}
+              onDragLeave={isProjectSelected ? handleDragLeave : undefined}
+              onDrop={isProjectSelected ? handleDrop : undefined}
+              onClick={isProjectSelected ? () => fileInputRef.current?.click() : undefined}
               className={cn(
-                'border-2 border-dashed rounded-lg p-12 text-center cursor-pointer transition-all duration-300',
+                'border-2 border-dashed rounded-lg p-12 text-center transition-all duration-300',
+                !isProjectSelected && 'opacity-50 cursor-not-allowed',
+                isProjectSelected && 'cursor-pointer',
                 isDragActive
                   ? 'border-blue-500 bg-blue-50'
-                  : 'border-slate-300 bg-white hover:border-blue-500'
+                  : isProjectSelected
+                    ? 'border-slate-300 bg-white hover:border-blue-500'
+                    : 'border-slate-200 bg-slate-50'
               )}
             >
               <input
@@ -317,16 +507,24 @@ export function ContractUploadStep() {
                 className="hidden"
               />
 
-              <Upload className="w-12 h-12 mx-auto mb-4 text-slate-400" />
+              <Upload className={cn("w-12 h-12 mx-auto mb-4", isProjectSelected ? "text-slate-400" : "text-slate-300")} />
               <h3 className="text-lg font-semibold text-slate-900 mb-2">
-                {isDragActive ? 'Drop file here' : 'Upload Contract'}
+                {!isProjectSelected
+                  ? 'Select a project first'
+                  : isDragActive
+                    ? 'Drop file here'
+                    : 'Upload Contract'}
               </h3>
               <p className="text-slate-600 mb-4">
-                Drag and drop a file here, or click to browse
+                {isProjectSelected
+                  ? 'Drag and drop a file here, or click to browse'
+                  : 'You must select an organization and project before uploading'}
               </p>
-              <p className="text-sm text-slate-500 font-mono">
-                Supported formats: PDF, DOCX (max 10MB)
-              </p>
+              {isProjectSelected && (
+                <p className="text-sm text-slate-500 font-mono">
+                  Supported formats: PDF, DOCX (max 10MB)
+                </p>
+              )}
             </div>
 
             {/* Selected File Preview */}

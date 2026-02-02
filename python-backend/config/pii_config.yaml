@@ -1,0 +1,162 @@
+# PII Detection Configuration
+# Modify this file to add/remove entity types, change thresholds,
+# or add custom recognizer patterns without changing Python code.
+
+detection:
+  language: "en"
+  min_confidence_threshold: 0.4  # Presidio phone scores 0.4 base
+
+# Terms that must NOT be flagged as PERSON by spaCy NER.
+# Case-insensitive exact match. Add entries as false positives are discovered.
+person_entity_denylist:
+  # Business / contract terms
+  - "Managed Site"
+  - "Site Acceptance"
+  - "Allocation Target"
+  - "Technical Site"
+  - "Commercial Operation"
+  - "Force Majeure"
+  - "Effective Date"
+  - "Guaranteed Capacity"
+  - "Commercial Operation Date"
+  - "Site Acceptance Test"
+  - "Force Majeure Event"
+  # Site-associated terms frequently misidentified as PERSON
+  - "Project Site"
+  - "Generation Site"
+  - "Facility Site"
+  - "Construction Site"
+  - "Solar Site"
+  - "Wind Site"
+  - "Battery Site"
+  - "Substation Site"
+  - "Interconnection Site"
+  - "Delivery Site"
+  - "Metering Site"
+  # Geographic names misidentified as PERSON
+  - "Sierra Leone"
+  - "Freetown"
+  - "Ivory Coast"
+  - "Burkina Faso"
+  - "Sri Lanka"
+  - "Costa Rica"
+  - "Puerto Rico"
+  - "El Salvador"
+  - "Trinidad"
+  - "Tobago"
+
+# Regex patterns for filtering PERSON false positives from spaCy NER.
+# If a PERSON entity matches ANY pattern, it is dropped. Case-insensitive.
+# Complements the static denylist above for scalable structural matching.
+person_entity_deny_patterns:
+  # Unambiguous contract suffixes — 1+ preceding word is enough
+  - '\b\w+\s+(?:Date|Period|Test|Agreement|Certificate|Obligation|Requirement|Warranty|Guarantee|Condition|Termination|Payment|Schedule|Appendix|Annex|Notice|Amount|Dispute|Damages|Report|Site)\b'
+  # Ambiguous suffixes — require 2+ preceding words to avoid filtering real names like "Michael Price"
+  - '\b(?:\w+\s+){2,4}(?:Event|Capacity|Price|Rate|Fee|Charge|Limit|Factor|Index|Ratio)\b'
+  # "X of Y" contract phrases
+  - '\b[A-Z][a-z]+\s+of\s+[A-Z][a-z]+\b'
+
+# Section-restricted entity types: only redact these in PII-heavy sections.
+# High-confidence regex entities (EMAIL, PHONE, SSN, etc.) still redact everywhere.
+section_restricted_entities:
+  - PERSON
+  - STREET_ADDRESS
+
+# Regex patterns that identify PII-heavy sections (case-insensitive).
+# NER-based entities are only redacted within these sections.
+pii_sections:
+  - '(?:^|\n)\s*(?:ARTICLE\s+[\dIVXLCDM]+[.:]?\s*)?(?:NOTICES?|NOTIFICATION)\b'
+  - '(?:^|\n)\s*(?:IN WITNESS WHEREOF|EXECUTION|SIGNATURES?)\b'
+  - '(?:^|\n)\s*(?:RECITALS?|WHEREAS|PREAMBLE)\b'
+  - '(?:^|\n)\s*(?:SCHEDULES?|APPENDIX|ANNEX|EXHIBIT)\s'
+
+# Context triggers for PERSON entities within PII sections.
+# Even inside a PII section, a PERSON entity must appear near a contextual
+# trigger (e.g., "Name:", "Attention:", "By:") to be kept. This narrows
+# detection from "anywhere in NOTICES" to "near name-related lines."
+name_context_triggers:
+  enabled: true
+  lookbehind_chars: 300
+  patterns:
+    - 'Name\s*:'
+    - 'name\s*:'
+    - 'Attention\s*:'
+    - 'Attn\.?\s*:'
+    - 'Contact(?:\s+Person)?\s*:'
+    - 'Representative\s*:'
+    - 'If\s+to\s+(?:the\s+)?(?:Seller|Buyer|Company|Owner|Operator|Lender|Agent|Party)'
+    - 'By\s*:'
+    - 'Signed\s+by'
+    - '[Ee]xecuted\s+by'
+    - '[Ww]itnessed\s+by'
+    - '\bbetween\b'
+    - '\bBetween\b'
+    - '\bBETWEEN\b'
+    - '\bWHEREAS\b'
+    - '\bMr\.\s'
+    - '\bMrs\.\s'
+    - '\bMs\.\s'
+    - '\bDr\.\s'
+    - '\(\s*"(?:the\s+)?(?:Seller|Buyer|Company|Owner|Operator|Lender|Agent|Party)"\s*\)'
+
+# Regex patterns to find the DEFINITIONS section and extract defined terms.
+# Extracted terms become a per-contract dynamic denylist for PERSON entities.
+definitions_section:
+  heading_pattern: '(?:^|\n)\s*(?:ARTICLE\s+[\dIVXLCDM]+[.:]?\s*)?(?:DEFINITIONS?|INTERPRETATION)\b'
+  term_patterns:
+    - '"([^"]{2,60})"\s+(?:means|shall mean|has the meaning|refers to|is defined|includes)'
+    - "\u201c([^\u201d]{2,60})\u201d\\s+(?:means|shall mean|has the meaning|refers to|is defined|includes)"
+
+standard_entities:
+  - EMAIL_ADDRESS
+  - PHONE_NUMBER
+  - PERSON
+  - US_SSN
+  - CREDIT_CARD
+  - ORGANIZATION
+  # NOTE: LOCATION is intentionally excluded. Presidio's NER-based LOCATION
+  # entity catches cities, states, and countries which provide useful context
+  # for contract analysis. Instead, we use a custom STREET_ADDRESS recognizer
+  # below to redact only street-level details (house numbers, street names, PO boxes).
+
+custom_recognizers:
+  - name: contract_id
+    entity_type: CONTRACT_ID
+    patterns:
+      - name: contract_id_pattern
+        regex: 'PPA-\d{4}-\d{6}'
+        score: 0.9
+
+  - name: street_address
+    entity_type: STREET_ADDRESS
+    patterns:
+      # Matches "123 Main Street", "No.7 Wilkinson Road", "No 5 Siaka Stevens Street", etc.
+      - name: numbered_street
+        regex: '(?:No\.?\s*)?\d{1,6}[A-Za-z]?\s+[A-Za-z][A-Za-z\.\s]{0,30}\b(?:Street|St|Avenue|Ave|Boulevard|Blvd|Drive|Dr|Lane|Ln|Road|Rd|Court|Ct|Place|Pl|Way|Circle|Cir|Terrace|Ter|Trail|Trl|Parkway|Pkwy|Highway|Hwy|Loop|Square|Sq)\.?\b'
+        score: 0.85
+      # Matches "No.7, Wilkinson Road" (comma-separated variant)
+      - name: no_prefix_street
+        regex: 'No\.?\s*\d{1,6}[A-Za-z]?\s*,\s*[A-Za-z][A-Za-z\.\s]{0,30}\b(?:Street|St|Avenue|Ave|Boulevard|Blvd|Drive|Dr|Lane|Ln|Road|Rd|Court|Ct|Place|Pl|Way|Circle|Cir|Terrace|Ter|Trail|Trl|Parkway|Pkwy|Highway|Hwy|Loop|Square|Sq)\.?\b'
+        score: 0.85
+      # Matches "P.O. Box 1234", "PO Box 567", "P O Box 89"
+      - name: po_box
+        regex: 'P\.?\s?O\.?\s*Box\s+\d+'
+        score: 0.9
+
+anonymization:
+  # "replace" = swap with placeholder, "redact" = remove entirely, "keep" = do not anonymize
+  operators:
+    EMAIL_ADDRESS:  { strategy: replace, placeholder: "<EMAIL_REDACTED>" }
+    PHONE_NUMBER:   { strategy: replace, placeholder: "<PHONE_REDACTED>" }
+    PERSON:         { strategy: replace, placeholder: "<NAME_REDACTED>" }
+    US_SSN:         { strategy: redact }
+    CREDIT_CARD:    { strategy: redact }
+    CONTRACT_ID:    { strategy: replace, placeholder: "<CONTRACT_ID_REDACTED>" }
+    STREET_ADDRESS: { strategy: replace, placeholder: "<ADDRESS_REDACTED>" }
+    ORGANIZATION:   { strategy: keep }  # Kept for context
+
+file_validation:
+  max_file_size_mb: 10
+  allowed_extensions:
+    - .pdf
+    - .docx

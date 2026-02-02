@@ -218,8 +218,9 @@ export function ReportGenerationStep() {
     () =>
       new ReportsClient({
         enableLogging: process.env.NODE_ENV === 'development',
+        organizationId: state.organizationId || undefined,
       }),
-    []
+    [state.organizationId]
   )
 
   const {
@@ -283,6 +284,7 @@ export function ReportGenerationStep() {
         file_format: selectedReportFormat,
         name: `${invoicePreview?.invoiceNumber || 'Invoice'}_${selectedReportType}_${new Date().toISOString().slice(0, 10)}`,
         contract_id: parseResult?.contract_id,
+        project_id: state.projectId || undefined,
       })
 
       // Start polling for completion

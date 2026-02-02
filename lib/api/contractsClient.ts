@@ -428,7 +428,15 @@ export class APIClient {
     this.log('info', `Uploading contract: ${file.name}`, {
       size: file.size,
       type: file.type,
+      project_id: metadata.project_id,
+      organization_id: metadata.organization_id,
     })
+
+    // Debug: Log FormData contents
+    console.log('[APIClient] FormData contents:')
+    for (const [key, value] of formData.entries()) {
+      console.log(`  ${key}: ${value instanceof File ? value.name : value}`)
+    }
 
     // Report progress stages (simulated since we can't get real progress from fetch)
     onProgress?.({

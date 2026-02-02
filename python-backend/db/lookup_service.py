@@ -538,6 +538,66 @@ class LookupService:
             logger.error(f"Exact counterparty match failed: {e}")
         return None
 
+    def create_counterparty(
+        self,
+        name: str,
+        counterparty_type: str = "other",
+        created_by: Optional[str] = None
+    ) -> Optional[int]:
+        """
+        Create a new counterparty record when no match found.
+
+        Args:
+            name: Counterparty name (e.g., "SolarCo Energy LLC")
+            counterparty_type: Type hint (buyer, seller, other) - not stored, for logging
+            created_by: Optional identifier for who/what created (for logging)
+
+        Returns:
+            New counterparty ID or None if creation failed
+        """
+        if not name or not name.strip():
+            logger.warning("Cannot create counterparty with empty name")
+            return None
+
+        normalized_name = name.strip()
+
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    # Check if already exists (case-insensitive)
+                    cursor.execute(
+                        "SELECT id FROM counterparty WHERE LOWER(name) = LOWER(%s)",
+                        (normalized_name,)
+                    )
+                    existing = cursor.fetchone()
+
+                    if existing:
+                        logger.info(
+                            f"Counterparty already exists: '{normalized_name}' (ID {existing['id']})"
+                        )
+                        return existing['id']
+
+                    # Insert new counterparty
+                    cursor.execute(
+                        """
+                        INSERT INTO counterparty (name, created_at)
+                        VALUES (%s, NOW())
+                        RETURNING id
+                        """,
+                        (normalized_name,)
+                    )
+                    new_id = cursor.fetchone()['id']
+
+                    logger.info(
+                        f"Auto-created counterparty: '{normalized_name}' "
+                        f"(ID {new_id}, type hint: {counterparty_type})"
+                    )
+                    return new_id
+
+        except Exception as e:
+            logger.error(f"Failed to create counterparty '{normalized_name}': {e}")
+            return None
+
     # =========================================================================
     # FK VALIDATION METHODS
     # =========================================================================

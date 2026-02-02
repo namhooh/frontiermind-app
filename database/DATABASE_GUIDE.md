@@ -3,7 +3,7 @@
 
 Quick links: [Directory Structure](#directory-structure) | [Workflows](#common-workflows) | [Scripts](#scripts-reference) | [Troubleshooting](#troubleshooting)
 
-Last updated: 2026-01-26
+Last updated: 2026-01-31
 
 ---
 
@@ -62,6 +62,8 @@ database/
 │   ├── 018_export_and_reports_schema.sql  # Phase 5: Export and report generation
 │   ├── 019_invoice_comparison_final_amount.sql  # Phase 5.2: Invoice reconciliation columns
 │   ├── 020_contract_extraction_metadata.sql     # Phase 5.4: Contract metadata extraction
+│   ├── 021_seed_billing_period.sql              # Phase 5.5: Billing period seed data
+│   ├── 022_exchange_rate_and_invoice_validation.sql  # Phase 5.6: Exchange rates, invoice validation architecture
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -973,6 +975,18 @@ database/
   - `services/contract_parser.py` - Step 4.5 metadata extraction
   - `api/contracts.py` - FK validation at upload
 - Reference: `contract-digitization/docs/IMPLEMENTATION_GUIDE.md`
+
+**v5.6 (Client Invoice Validation Architecture)** - Completed
+- Migration: `022_exchange_rate_and_invoice_validation.sql`
+- New: `exchange_rate` table (per org/currency/date, rate to USD)
+- New enum: `invoice_direction` ('payable', 'receivable')
+- Extended: `clause_tariff` with `tariff_group_key`, `meter_id`, `source_metadata`, `is_active`
+- Extended: `meter_aggregate` with billing readings (`opening_reading`, `closing_reading`, `utilized_reading`, etc.)
+- Extended: Invoice headers and line items with `invoice_direction`, `clause_tariff_id`, `quantity`, `line_unit_price`
+- Extended: `invoice_comparison_line_item` with `variance_percent`, `variance_details`
+- Seeded: 11 currencies (USD, EUR, GBP, ZAR, GHS, NGN, KES, RWF, SLE, EGP, MZN)
+- Seeded: 14 tariff types (FLAT, TOU, TIERED, METERED_ENERGY, etc.)
+- Reference: `CBE_data_extracts/CBE_TO_FRONTIERMIND_MAPPING.md`
 
 ---
 

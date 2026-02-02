@@ -27,6 +27,9 @@ from api.rules import router as rules_router
 from api.ingest import router as ingest_router
 from api.ontology import router as ontology_router
 from api.reports import router as reports_router
+from api.entities import router as entities_router
+from api.invoices import router as invoices_router
+from api.pii_redaction_temp import router as pii_redaction_temp_router
 
 # Import rate limiting middleware
 from middleware.rate_limiter import setup_rate_limiting, limiter, limit_health
@@ -67,6 +70,9 @@ app.include_router(rules_router)
 app.include_router(ingest_router)
 app.include_router(ontology_router)
 app.include_router(reports_router)
+app.include_router(entities_router)
+app.include_router(invoices_router)
+app.include_router(pii_redaction_temp_router)
 
 
 @app.get("/", response_model=Dict[str, str])

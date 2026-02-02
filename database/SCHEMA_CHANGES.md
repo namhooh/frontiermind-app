@@ -563,6 +563,27 @@ This document tracks major schema versions and their associated changes.
 
 ---
 
+### v5.5 - 2026-01-26 (Billing Period Seed Data)
+
+**Description:** Seed billing_period table with default entry required for invoice/report workflow.
+
+**Migrations:**
+- `database/migrations/021_seed_billing_period.sql` - Insert default billing period with ID=1
+
+**Changes:**
+
+**Seeded billing_period table:**
+- Inserts billing_period with `id=1`, `name='January 2026'`, dates `2026-01-01` to `2026-01-31`
+- Uses `ON CONFLICT (id) DO NOTHING` for idempotency
+- Resets sequence to prevent ID conflicts
+
+**Design Notes:**
+- Required for invoice generation and report workflow which use `billing_period_id: 1` as default
+- The invoice save step (`InvoiceGenerationStep.tsx:163`) and report generation (`ReportGenerationStep.tsx:273`) reference this billing period
+- Report queries JOIN on billing_period table - missing record causes empty results
+
+---
+
 ### v4.1 - 2026-01-20 (Security Hardening)
 
 **Description:** Comprehensive security hardening based on Security & Privacy Assessment cross-reference analysis. Implements audit logging, enhanced RLS, and access controls.
@@ -690,7 +711,7 @@ Policy Pattern (applied to all):
 - For GDPR right-to-erasure or court orders: use ALTER TABLE DISABLE/ENABLE TRIGGER
 - All bypass operations must be logged manually and go through change management
 
-**Application Integration:**
+**Application Integration (v4.1):**
 - `python-backend/middleware/rate_limiter.py` - FastAPI rate limiting
 - `python-backend/services/export_controls.py` - Dual approval for bulk exports
 - `lib/auth/helpers.ts` - MFA enforcement
@@ -702,5 +723,114 @@ Policy Pattern (applied to all):
 - `SESSION_ABSOLUTE_TIMEOUT=86400` - 24 hour absolute timeout
 - `RATE_LIMIT_DEFAULT=100/minute` - API rate limiting
 - `EXPORT_BULK_THRESHOLD=20` - Bulk export approval threshold
+
+---
+
+### v5.6 - 2026-01-31 (Client Invoice Validation Architecture)
+
+**Description:** Database architecture for client invoice validation. Adds exchange rates, extends clause_tariff with grouping and client metadata, extends meter_aggregate with billing readings, adds AP/AR invoice direction, and enriches invoice line items with tariff and quantity data.
+
+**Reference:** `CBE_data_extracts/CBE_TO_FRONTIERMIND_MAPPING.md`
+
+**Migrations:**
+- `database/migrations/022_exchange_rate_and_invoice_validation.sql` - All schema changes
+
+**Key Changes:**
+
+**New Table: exchange_rate**
+- `id` - BIGSERIAL PRIMARY KEY
+- `organization_id` - BIGINT REFERENCES organization(id)
+- `currency_id` - BIGINT REFERENCES currency(id) (the local currency)
+- `rate_date` - DATE (effective date)
+- `rate` - DECIMAL (1 USD = X local currency units)
+- `source` - VARCHAR(100) DEFAULT 'manual' (manual, api, etc.)
+- `created_by` - UUID
+- `created_at` - TIMESTAMPTZ
+- UNIQUE(organization_id, currency_id, rate_date)
+- RLS enabled with org member/admin/service policies
+- Index: `idx_exchange_rate_lookup` on (organization_id, currency_id, rate_date DESC)
+
+**Convention:** `rate` = how many units of `currency_id` per 1 USD.
+- Example: ZAR with `rate = 18.50` means 1 USD = 18.50 ZAR
+- To get USD from local: `local_amount / rate`
+- Lookup at runtime: pricing calculator reads `clause_tariff.currency_id`, finds nearest rate on or before billing period date
+
+**New Enum: invoice_direction**
+- `payable` - Accounts payable (contractor bills us / expected contractor bill)
+- `receivable` - Accounts receivable (we bill client / ERP-generated invoice)
+
+**Extended clause_tariff table:**
+- `organization_id` - BIGINT REFERENCES organization(id) (multi-tenant FK)
+- `tariff_group_key` - VARCHAR(255) (groups same logical tariff line across time periods; adapter maps client IDs here)
+- `meter_id` - BIGINT REFERENCES meter(id) (optional link to physical meter)
+- `is_active` - BOOLEAN DEFAULT true (whether tariff line is currently active)
+- `source_metadata` - JSONB DEFAULT '{}' (all client-specific fields; core reads only generic columns)
+- `updated_at` - TIMESTAMPTZ DEFAULT NOW()
+- Indexes: `idx_clause_tariff_group_key`, `idx_clause_tariff_org`, `idx_clause_tariff_meter`
+
+**tariff_group_key usage:**
+- CBE maps `CONTRACT_LINE_UNIQUE_ID` → `tariff_group_key` (e.g. "CONZIM00-2025-00002-4000")
+- Multiple rows with same key = same logical tariff line with price changes over time
+- Future clients use their own convention
+
+**source_metadata examples:**
+```json
+// CBE:
+{"external_line_id": "4000", "product_code": "ENER0001", "metered_available": "EMetered"}
+// Future client:
+{"sap_material_number": "MAT-12345", "billing_plan_id": "BP-001"}
+```
+
+**Extended meter_aggregate table:**
+- `clause_tariff_id` - BIGINT REFERENCES clause_tariff(id) (links to billable tariff line)
+- `opening_reading` - DECIMAL (meter reading at period start)
+- `closing_reading` - DECIMAL (meter reading at period end)
+- `utilized_reading` - DECIMAL (net consumption)
+- `discount_reading` - DECIMAL DEFAULT 0 (discounted/waived quantity)
+- `sourced_energy` - DECIMAL DEFAULT 0 (self-sourced energy to deduct)
+- `source_metadata` - JSONB DEFAULT '{}' (client-specific reading metadata)
+- Index: `idx_meter_aggregate_clause_tariff`
+- `total_production` (existing) = final billable quantity. Adapter computes: `utilized_reading - discount_reading - sourced_energy`
+
+**Two usage patterns for meter_aggregate:**
+1. Physical meter pipeline (existing): `meter_id` set, `clause_tariff_id` NULL
+2. Client billing data (new): `clause_tariff_id` set, `meter_id` optional
+
+**Extended invoice headers:**
+- `expected_invoice_header.invoice_direction` - invoice_direction NOT NULL DEFAULT 'payable'
+- `received_invoice_header.invoice_direction` - invoice_direction NOT NULL DEFAULT 'payable'
+- `invoice_comparison.invoice_direction` - invoice_direction NOT NULL DEFAULT 'payable'
+
+**Extended expected_invoice_line_item:**
+- `clause_tariff_id` - BIGINT REFERENCES clause_tariff(id) (pricing source)
+- `meter_aggregate_id` - BIGINT REFERENCES meter_aggregate(id) (readings source; NULL for non-metered)
+- `quantity` - DECIMAL (billable quantity; from meter_aggregate or contract terms)
+- `line_unit_price` - DECIMAL (unit price at calculation time; from clause_tariff.base_rate)
+
+**Extended received_invoice_line_item:**
+- `clause_tariff_id` - BIGINT REFERENCES clause_tariff(id)
+- `meter_aggregate_id` - BIGINT REFERENCES meter_aggregate(id)
+- `quantity` - DECIMAL (quantity as stated on received invoice)
+- `line_unit_price` - DECIMAL (unit price as stated on received invoice)
+
+**Extended invoice_comparison_line_item:**
+- `clause_tariff_id` - BIGINT REFERENCES clause_tariff(id) (tariff for variance analysis)
+- `variance_percent` - DECIMAL (percentage variance)
+- `variance_details` - JSONB DEFAULT '{}' (method-specific breakdown, rounding differences)
+
+**Seeded currency table (11 currencies):**
+- USD, EUR, GBP, ZAR, GHS, NGN, KES, RWF, SLE, EGP, MZN
+
+**Seeded tariff_type table (14 types):**
+- FLAT, TOU, TIERED, INDEXED, METERED_ENERGY, AVAILABLE_ENERGY, DEEMED_ENERGY
+- BESS_CAPACITY, MIN_OFFTAKE, EQUIP_RENTAL, OM_FEE, DIESEL, PENALTY, PRICE_CORRECTION
+
+**Design Notes:**
+- No `clause_id` FK on clause_tariff — it's a parallel table to clause, not a child
+- No `adjusted_reading` on meter_aggregate — use existing `total_production` as final billable quantity
+- No `bill_date` on meter_aggregate — billing date captured on invoice_header
+- `exchange_rate_feed` deferred — will be added when auto-fetch scheduler is implemented
+- Default `invoice_direction = 'payable'` preserves backward compatibility for existing AP flows
+- Non-metered tariffs (capacity, O&M, penalties) have NULL `meter_aggregate_id` with quantity/price stored directly on line items
 
 ---
