@@ -549,36 +549,44 @@ const supabaseAdmin = createClient(url, process.env.SUPABASE_SERVICE_ROLE_KEY);
 
 ### 4.4 External Credential Storage (Inverter Fetchers)
 
-**The Problem:** Fetcher workers need to authenticate to client inverter portals (Huawei, Sungrow, SolarEdge). Storing credentials insecurely is a critical failure.
+**The Problem:** Fetcher workers need to authenticate to client inverter portals (Enphase, SMA, SolarEdge, GoodWe). Storing credentials insecurely is a critical failure.
 
 **Mandatory Requirement:**
 
-> ⚠️ **External credentials MUST be encrypted at rest using pgsodium transparent column encryption. Plain text credential storage is PROHIBITED.**
+> ⚠️ **External credentials MUST be encrypted at rest using AES-256-GCM authenticated encryption. Plain text credential storage is PROHIBITED.**
 
-**Implementation:**
+**Implementation: Application-Level AES-256-GCM**
+
+Rather than database-level encryption (pgsodium), we use application-level encryption for portability across TypeScript (Supabase Edge Functions) and Python (fetchers):
+
+| Aspect | Specification |
+|--------|---------------|
+| **Algorithm** | AES-256-GCM (authenticated encryption) |
+| **Key Size** | 256 bits (32 bytes), base64-encoded |
+| **IV Size** | 96 bits (12 bytes), randomly generated per operation |
+| **Auth Tag** | 128 bits (16 bytes), appended to ciphertext |
+| **Wire Format** | `[IV-12][Ciphertext][AuthTag-16]` → Base64 |
+
+**Database Schema:**
 
 ```sql
--- Enable pgsodium extension
-CREATE EXTENSION IF NOT EXISTS pgsodium;
-
--- Create encrypted credentials table
 CREATE TABLE integration_credential (
     id BIGSERIAL PRIMARY KEY,
     organization_id BIGINT REFERENCES organization(id),
-    integration_type VARCHAR(50) NOT NULL,  -- 'huawei', 'sungrow', etc.
-    
-    -- Encrypted columns using pgsodium
-    username_encrypted BYTEA,  -- Encrypted with pgsodium
-    password_encrypted BYTEA,  -- Encrypted with pgsodium
-    api_key_encrypted BYTEA,   -- Encrypted with pgsodium
-    
-    -- Metadata (not encrypted)
-    portal_url VARCHAR(500),
+    data_source_id BIGINT REFERENCES data_source(id),
+    credential_name VARCHAR(255),
+
+    -- AES-256-GCM encrypted JSON (base64 encoded)
+    encrypted_credentials TEXT NOT NULL,
+
+    auth_type VARCHAR(20) CHECK (auth_type IN ('api_key', 'oauth2')),
+    token_expires_at TIMESTAMPTZ,
+    token_refreshed_at TIMESTAMPTZ,
+    is_active BOOLEAN DEFAULT true,
     last_used_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ DEFAULT NOW(),
-    
-    -- RLS
-    CONSTRAINT fk_org FOREIGN KEY (organization_id) REFERENCES organization(id)
+    last_error TEXT,
+    error_count INT DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 -- RLS policy
@@ -587,10 +595,56 @@ CREATE POLICY "org_isolation" ON integration_credential
     USING (organization_id = (auth.jwt() ->> 'organization_id')::BIGINT);
 ```
 
+**Implementation Files:**
+
+| Component | File | Operation |
+|-----------|------|-----------|
+| OAuth Callback | `data-ingestion/oauth/supabase-callback/index.ts` | Encrypt credentials |
+| Data Fetchers | `data-ingestion/sources/inverter-api/base_fetcher.py` | Decrypt/Re-encrypt |
+| Backend API | `python-backend/db/encryption.py` | Utility functions |
+
 **Key Management:**
-- Decryption key managed by Supabase Vault or external KMS
-- Key is NOT stored in database
-- Access to decrypt requires explicit permission
+- Key stored in AWS Secrets Manager: `frontiermind/backend/encryption-key`
+- Same key used by Edge Functions and Python backend
+- Key rotation requires re-encrypting all credentials
+
+### 4.4.1 OAuth State CSRF Protection
+
+**The Problem:** OAuth 2.0 flows are vulnerable to CSRF attacks where an attacker tricks a user into linking an attacker-controlled account.
+
+**Mandatory Requirement:**
+
+> ⚠️ **All OAuth redirects MUST include an HMAC-signed state parameter. The backend MUST validate state signatures before processing callbacks.**
+
+**Implementation:**
+
+| Aspect | Specification |
+|--------|---------------|
+| **Algorithm** | HMAC-SHA256 |
+| **Payload** | `{"organization_id": N, "ts": <epoch_ms>}` |
+| **Expiry** | 10 minutes |
+| **Format** | URL-safe Base64 (padding stripped) |
+
+**Flow:**
+1. Frontend calls `POST /api/oauth/state` with organization_id
+2. Backend generates HMAC-signed state with timestamp
+3. Frontend includes state in OAuth redirect URL
+4. OAuth callback validates signature, expiry, and organization_id
+5. Unsigned or expired states are **rejected with 400**
+
+**Implementation Files:**
+
+| Component | File | Operation |
+|-----------|------|-----------|
+| State Generation | `python-backend/api/oauth.py` | Generate signed state |
+| State Validation | `data-ingestion/oauth/supabase-callback/index.ts` | Validate on callback |
+| Frontend Client | `lib/api/oauthClient.ts` | Request state before redirect |
+
+**Security Controls:**
+- HMAC secret never exposed to frontend
+- Timestamp prevents replay attacks
+- Organization ID prevents cross-tenant linking
+- Strict validation (no legacy fallback)
 
 ### 4.5 Database Network Access (Critical)
 

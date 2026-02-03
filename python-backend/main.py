@@ -30,6 +30,7 @@ from api.reports import router as reports_router
 from api.entities import router as entities_router
 from api.invoices import router as invoices_router
 from api.pii_redaction_temp import router as pii_redaction_temp_router
+from api.oauth import router as oauth_router
 
 # Import rate limiting middleware
 from middleware.rate_limiter import setup_rate_limiting, limiter, limit_health
@@ -73,6 +74,7 @@ app.include_router(reports_router)
 app.include_router(entities_router)
 app.include_router(invoices_router)
 app.include_router(pii_redaction_temp_router)
+app.include_router(oauth_router)
 
 
 @app.get("/", response_model=Dict[str, str])

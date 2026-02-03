@@ -13,9 +13,11 @@ from abc import ABC, abstractmethod
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
+import os
+
 import boto3
 import requests
-from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
 from .config import Config
 
@@ -54,21 +56,35 @@ class BaseFetcher(ABC):
         self.config = config or Config.from_aws_secrets()
         self.dry_run = dry_run
         self.s3_client = boto3.client("s3", region_name=self.config.aws_region)
-        self._fernet: Optional[Fernet] = None
+        self._aesgcm: Optional[AESGCM] = None
 
     @property
-    def fernet(self) -> Fernet:
-        """Get Fernet cipher for credential encryption/decryption."""
-        if self._fernet is None:
+    def aesgcm(self) -> AESGCM:
+        """Get AES-GCM cipher for credential encryption/decryption."""
+        if self._aesgcm is None:
             if not self.config.encryption_key:
                 raise ValueError("Encryption key not configured")
-            self._fernet = Fernet(self.config.encryption_key.encode())
-        return self._fernet
+            # Decode base64 key
+            key = base64.b64decode(self.config.encryption_key)
+            if len(key) < 32:
+                raise ValueError("Encryption key must be at least 32 bytes")
+            self._aesgcm = AESGCM(key[:32])
+        return self._aesgcm
 
     def decrypt_credentials(self, encrypted_data: bytes) -> Dict[str, Any]:
-        """Decrypt credential data."""
-        decrypted = self.fernet.decrypt(encrypted_data)
-        return json.loads(decrypted.decode())
+        """
+        Decrypt AES-256-GCM encrypted credentials.
+        Format: [IV_12][CIPHERTEXT][AUTH_TAG_16]
+        Compatible with TypeScript encrypt in supabase-callback/index.ts
+        """
+        if len(encrypted_data) < 12:
+            raise ValueError("Encrypted data too short (missing IV)")
+
+        iv = encrypted_data[:12]
+        ciphertext = encrypted_data[12:]  # Includes auth tag
+
+        plaintext = self.aesgcm.decrypt(iv, ciphertext, None)
+        return json.loads(plaintext.decode("utf-8"))
 
     def get_credentials(self) -> List[Dict[str, Any]]:
         """
@@ -405,8 +421,13 @@ class BaseFetcher(ABC):
             decrypted_credentials: New decrypted credentials.
             expires_at: New token expiry timestamp.
         """
-        # Encrypt the new credentials
-        encrypted = self.fernet.encrypt(json.dumps(decrypted_credentials).encode())
+        # Encrypt with AES-GCM (matching TypeScript callback format)
+        iv = os.urandom(12)
+        plaintext = json.dumps(decrypted_credentials).encode()
+        ciphertext = self.aesgcm.encrypt(iv, plaintext, None)
+
+        # Combine IV + ciphertext and base64 encode
+        encrypted = iv + ciphertext
         encrypted_b64 = base64.b64encode(encrypted).decode()
 
         headers = {

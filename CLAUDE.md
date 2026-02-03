@@ -16,7 +16,7 @@ Contract Compliance & Invoicing Verification Engine for renewable energy project
 |-------|-------------|
 | **FRONTEND_ARCHITECTURE_GUIDE.md** | Frontend structure, components, state, API clients, Vercel deployment, Figma MCP |
 | **DATABASE_GUIDE.md** | Database schema and migrations |
-| **IMPLEMENTATION_GUIDE_REPORTS.md** | Report generation system |
+| **IMPLEMENTATION_GUIDE_REPORT_GENERATION.md** | Report generation system |
 | **.claude/skills/sync-figma.md** | Detailed Figma-to-code workflow |
 
 ## Commands
@@ -279,6 +279,49 @@ aws secretsmanager list-secrets --region us-east-1 --filter Key=name,Values=fron
 
 - See `data-ingestion/` for data ingestion components and documentation
 - Architecture guide: `data-ingestion/docs/IMPLEMENTATION_GUIDE_ARCHITECTURE.md`
+
+## OAuth Integration Security
+
+When implementing OAuth flows for inverter integrations (Enphase, SMA):
+
+### Required Pattern
+
+**ALWAYS** use the backend OAuth state endpoint before redirecting users:
+
+```typescript
+import { generateOAuthState, buildOAuthUrl } from '@/lib/api/oauthClient';
+
+// Option 1: Generate state manually
+const { state } = await generateOAuthState(organizationId);
+const authUrl = `https://api.enphase.com/oauth/authorize?state=${state}&...`;
+
+// Option 2: Use helper to build full URL
+const authUrl = await buildOAuthUrl('enphase', organizationId, callbackUrl);
+window.location.href = authUrl;
+```
+
+### Why This Matters
+
+1. **CSRF Protection**: The state parameter is HMAC-signed and prevents cross-site request forgery
+2. **Server-Side Secret**: The HMAC secret never leaves the backend
+3. **Time-Limited**: States expire after 10 minutes
+4. **Strict Validation**: The OAuth callback rejects unsigned or expired states
+
+### DO NOT
+
+- Generate state client-side (exposes HMAC secret)
+- Use simple random strings as state
+- Skip state parameter validation
+- Store OAuth secrets in frontend environment variables
+
+### Environment Variables
+
+| Variable | Location | Purpose |
+|----------|----------|---------|
+| `OAUTH_STATE_SECRET` | Backend only | HMAC signing key |
+| `ENCRYPTION_KEY` | Backend + Edge Function | Credential encryption (AES-256-GCM) |
+| `NEXT_PUBLIC_ENPHASE_CLIENT_ID` | Frontend | OAuth client ID (public) |
+| `NEXT_PUBLIC_SMA_CLIENT_ID` | Frontend | OAuth client ID (public) |
 
 ## Conventions
 

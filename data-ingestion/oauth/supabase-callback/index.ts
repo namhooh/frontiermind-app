@@ -55,41 +55,41 @@ interface TokenResponse {
 }
 
 /**
- * Encrypt data using Fernet-compatible encryption
- * Note: Deno's crypto API is used for AES encryption
+ * Encrypt credentials using AES-256-GCM (authenticated encryption).
+ * Format: [IV_12_BYTES][CIPHERTEXT][AUTH_TAG_16_BYTES] → base64
+ * Compatible with Python decrypt in base_fetcher.py
  */
 async function encryptCredentials(
   data: Record<string, unknown>,
   encryptionKey: string
 ): Promise<string> {
-  // For Supabase Edge Functions, we use a simpler approach
-  // The key should be base64-encoded
   const key = base64.decode(encryptionKey);
+  if (key.length < 32) {
+    throw new Error("Encryption key must be at least 32 bytes");
+  }
 
-  // Generate IV
-  const iv = crypto.getRandomValues(new Uint8Array(16));
+  // AES-GCM uses 12-byte IV (NIST recommendation)
+  const iv = crypto.getRandomValues(new Uint8Array(12));
 
-  // Encode data
   const encoder = new TextEncoder();
   const dataBytes = encoder.encode(JSON.stringify(data));
 
-  // Import key for AES-CBC
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    key.slice(0, 32), // Use first 32 bytes for AES-256
-    { name: "AES-CBC" },
+    key.slice(0, 32),
+    { name: "AES-GCM" },
     false,
     ["encrypt"]
   );
 
-  // Encrypt
+  // GCM automatically appends 16-byte auth tag to ciphertext
   const encrypted = await crypto.subtle.encrypt(
-    { name: "AES-CBC", iv },
+    { name: "AES-GCM", iv },
     cryptoKey,
     dataBytes
   );
 
-  // Combine IV + encrypted data and encode as base64
+  // Combine: IV (12) + ciphertext + auth tag (16)
   const combined = new Uint8Array(iv.length + encrypted.byteLength);
   combined.set(iv, 0);
   combined.set(new Uint8Array(encrypted), iv.length);
@@ -98,18 +98,111 @@ async function encryptCredentials(
 }
 
 /**
- * Validate state parameter to prevent CSRF attacks
- * State should be a signed token or stored in session
+ * Create HMAC-signed state parameter for CSRF protection.
+ * Returns URL-safe base64 encoding to survive OAuth redirects.
+ *
+ * @param orgId - Organization ID to embed in state
+ * @param secret - Secret key for HMAC signing
+ * @returns URL-safe base64-encoded signed state
+ *
+ * Usage (frontend):
+ *   const state = await createState(orgId, OAUTH_STATE_SECRET);
+ *   window.location.href = `${authUrl}?state=${state}&...`;
  */
-function validateState(state: string, expectedOrgId: number): boolean {
-  // Basic validation - state should contain org ID
-  // In production, use signed JWTs or session-based validation
+async function createState(orgId: number, secret: string): Promise<string> {
+  const payload = { organization_id: orgId, ts: Date.now() };
+  const data = JSON.stringify(payload);
+
+  const encoder = new TextEncoder();
+  const keyData = encoder.encode(secret);
+  const messageData = encoder.encode(data);
+
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    keyData,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"]
+  );
+
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, messageData);
+  const sig = base64.encode(new Uint8Array(signature));
+
+  // Use URL-safe base64 encoding (replace +/= with URL-safe chars)
+  const base64State = btoa(JSON.stringify({ data, sig }));
+  return base64State.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+/**
+ * Validate state parameter to prevent CSRF attacks.
+ *
+ * Strict HMAC enforcement - requires signed state format: { data: JSON, sig: HMAC }
+ * Legacy unsigned states are rejected for security.
+ *
+ * @param state - Base64-encoded state from OAuth callback
+ * @param expectedOrgId - Expected organization ID
+ * @param secret - Secret key for HMAC verification (required)
+ * @returns true if state is valid
+ */
+async function validateState(
+  state: string,
+  expectedOrgId: number,
+  secret: string
+): Promise<boolean> {
   try {
-    const decoded = JSON.parse(atob(state));
-    return decoded.organization_id === expectedOrgId;
-  } catch {
-    // If state is not JSON, do basic string matching
-    return state.includes(String(expectedOrgId));
+    // Restore URL-safe base64 padding before decode
+    let standardBase64 = state.replace(/-/g, "+").replace(/_/g, "/");
+    while (standardBase64.length % 4) {
+      standardBase64 += "=";
+    }
+
+    const decoded = JSON.parse(atob(standardBase64));
+
+    // Require HMAC-signed format - no legacy fallback
+    if (!decoded.data || !decoded.sig) {
+      console.error("State missing required HMAC fields");
+      return false;
+    }
+
+    // Verify HMAC signature
+    const encoder = new TextEncoder();
+    const keyData = encoder.encode(secret);
+    const messageData = encoder.encode(decoded.data);
+
+    const cryptoKey = await crypto.subtle.importKey(
+      "raw",
+      keyData,
+      { name: "HMAC", hash: "SHA-256" },
+      false,
+      ["verify"]
+    );
+
+    const expectedSig = base64.decode(decoded.sig);
+    const isValid = await crypto.subtle.verify(
+      "HMAC",
+      cryptoKey,
+      expectedSig,
+      messageData
+    );
+
+    if (!isValid) {
+      console.error("State HMAC verification failed");
+      return false;
+    }
+
+    const payload = JSON.parse(decoded.data);
+
+    // Check expiry (10 minutes)
+    const age = Date.now() - payload.ts;
+    if (age > 600000) {
+      console.error("State expired:", age, "ms old");
+      return false;
+    }
+
+    return payload.organization_id === expectedOrgId;
+  } catch (err) {
+    console.error("State validation error:", err);
+    return false;
   }
 }
 
@@ -162,6 +255,7 @@ async function exchangeCodeForTokens(
 
 /**
  * Get data source ID for provider
+ * @throws Error if data source not found (requires proper DB seeding)
  */
 async function getDataSourceId(
   supabase: ReturnType<typeof createClient>,
@@ -174,12 +268,10 @@ async function getDataSourceId(
     .single();
 
   if (error || !data) {
-    // Default IDs if not found
-    const defaults: Record<string, number> = {
-      enphase: 3,
-      sma: 4,
-    };
-    return defaults[provider] || 0;
+    console.error(`Data source lookup failed for ${provider}:`, error);
+    throw new Error(
+      `Data source not found for provider: ${provider}. Ensure data_source table is seeded correctly.`
+    );
   }
 
   return data.id;
@@ -227,10 +319,15 @@ serve(async (req) => {
       );
     }
 
-    // Validate state (CSRF protection)
-    if (!validateState(state, organization_id)) {
+    // Validate state (CSRF protection - strict HMAC enforcement)
+    const stateSecret = Deno.env.get("OAUTH_STATE_SECRET");
+    if (!stateSecret) {
+      throw new Error("OAUTH_STATE_SECRET not configured");
+    }
+
+    if (!(await validateState(state, organization_id, stateSecret))) {
       return new Response(
-        JSON.stringify({ error: "Invalid state parameter" }),
+        JSON.stringify({ error: "Invalid or expired state parameter" }),
         {
           status: 400,
           headers: { ...corsHeaders, "Content-Type": "application/json" },

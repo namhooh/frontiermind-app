@@ -120,3 +120,16 @@ export {
   // Types - Config
   type InvoicesClientConfig,
 } from './invoicesClient'
+
+// OAuth Client
+export {
+  // Standalone Functions
+  generateOAuthState,
+  buildOAuthUrl,
+  getOAuthProviderConfig,
+
+  // Types
+  type OAuthStateResponse,
+  type OAuthProviderConfig,
+  type OAuthProvider,
+} from './oauthClient'

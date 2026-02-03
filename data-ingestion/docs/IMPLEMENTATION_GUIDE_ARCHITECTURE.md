@@ -206,6 +206,35 @@ CLIENT                    YOUR APP                 MANUFACTURER AUTH
 - Encrypt and store tokens in `integration_credential` table
 - Return success/close popup
 
+### 4.5 OAuth Security Architecture
+
+**State Parameter (CSRF Protection):**
+- Frontend MUST call `POST /api/oauth/state` to get HMAC-signed state
+- State includes organization_id, timestamp, and HMAC-SHA256 signature
+- Callback validates signature and rejects expired states (>10 min)
+- Legacy unsigned states are rejected
+
+**Credential Encryption:**
+- All credentials encrypted with AES-256-GCM (authenticated encryption)
+- 12-byte random IV per encryption operation
+- 16-byte authentication tag prevents tampering
+- Same format used by both TypeScript callback and Python fetchers
+
+**Wire Format:**
+```
+[IV - 12 bytes][Ciphertext][Auth Tag - 16 bytes] → Base64
+```
+
+**Implementation Files:**
+
+| Component | File | Operation |
+|-----------|------|-----------|
+| State Generation | `python-backend/api/oauth.py` | Generate HMAC-signed state |
+| State Validation | `data-ingestion/oauth/supabase-callback/index.ts` | Validate on callback |
+| Credential Encrypt | `data-ingestion/oauth/supabase-callback/index.ts` | Encrypt tokens |
+| Credential Decrypt | `data-ingestion/sources/inverter-api/base_fetcher.py` | Decrypt/re-encrypt |
+| Frontend Client | `lib/api/oauthClient.ts` | Request state before redirect |
+
 ---
 
 ## 5. Credential Storage
@@ -218,7 +247,7 @@ Stores encrypted API keys and OAuth tokens for each organization's inverter conn
 - `organization_id` - Links to organization
 - `source_type` - 'solaredge', 'enphase', 'sma', 'goodwe'
 - `auth_type` - 'api_key' or 'oauth2'
-- `encrypted_credentials` - Fernet-encrypted JSON containing keys/tokens
+- `encrypted_credentials` - AES-256-GCM encrypted JSON containing keys/tokens
 - `token_expires_at` - For OAuth tokens, when refresh is needed
 - `is_active` - Enable/disable integration
 - `last_used_at` - Track usage
