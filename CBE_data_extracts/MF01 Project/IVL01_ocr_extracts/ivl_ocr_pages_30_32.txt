@@ -1,0 +1,224 @@
+CONFIDENTIAL
+
+ANNEXURE C: PRICING AND PAYMENT TERMS
+
+1. Pricing
+
+Payment = Solar Tariff X Energy Output
+
+Where:
+
+Payment = | Monthly payment due to System Owner for Energy Output, which shall be
+calculated into its EGP value on a monthly basis at the Agreed Exchange Rate as
+of the date Energy Output for the relevant month is invoiced.
+
+Solar Tariff = | 0.0603 USD per kilowatt-hour for the first fifteen (15) Operating Years of the
+Agreement; and
+0.0570 USD per kilowatt-hour for the remaining ten (10) Operating Years of the
+Agreement.
+
+Energy Output = | Defined in Annexure E.
+
+2. Payment Terms
+
+Payment is due each month, within 30 calendar days of receipt by the Customer of the relevant invoice from
+System Owner. If System Owner has not received the Payment by such due date, the Customer shall in addition
+pay to the System Owner interest at the Secured Overnight Finance rate + 2% percentage points per annum
+(the “Default Rate”) on a pro-rata basis from the due date until the date the Payment is actually received by the
+System Owner and shall also indemnify the System Owner for any FX Loss/Gain the System Owner may incur
+due to the Agreed Exchange Rate on the date payment is actually received being less favourable to the System
+Owner than the Agreed Exchange Rate on the Overdue Date of such payment. Should the FX Loss/Gain be a
+negative amount because the Agreed Exchange Rate has become more favourable, then System Owner shall
+credit the relevant amount to Customer against the amount due on the invoice following receipt of the overdue
+amount.
+
+Ifa bona fide dispute arises with respect to any invoice, Customer shall pay all undisputed amounts and shall,
+prior to the due date under the relevant invoice, provide a reasonably detailed explanation of its objections to
+the relevant invoice, together with relevant documentation, if any, following which Customer shall not be deemed
+in default under this Agreement and the Parties shall not suspend the performance of their respective obligations
+hereunder, including payment of undisputed amounts owed hereunder. Any query concerning a disputed sum
+that remains unresolved by the Parties for 30 days shall be resolved per the terms set forth in Clause 26. Ifan
+amount disputed by Customer is subsequently deemed to have been due pursuant to the applicable invoice,
+interest shall accrue at the Default Rate on such amount from the due date under such invoice until the date
+payment is actually received by the System Owner, and the Customer shall in addition, pay the System Owner
+the corresponding FX Loss/Gain, if any. If an amount disputed by Customer is subsequently deemed to entitle
+the Customer to a refund of amounts actually paid, interest shall accrue at the Default Rate on such amount
+from the date of the overpayment under such invoice until the date paid, and the System Owner shall pay the
+Customer the FX Loss/Gain, if any.
+
+3. Payment Security & Parent Company Guarantee
+
+As a condition for System Owner's obligations under the Agreement, Customer shall provide and maintain in
+full force and effect a parent company guarantee in the form agreed separately by the Parties. Where the
+Customer fails to make payment of any amount hereunder within 30 days after the due date, the System Owner
+shall be entitled to draw on the Customer payment security, following which Customer shall, within 5 business
+days after any such draw, procure that such payment security be replenished so it again covers the full required
+amount.
+
+29
+
+
+
+
+CONFIDENTIAL
+
+ANNEXURE D: CUSTOMER ENABLING WORKS
+
+Pre-Construction Works ~ Standard Enabling Works
+
+Description —
+
+Site Access - Ensure access for trucks with 40” containers to the laydown area and to site.
+
+Offloading onsite — where possible and practical, Customer to assist with providing machinery and assistance for the
+unloading of containers onsite. The purpose of this is avoid the requirement of bringing external machinery onsite for the
+purpose of offloading.
+
+Laydown Area and Storage Room — allocation of a flat area with dimensions of at least 900 m? (laydown area) as well
+as lockable storage room.
+
+Perimeter fencing and security provisions - 24/7 security services according to industrial standard to assist in the
+prevention of theft during construction.
+
+Utility Services — provision of onsite utility services at a localized point at ground level as follows:
+¢ Electricity: supply of power (single phase) where possible for construction purposes to power handheld power
+tools, mobile welders, laptops and any other appliances for construction purposes;
+
+«Internet: For remote service and event analysis reasons it is mandatory to have a secure and stable internet
+connection between the System Owner and the Control and Monitoring system according to the system
+requirements. In order to have this connection as simple and safe as possible the VPN IPsec technology is
+used. This allows an encrypted communication realized via a VPN tunnel to guarantee a high secured data
+transfer. The tunnel ensures the transfer of necessary firmware updates, download event log files and providing
+of online support. As a requirement, it is to be connected permanently to the internet.
+
+In case there is a Customer firewall in place, the following settings have to be released to ensure the access to
+the Fuel Saver Plant:
+
+- System Owner IP Address: TBC
+
+- Destination Ports: 500 and 4500
+
+- Used Protocol: UDP
+
+- Minimum Bandwidth: 1MBit
+
+- Volume: 2GB/month, a flat rate is recommended
+
+- VPN: Passed through 4 IPSEC
+
+Additionally, it is necessary to forward one public port to port 443 (protocol: TCP) to the IP-Address of the Solar
+Hybrid Controller in the Customer's network. This port-forward is used to troubleshoot the VPN connection using
+an encrypted http connection in case of an interruption of the VPN tunnel.
+
+e Water: provision of water for cleaning PV modules. The water requirement for module cleaning during operation
+is ~35 m*/year/MW, subject to confirmation of environmental conditions on site
+
+Staff Welfare Facilities: Where possible and practical, Customer to grant System Owner access to sanitary facilities
+and canteen services (fit for purpose) during scheduled work hours
+
+Temporary Office Space: Customer to provide lockable temporary office space to the Construction Contractor's project
+manager for the period of construction.
+
+Structural Reinforcement Works: Customer shall be responsible for maintaining the structural integrity of the
+Customer's roof(s) and building(s) and their ability to accept the additional structural loading implied by the installation of
+the solar Facility, in accordance with the Independent Structural Assessment. Customer shall be liable for any structural
+reinforcement works that may be required to ensure the structural integrity of the Customer's roof(s) and building(s) in
+accordance with the Independent Structural Assessment.
+
+30
+
+
+
+
+CONFIDENTIAL
+
+Description —
+
+Delivery Point (Interconnection Point): Customer to provide suitable Delivery Point(s) for the PV system. The
+Customer is responsible for undertaking any and all modifications that may be required to the Customer's existing power
+distribution system to form the Delivery Point(s), if a suitable Delivery Point does not already exist. System Owner to
+design, supply and install all infrastructure leading up to the Delivery Point(s).
+
+The agreed Delivery Points for this project are as follows:
+4. One Delivery Point on the PCC1 Switchboard. Switchboard shall be extended to create this Delivery Point.
+2. One Delivery Point on the PCC2 Switchboard. Switchboard shall be extended to create this Delivery Point.
+
+Refer to Annexure B for details on the Delivery Points and the scope boundary between the Customer and the System
+Owner.
+
+Customer shall be liable for the modifications required to the Customer's existing power distribution system to create
+these Delivery Points.
+
+The detailed design of the Delivery Points shall be undertaken under a separate contract by an electrical engineer to be
+engaged directly by the Customer. The construction/installation works associated with creating the Delivery Points shall
+be undertaken under a separate contract by an electrical contractor to be engaged directly by the Customer. Customer
+shall be responsible for the review and approval of these works and accepts liability and responsibility for the works.
+
+System Owner shall finance these works up to a maximum value of $40,000 (inclusive of all VAT, taxes and duties), with
+the following conditions:
+
+4. System Owner shall review and approve the quotations and invoices for these works from the Customer's
+contractors to ensure that the total amount remains within the agreed budget.
+
+2. Prior to the payment of any invoice related to these works, the Customer will review the works undertaken, and
+the associated documentation provided by the Customer's contractor, and will provide the System Owner with
+written approval and acceptance of the works and associated documentation.
+
+3. Following receipt of written acceptance, the System Owner will pay the contractor directly.
+
+4. Any variation requests by the Customer's contractor will require approval by both the Customer and the System
+Owner.
+
+5. Following completion of the works, the Customer will issue the System Owner with a full and final written
+acceptance of the works carried out by the Customer's contractor.
+
+6. Upon receipt of the final written acceptance from the Customer, the System Owner will make final payment to
+the Customer's contractor.
+
+Should the cost of these works exceed the agreed value, the Parties shall meet and attempt in good faith to negotiate
+amendments to this Agreement as are reasonably necessary to mutually preserve the economic value of this Agreement
+to both Parties.
+
+10.
+
+Interconnection Downtime: The Customer to make provision for downtime, System Owner to notify Customer 4 weeks
+before connection is required. The Customer will arrange for their own staff to shut down the board and hand it over to
+the System Owner who will then make the modifications/connection. The Customer will then reenergise the board once
+it is handed back by the System Owner. Estimated downtime is 2-4 hours per day for 3 days.
+
+11.
+
+Design acceptance: Once the system is designed, post signature, the Customer is responsible to review and accept the
+Engineering and the Execution methodology prior to any purchase of equipment or installation. The Customer shall have
+7 days from receipt of design documentation to review. If after 7 days no comments have been received the design will
+be considered accepted.
+
+12.
+
+New Works: Customer is to ensure that no new works are carried out that present new obstacles or features that may
+interfere with the Facility at the areas allocated for the Facility, as indicated in Annexure B.
+
+13.
+
+Existing Earthing and Lightning Protection system: Customer is responsible for ensuring that the existing earthing
+and lightning protection system is adequate and in sufficient working order to protect the existing infrastructure without
+considering the installation of the Facility.
+
+14,
+
+Earthing and Lightning Study Approval: Customer to review and accept the earthing and lightning protection system
+study considering any dependencies from the Facility on the existing earthing and lightning protection systems.
+
+15.
+
+Reactive Power Compensation: The Facility will supply power at unity power factor and will not (under normal operation)
+provide any reactive power compensation. Any reactive power compensation required will need to be accounted for by
+the Customer.
+
+Information Requirements — Reliance Material
+
+Sharing of Health and Safety Standards: The Customer shall ensure that Ensure that the System Owner is aware of
+the site-specific health and safety requirements and procedures.
+
+31
+
