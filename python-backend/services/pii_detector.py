@@ -369,16 +369,22 @@ class PIIDetector:
         """Return True if *entity_text* matches the person-entity denylist (case-insensitive)."""
         return entity_text.strip().lower() in self._person_denylist
 
-    def _is_person_deny_pattern_match(self, entity_text: str) -> bool:
+    def _is_person_deny_pattern_match(
+        self, entity_text: str, skip_all_caps_filter: bool = False
+    ) -> bool:
         """Return True if *entity_text* matches a person-entity deny pattern.
 
         Checks two conditions:
         1. ALL-CAPS text (3+ chars) — section headers like "DEFINITIONS".
+           This check is skipped if ``skip_all_caps_filter=True``, which is
+           used for entities from custom PatternRecognizers that explicitly
+           match names in structured fields (e.g., "Name: LOKECH KUMAR").
         2. Regex patterns from ``person_entity_deny_patterns`` config.
         """
         text = entity_text.strip()
         # ALL-CAPS structural filter (3+ chars)
-        if len(text) >= 3 and text == text.upper():
+        # Skip this filter for entities from custom pattern recognizers
+        if not skip_all_caps_filter and len(text) >= 3 and text == text.upper():
             return True
         # Regex pattern filter
         for pattern in self._person_deny_patterns:
@@ -626,8 +632,19 @@ class PIIDetector:
                     entity_text in dt for dt in definition_terms_lower
                 ):
                     return True
-                # Regex structural patterns
-                if self._is_person_deny_pattern_match(text[r.start:r.end]):
+                # Check if entity is from a custom PatternRecognizer
+                # Custom recognizers explicitly match names in structured fields
+                # (e.g., "Name: LOKECH KUMAR") so we skip the ALL-CAPS filter
+                meta = getattr(r, "recognition_metadata", None) or {}
+                recognizer_name = meta.get("recognizer_name", "")
+                is_custom_pattern = (
+                    recognizer_name == "PatternRecognizer"
+                    or "Recognizer" not in recognizer_name
+                )
+                # Regex structural patterns (skip ALL-CAPS filter for custom patterns)
+                if self._is_person_deny_pattern_match(
+                    text[r.start:r.end], skip_all_caps_filter=is_custom_pattern
+                ):
                     return True
                 return False
 
@@ -650,13 +667,24 @@ class PIIDetector:
             # appear near a contextual trigger (e.g., "Name:", "Attention:", "By:")
             # to be kept.  This narrows detection from "anywhere in NOTICES" to
             # "near name-related lines within NOTICES."
+            # Skip this check for entities from custom PatternRecognizers, since
+            # those patterns already encode the contextual structure (e.g., the
+            # "name_before_title" pattern only matches names followed by "Title:").
             if self._name_context_enabled and self._name_context_patterns:
-                results = [
-                    r for r in results
-                    if r.entity_type != "PERSON"
-                    or not pii_ranges  # safe default: no sections found → skip context check
-                    or self._has_name_context(text, r.start)
-                ]
+
+                def _has_context_or_is_custom(r: RecognizerResult) -> bool:
+                    if r.entity_type != "PERSON":
+                        return True
+                    if not pii_ranges:
+                        return True  # safe default: no sections found → skip context check
+                    # Custom PatternRecognizers already encode context in their patterns
+                    meta = getattr(r, "recognition_metadata", None) or {}
+                    recognizer_name = meta.get("recognizer_name", "")
+                    if recognizer_name == "PatternRecognizer":
+                        return True
+                    return self._has_name_context(text, r.start)
+
+                results = [r for r in results if _has_context_or_is_custom(r)]
 
             # Debug logging for ADDRESS entities to trace recognizer source
             for r in results:

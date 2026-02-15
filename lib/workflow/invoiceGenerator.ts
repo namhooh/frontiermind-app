@@ -40,24 +40,23 @@ function extractPricingFromClauses(clauses: ExtractedClause[]): {
   for (const clause of pricingClauses) {
     const payload = clause.normalized_payload
 
-    // Try to extract rate from payload
+    // Try to extract rate from payload using canonical field name
+    // Canonical: base_rate_per_kwh (ontology), fallback: rate (legacy extractions)
     if (payload) {
-      if (typeof payload.rate === 'number') {
+      if (typeof payload.base_rate_per_kwh === 'number') {
+        energyRate = payload.base_rate_per_kwh
+      } else if (typeof payload.rate === 'number') {
         energyRate = payload.rate
-      } else if (typeof payload.price === 'number') {
-        energyRate = payload.price
-      } else if (typeof payload.tariff === 'number') {
-        energyRate = payload.tariff
-      } else if (typeof payload.energy_rate === 'number') {
-        energyRate = payload.energy_rate
       }
 
       if (typeof payload.currency === 'string') {
         currency = payload.currency
       }
 
-      if (typeof payload.unit === 'string') {
-        rateUnit = payload.unit
+      if (typeof payload.base_rate_unit === 'string') {
+        rateUnit = payload.base_rate_unit
+      } else if (typeof payload.unit === 'string') {
+        rateUnit = payload.unit // Legacy fallback
       }
     }
 

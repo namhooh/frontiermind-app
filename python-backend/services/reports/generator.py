@@ -205,7 +205,7 @@ class ReportGenerator:
                         id, organization_id, report_template_id,
                         report_type, name, report_status,
                         file_format, billing_period_id,
-                        contract_id, project_id
+                        contract_id, project_id, invoice_direction
                     FROM generated_report
                     WHERE id = %s
                     """,
@@ -259,6 +259,7 @@ class ReportGenerator:
             organization_id=report['organization_id'],
             contract_id=report.get('contract_id'),
             project_id=report.get('project_id'),
+            invoice_direction=report.get('invoice_direction'),
             include_charts=include_charts,
             include_summary=include_summary,
             include_line_items=include_line_items,
@@ -281,7 +282,8 @@ class ReportGenerator:
             billing_period_id=config.billing_period_id,
             org_id=config.organization_id,
             contract_id=config.contract_id,
-            project_id=config.project_id
+            project_id=config.project_id,
+            invoice_direction=config.invoice_direction
         )
 
     def _format_output(

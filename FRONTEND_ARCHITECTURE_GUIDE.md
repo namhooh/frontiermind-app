@@ -762,5 +762,5 @@ import { cn } from '@/app/components/ui/cn'
 
 - **CLAUDE.md** - Project overview, backend deployment, database
 - **DATABASE_GUIDE.md** - Schema and migrations
-- **IMPLEMENTATION_GUIDE_REPORTS.md** - Report generation system
+- **IMPLEMENTATION_GUIDE_REPORT_GENERATION.md** - Report generation system
 - **.claude/skills/sync-figma.md** - Detailed Figma MCP workflow

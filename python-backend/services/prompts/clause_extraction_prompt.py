@@ -60,15 +60,15 @@ Extract and normalize:
 **Description:** System uptime, availability guarantees, meter accuracy, and curtailment provisions
 **Look for:** "availability", "uptime", "meter accuracy", "curtailment", "unavailability", "outage hours"
 
-Extract and normalize:
-- threshold_percent: Guaranteed minimum availability (e.g., 95.0)
-- measurement_period: "monthly", "quarterly", "annual"
-- calculation_method: Formula or method description
-- excused_events: List of events that don't count against availability
-- meter_accuracy_threshold_percent: Error threshold for meter testing (e.g., 2.0)
-- meter_test_frequency: How often meters are tested
-- curtailment_cap_hours: Maximum allowed curtailment hours per period
-- curtailment_cap_percent: Maximum curtailment as percentage
+Extract and normalize (use these canonical field names):
+- threshold [T]: Guaranteed minimum availability percentage (e.g., 95.0)
+- measurement_period [C]: "monthly", "quarterly", "annual"
+- calculation_method [FD]: Formula or method description
+- excused_events [S]: List of events that don't count against availability
+- ld_rate [FI]: Liquidated damages rate per shortfall point
+- ld_cap [FI]: Annual cap on liquidated damages
+- scheduled_outage_max_hours_per_year [C]: Maximum scheduled outage hours per year
+- scheduled_outage_notice_days [C]: Advance notice for planned outages
 
 
 ### 3. PERFORMANCE GUARANTEE
@@ -76,13 +76,14 @@ Extract and normalize:
 **Description:** Output guarantees, capacity factor, performance ratio, and degradation allowances
 **Look for:** "performance ratio", "capacity factor", "degradation", "output guarantee", "energy production"
 
-Extract and normalize:
-- guaranteed_performance_ratio_percent: PR guarantee (e.g., 80.0)
-- guaranteed_capacity_factor_percent: CF guarantee (e.g., 25.0)
-- guaranteed_annual_production_kwh: Annual energy guarantee
-- measurement_period: "monthly", "quarterly", "annual"
-- degradation_rate_percent_per_year: Annual degradation allowance
-- weather_adjustment_method: How weather affects calculations
+Extract and normalize (use these canonical field names):
+- threshold [T]: Guaranteed performance percentage (PR or CF)
+- variant [C]: "performance_ratio", "capacity_factor", or "annual_production"
+- guaranteed_annual_production_kwh [T]: Annual energy guarantee (if applicable)
+- measurement_period [C]: "monthly", "quarterly", "annual"
+- degradation_rate_percent_per_year [FI]: Annual degradation allowance
+- weather_adjustment_method [FD]: How weather affects calculations
+- performance_ratio_schedule [S]: Monthly or periodic PR targets (list of {month, target_percent})
 
 
 ### 4. LIQUIDATED DAMAGES
@@ -105,13 +106,16 @@ Extract and normalize:
 **Description:** Energy rates, price escalation, indexing, and adjustment mechanisms
 **Look for:** "price", "rate", "$/kWh", "$/MWh", "escalation", "price adjustment", "tariff"
 
-Extract and normalize:
-- pricing_structure: "fixed", "escalating", "indexed", "tiered", "time_of_use"
-- base_rate: Starting rate value
-- base_rate_unit: "$/kWh" or "$/MWh"
-- escalation_rate_percent_per_year: Annual escalation percentage
-- escalation_index: Index name if indexed (e.g., "CPI", "PPI")
-- escalation_start_year: When escalation begins
+Extract and normalize (use these canonical field names):
+- base_rate_per_kwh [FI]: Starting energy rate value (REQUIRED)
+- base_rate_unit [C]: "$/kWh" or "$/MWh"
+- escalation_rate [FI]: Annual escalation percentage
+- escalation_index [C]: Index name if indexed (e.g., "fixed", "CPI", "PPI")
+- pricing_structure [C]: "fixed", "escalating", "indexed", "tiered", "time_of_use"
+- deemed_energy_method [C]: Method for deemed energy calculation
+- includes_environmental_attributes [C]: Whether rate includes RECs
+- rate_schedule [S]: Rate schedule for tiered/time-varying pricing (list of {period, rate, unit})
+- billing_currency [C]: Currency for billing and invoicing
 
 
 ### 6. PAYMENT TERMS
@@ -119,14 +123,14 @@ Extract and normalize:
 **Description:** Billing cycles, payment timing, take-or-pay obligations, and invoice procedures
 **Look for:** "payment", "invoice", "billing", "take or pay", "minimum purchase", "due date"
 
-Extract and normalize:
-- billing_frequency: "monthly", "quarterly", "annual"
-- invoice_timing: When invoices are issued (e.g., "5th business day")
-- payment_due_days: Days after invoice to pay
-- late_payment_interest_rate_percent: Interest rate on overdue amounts
-- currency: Payment currency (e.g., "USD")
-- minimum_purchase_percent: Minimum offtake obligation as percentage
-- take_or_pay_shortfall_rate: Rate for shortfall payment
+Extract and normalize (use these canonical field names):
+- invoice_frequency [C]: "monthly", "quarterly", "annual" (REQUIRED)
+- invoice_timing [C]: When invoices are issued (e.g., "5th business day")
+- payment_due_days [C]: Days after invoice to pay (REQUIRED)
+- late_interest_rate [FI]: Interest rate on overdue amounts
+- currency [C]: Payment currency (e.g., "USD")
+- minimum_purchase_percent [FI]: Minimum offtake obligation as percentage
+- take_or_pay_shortfall_rate [FI]: Rate for shortfall payment
 
 
 ### 7. DEFAULT
@@ -134,14 +138,15 @@ Extract and normalize:
 **Description:** Events of default, cure periods, remedies, and reimbursement provisions
 **Look for:** "default", "breach", "event of default", "cure", "remedy", "reimbursement"
 
-Extract and normalize:
-- owner_default_events: List of seller/owner default triggers
-- buyer_default_events: List of buyer/offtaker default triggers
-- cure_period_days: Standard cure period
-- extended_cure_period_days: Extended period for complex cures
-- cure_notice_method: How cure notice must be given
-- cross_default_applies: true/false
-- reimbursable_costs: List of recoverable costs
+Extract and normalize (use these canonical field names):
+- variant [C]: "buyer", "seller", or "mutual"
+- owner_default_events [S]: List of seller/owner default triggers
+- buyer_default_events [S]: List of buyer/offtaker default triggers
+- cure_period_days [FI]: Standard cure period (REQUIRED)
+- extended_cure_period_days [FI]: Extended period for complex cures
+- remedy [C]: Available remedies upon default
+- cure_notice_method [C]: How cure notice must be given
+- cross_default_applies [C]: true/false
 
 
 ### 8. FORCE MAJEURE
@@ -149,12 +154,12 @@ Extract and normalize:
 **Description:** Excused events beyond party control and related relief provisions
 **Look for:** "force majeure", "act of god", "unforeseeable", "beyond control", "excused event"
 
-Extract and normalize:
-- defined_events: List of qualifying FM events
-- notification_period_hours: Time to notify other party
-- documentation_required: What proof is needed
-- max_duration_days: Maximum FM period before termination rights
-- payment_obligations_during_fm: Whether payments continue
+Extract and normalize (use these canonical field names):
+- events [S]: List of qualifying FM events (REQUIRED)
+- notice_period_days [C]: Time to notify other party (in days)
+- documentation_required [C]: What proof is needed
+- max_duration_days [C]: Maximum FM period before termination rights
+- relief_scope [C]: Scope of relief: "suspended", "partial", "none"
 
 
 ### 9. TERMINATION
@@ -162,15 +167,18 @@ Extract and normalize:
 **Description:** Contract end provisions, early termination rights, purchase options, and fair market value
 **Look for:** "termination", "expiration", "early termination", "purchase option", "fair market value", "buyout"
 
-Extract and normalize:
-- initial_term_years: Primary contract duration
-- extension_term_years: Extension period length
-- extension_count: Number of extensions allowed
-- early_termination_by_owner: Conditions allowing owner termination
-- early_termination_by_buyer: Conditions allowing buyer termination
-- termination_notice_days: Required notice period
-- purchase_option_exists: true/false
-- purchase_price_basis: "fair_market_value", "book_value", "fixed_price"
+Extract and normalize (use these canonical field names):
+- variant [C]: "declining_per_wp", "tiered_by_event", "convenience", "default"
+- initial_term_years [C]: Primary contract duration
+- termination_fee_formula [FD]: Formula for calculating termination fee
+- declining_schedule [S]: Declining termination fee schedule
+- extension_term_years [C]: Extension period length
+- extension_count [C]: Number of extensions allowed
+- early_termination_by_owner [C]: Conditions allowing owner termination
+- early_termination_by_buyer [C]: Conditions allowing buyer termination
+- termination_notice_days [C]: Required notice period
+- purchase_option_exists [C]: true/false
+- purchase_price_basis [C]: "fair_market_value", "book_value", "fixed_price"
 
 
 ### 10. MAINTENANCE
@@ -178,14 +186,15 @@ Extract and normalize:
 **Description:** O&M obligations, service level agreements, scheduled outages, and party responsibilities
 **Look for:** "maintenance", "O&M", "service level", "SLA", "scheduled outage", "repair"
 
-Extract and normalize:
-- maintenance_responsible_party: "owner", "buyer", "third_party"
-- maintenance_standard: Standard to be met (e.g., "prudent industry practice")
-- response_time_hours: Response time for issues
-- resolution_time_hours: Time to resolve issues
-- sla_availability_percent: SLA availability target
-- scheduled_outage_notice_days: Advance notice for planned outages
-- scheduled_outage_max_hours_per_year: Maximum scheduled outage hours
+Extract and normalize (use these canonical field names):
+- maintenance_responsible_party [C]: "owner", "buyer", "third_party" (REQUIRED)
+- maintenance_standard [C]: Standard to be met (e.g., "prudent industry practice")
+- response_time_hours [FI]: Response time for issues
+- resolution_time_hours [FI]: Time to resolve issues
+- sla_targets [T]: SLA target metrics (object with key/value pairs)
+- spare_parts_obligation [C]: Spare parts inventory obligations
+- scheduled_outage_notice_days [C]: Advance notice for planned outages
+- scheduled_outage_max_hours_per_year [C]: Maximum scheduled outage hours
 
 
 ### 11. COMPLIANCE
@@ -193,12 +202,12 @@ Extract and normalize:
 **Description:** Regulatory, environmental, and legal compliance requirements
 **Look for:** "compliance", "regulatory", "permit", "environmental", "law", "regulation"
 
-Extract and normalize:
-- compliance_responsible_party: Who ensures compliance
-- required_permits: List of required permits/licenses
-- environmental_standards: Environmental requirements to meet
-- reporting_obligations: Required reports and frequency
-- change_in_law_provisions: How law changes are handled
+Extract and normalize (use these canonical field names):
+- compliance_responsible_party [C]: Who ensures compliance
+- standards [S]: List of compliance standards, permits, and licenses
+- reporting_frequency [C]: How often compliance reports are due
+- audit_rights [C]: Rights to audit/inspect compliance
+- change_in_law_provisions [C]: How law changes are handled
 
 
 ### 12. SECURITY PACKAGE
@@ -206,13 +215,15 @@ Extract and normalize:
 **Description:** Financial security instruments including letters of credit, bonds, and guarantees
 **Look for:** "letter of credit", "LC", "bond", "guarantee", "security", "collateral"
 
-Extract and normalize:
-- security_type: "letter_of_credit", "surety_bond", "parent_guarantee", "cash_deposit"
-- security_amount: Dollar amount required
-- security_amount_formula: If amount varies (e.g., "6 months revenue")
-- issuer_requirements: Requirements for issuing institution
-- release_conditions: When security is released
-- draw_conditions: When security can be drawn
+Extract and normalize (use these canonical field names):
+- instrument_type [C]: "letter_of_credit", "surety_bond", "parent_guarantee", "cash_deposit" (REQUIRED)
+- amount [FI]: Dollar amount required (REQUIRED)
+- security_currency [C]: Currency of security instrument
+- security_amount_formula [FD]: If amount varies (e.g., "6 months revenue")
+- issuer_requirements [C]: Requirements for issuing institution
+- release_conditions [S]: When security is released
+- draw_conditions [S]: When security can be drawn
+- replenishment_days [C]: Days to replenish security after a draw
 
 
 ### 13. GENERAL

@@ -7,7 +7,7 @@ Provides data extraction queries for all 4 invoice report types:
 - invoice_received: Received invoice from contractor for review
 - invoice_comparison: Variance analysis between expected and received
 
-Database Reference: Section 5 of IMPLEMENTATION_GUIDE_REPORTS.md
+Database Reference: Section 5 of IMPLEMENTATION_GUIDE_REPORT_GENERATION.md
 """
 
 import logging
@@ -125,7 +125,8 @@ class InvoiceRepository:
         billing_period_id: int,
         org_id: int,
         contract_id: Optional[int] = None,
-        project_id: Optional[int] = None
+        project_id: Optional[int] = None,
+        invoice_direction: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Extract expected invoice data for report generation.
@@ -137,6 +138,8 @@ class InvoiceRepository:
             org_id: Organization ID (security filter via project)
             contract_id: Optional contract filter
             project_id: Optional project filter
+            invoice_direction: Optional 'payable' or 'receivable' filter.
+                If None, returns all directions.
 
         Returns:
             Dictionary with headers, line_items, billing_period, metadata
@@ -178,6 +181,10 @@ class InvoiceRepository:
                 """
                 params: List[Any] = [billing_period_id, org_id]
 
+                if invoice_direction is not None:
+                    query += " AND eih.invoice_direction = %s::invoice_direction"
+                    params.append(invoice_direction)
+
                 if contract_id is not None:
                     query += " AND eih.contract_id = %s"
                     params.append(contract_id)
@@ -202,7 +209,8 @@ class InvoiceRepository:
         billing_period_id: int,
         org_id: int,
         contract_id: Optional[int] = None,
-        project_id: Optional[int] = None
+        project_id: Optional[int] = None,
+        invoice_direction: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Extract received invoice data for report generation.
@@ -214,6 +222,8 @@ class InvoiceRepository:
             org_id: Organization ID (security filter via project)
             contract_id: Optional contract filter
             project_id: Optional project filter
+            invoice_direction: Optional 'payable' or 'receivable' filter.
+                If None, returns all directions.
 
         Returns:
             Dictionary with headers, line_items, billing_period, metadata
@@ -259,6 +269,10 @@ class InvoiceRepository:
                 """
                 params: List[Any] = [billing_period_id, org_id]
 
+                if invoice_direction is not None:
+                    query += " AND rih.invoice_direction = %s::invoice_direction"
+                    params.append(invoice_direction)
+
                 if contract_id is not None:
                     query += " AND rih.contract_id = %s"
                     params.append(contract_id)
@@ -283,7 +297,8 @@ class InvoiceRepository:
         billing_period_id: int,
         org_id: int,
         contract_id: Optional[int] = None,
-        project_id: Optional[int] = None
+        project_id: Optional[int] = None,
+        invoice_direction: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Extract invoice comparison/variance data for report generation.
@@ -296,6 +311,8 @@ class InvoiceRepository:
             org_id: Organization ID (security filter via project)
             contract_id: Optional contract filter
             project_id: Optional project filter
+            invoice_direction: Optional 'payable' or 'receivable' filter.
+                If None, returns all directions.
 
         Returns:
             Dictionary with:
@@ -361,6 +378,10 @@ class InvoiceRepository:
                       AND p.organization_id = %s
                 """
                 params: List[Any] = [billing_period_id, org_id]
+
+                if invoice_direction is not None:
+                    query += " AND ic.invoice_direction = %s::invoice_direction"
+                    params.append(invoice_direction)
 
                 if contract_id is not None:
                     query += " AND eih.contract_id = %s"

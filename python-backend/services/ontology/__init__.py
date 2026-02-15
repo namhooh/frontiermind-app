@@ -9,5 +9,6 @@ The ontology layer defines explicit relationships between clauses:
 """
 
 from .relationship_detector import RelationshipDetector
+from .payload_validator import normalize_payload, validate_payload, ValidationResult
 
-__all__ = ['RelationshipDetector']
+__all__ = ['RelationshipDetector', 'normalize_payload', 'validate_payload', 'ValidationResult']

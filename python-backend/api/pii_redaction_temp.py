@@ -7,9 +7,10 @@ Standalone endpoint for OCR + PII redaction without clause extraction or databas
 import logging
 import time
 import os
+import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, HTTPException
+from fastapi import APIRouter, UploadFile, File, HTTPException, Request, status
 from pydantic import BaseModel
 from typing import Dict, List, Optional
 
@@ -23,6 +24,26 @@ router = APIRouter(prefix="/api/pii-redaction-temp", tags=["pii-redaction-temp"]
 # Maximum file size: 10MB
 MAX_FILE_SIZE = 10 * 1024 * 1024
 ALLOWED_EXTENSIONS = {".pdf", ".docx"}
+
+
+def get_org_id(request: Request) -> int:
+    """
+    Extract and validate organization ID from request header.
+    Raises HTTPException if missing or invalid.
+    """
+    org_id = request.headers.get("X-Organization-ID")
+    if not org_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={"error": "MissingOrganization", "message": "X-Organization-ID header required"}
+        )
+    try:
+        return int(org_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"error": "InvalidOrganization", "message": "X-Organization-ID must be an integer"}
+        )
 
 
 class PIIEntityDetail(BaseModel):
@@ -49,9 +70,11 @@ class PIIRedactionResponse(BaseModel):
 
 
 @router.post("/process", response_model=PIIRedactionResponse)
-async def process_pii_redaction(file: UploadFile = File(...)):
+async def process_pii_redaction(request: Request, file: UploadFile = File(...)):
     """
     Process a document for PII redaction.
+
+    Requires X-Organization-ID header for authentication.
 
     1. Validate file format and size
     2. Parse document with LlamaParse (OCR)
@@ -59,6 +82,10 @@ async def process_pii_redaction(file: UploadFile = File(...)):
     4. Anonymize PII
     5. Return redacted text + PII summary
     """
+    # Validate authentication
+    org_id = get_org_id(request)
+    logger.info(f"PII Redaction request from org {org_id}")
+
     start_time = time.time()
 
     # Validate file extension
@@ -154,7 +181,13 @@ async def _parse_document(file_bytes: bytes, filename: str) -> str:
     temp_dir = Path("/tmp/pii_redaction_temp")
     temp_dir.mkdir(exist_ok=True)
 
-    temp_file = temp_dir / filename
+    # Use UUID for temp file to prevent path traversal attacks
+    # Only preserve the file extension from the original filename
+    ext = Path(filename).suffix.lower() if filename else ".pdf"
+    if ext not in ALLOWED_EXTENSIONS:
+        ext = ".pdf"
+    safe_filename = f"{uuid.uuid4()}{ext}"
+    temp_file = temp_dir / safe_filename
     temp_file.write_bytes(file_bytes)
 
     try:

@@ -64,6 +64,15 @@ database/
 │   ├── 020_contract_extraction_metadata.sql     # Phase 5.4: Contract metadata extraction
 │   ├── 021_seed_billing_period.sql              # Phase 5.5: Billing period seed data
 │   ├── 022_exchange_rate_and_invoice_validation.sql  # Phase 5.6: Exchange rates, invoice validation architecture
+│   ├── 023_simplify_obligation_view.sql              # Phase 6.0: Canonical ontology field names in obligation VIEW
+│   ├── 024_drop_insecure_security_events_view.sql    # Phase 6.1: Security fix - drop insecure v_security_events view
+│   ├── 025_meter_reading_dedup_index.sql              # Phase 6.2: Business-key dedup index for meter_reading
+│   ├── 026_meter_aggregate_dedup_index.sql            # Phase 6.3: Billing aggregate dedup index for meter_aggregate
+│   ├── 027_tariff_classification_lookup.sql           # Phase 7.0: Org-scoped tariff classification lookup tables
+│   ├── 028_customer_contact.sql                       # Phase 7.0: Customer contact table (1:many from counterparty)
+│   ├── 029_production_forecast_guarantee.sql          # Phase 7.0: Production forecast (monthly) and guarantee (annual)
+│   ├── 030_seed_billing_period_calendar.sql           # Phase 7.1: Full billing period calendar (Jan 2024 - Dec 2027)
+│   ├── 031_generated_report_invoice_direction.sql     # Phase 7.1: Add invoice_direction to generated_report
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -935,7 +944,7 @@ database/
 - Migrations: `016_audit_log.sql`, `017_core_table_rls.sql`
 - New: `audit_log` table with 50+ action types (auth, data access, PII, exports, admin)
 - New: `audit_action_type` and `audit_severity` enums
-- New: `v_security_events` VIEW for security monitoring
+- New: `v_security_events` VIEW for security monitoring (**removed in migration 024** — security vulnerability)
 - New: RLS policies on 15+ core tables (organization, project, contract, clause, event, etc.)
 - Helper functions: `log_audit_event()`, `log_pii_access_event()`, `get_audit_summary()`
 - Security: Organization isolation, admin-only PII access, service role policies
@@ -949,7 +958,7 @@ database/
 - Helper functions: `get_latest_completed_billing_period()`, `calculate_next_run_time()`, `get_report_statistics()`
 - **Billing Period Integration:** Reports reference `billing_period_id` FK instead of date ranges
 - **Simplified workflow:** No approval process, on-demand vs scheduled generation only
-- **Implementation Guide:** `IMPLEMENTATION_GUIDE_REPORTS.md`
+- **Implementation Guide:** `IMPLEMENTATION_GUIDE_REPORT_GENERATION.md`
 
 **v5.2 (Invoice Reconciliation Columns)** - Completed
 - Migration: `019_invoice_comparison_final_amount.sql`
@@ -986,6 +995,26 @@ database/
 - Extended: `invoice_comparison_line_item` with `variance_percent`, `variance_details`
 - Seeded: 11 currencies (USD, EUR, GBP, ZAR, GHS, NGN, KES, RWF, SLE, EGP, MZN)
 - Seeded: 14 tariff types (FLAT, TOU, TIERED, METERED_ENERGY, etc.)
+- Reference: `CBE_data_extracts/CBE_TO_FRONTIERMIND_MAPPING.md`
+
+**v6.2 (Meter Reading Dedup Index)** - Completed
+- Migration: `025_meter_reading_dedup_index.sql`
+- New unique index: `idx_meter_reading_dedup` on (organization_id, reading_timestamp, COALESCE(external_site_id), COALESCE(external_device_id))
+- Enables row-level dedup via existing `ON CONFLICT DO NOTHING` in loader
+
+**v6.3 (Billing Aggregate Dedup Index)** - Completed
+- Migration: `026_meter_aggregate_dedup_index.sql`
+- New unique index: `idx_meter_aggregate_billing_dedup` on (organization_id, COALESCE(billing_period_id, -1), COALESCE(clause_tariff_id, -1)) WHERE period_type = 'monthly'
+- Enables row-level dedup for monthly billing aggregates via `ON CONFLICT DO NOTHING`
+
+**v7.0 (CBE Schema Design Review)** - Completed
+- Migrations: `027-029_*.sql`
+- New: `tariff_structure_type`, `energy_sale_type`, `escalation_type` — org-scoped lookup tables with platform canonical seeds
+- New: `customer_contact` — 1:many contacts per counterparty with role, invoice email, escalation flags
+- New: `production_forecast` — monthly time-series per project (forecast energy, GHI, PR, degradation)
+- New: `production_guarantee` — annual per project (guaranteed kWh, P50 %, actual/shortfall tracking)
+- Extended: `clause_tariff` with `tariff_structure_id`, `energy_sale_type_id`, `escalation_type_id`, `market_ref_currency_id`
+- Deferred energy calculation deferred to pricing calculator / rules engine (not a DB view)
 - Reference: `CBE_data_extracts/CBE_TO_FRONTIERMIND_MAPPING.md`
 
 ---
@@ -1083,7 +1112,7 @@ git commit -m "snapshot(db): v2.0 Phase 2 Contract Parsing Complete"
 - [Contract Digitization Guide](contract-digitization/docs/IMPLEMENTATION_GUIDE.md) - Phase 2 plan
 - [Data Ingestion Architecture](data-ingestion/docs/IMPLEMENTATION_GUIDE_ARCHITECTURE.md) - Phase 3 lake-house design
 - [Ontology Framework Guide](contract-digitization/docs/ONTOLOGY_GUIDE.md) - Phase 4 clause relationships
-- [Export & Reports Guide](database/IMPLEMENTATION_GUIDE_REPORTS.md) - Phase 5 export/report workflows
+- [Export & Reports Guide](IMPLEMENTATION_GUIDE_REPORT_GENERATION.md) - Phase 5 export/report workflows
 - [Security Assessment](SECURITY_PRIVACY_ASSESSMENT.md) - Security controls and implementation status
 - [Database Seed README](database/seed/README.md) - Data loading guide
 - [Migrations README](database/migrations/README.md) - Migration guidelines

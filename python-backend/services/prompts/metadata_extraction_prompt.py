@@ -44,6 +44,8 @@ Classify as one of:
 - **ESA** - Energy Storage Agreement
 - **VPPA** - Virtual/Financial PPA (no physical delivery)
 - **TOLLING** - Tolling agreement (offtaker provides fuel)
+- **SSA** - Service/Supply Agreement (equipment supply, service provision)
+- **PROJECT_AGREEMENT** - Project Agreement (three-party, implementation agreement)
 - **OTHER** - If none of the above fit
 
 ### 2. Party Names
@@ -196,6 +198,8 @@ VALID_CONTRACT_TYPES = [
     "ESA",
     "VPPA",
     "TOLLING",
+    "SSA",
+    "PROJECT_AGREEMENT",
     "OTHER",
 ]
 
@@ -223,6 +227,11 @@ def validate_contract_type(contract_type: str) -> Optional[str]:
         "INTERCONNECTION": "IA",
         "FINANCIAL_PPA": "VPPA",
         "STORAGE": "ESA",
+        "SERVICE_AGREEMENT": "SSA",
+        "SUPPLY_AGREEMENT": "SSA",
+        "SERVICE_SUPPLY": "SSA",
+        "IMPLEMENTATION_AGREEMENT": "PROJECT_AGREEMENT",
+        "PROJECT": "PROJECT_AGREEMENT",
     }
 
     if normalized in aliases:

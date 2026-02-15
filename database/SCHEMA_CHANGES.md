@@ -343,7 +343,7 @@ This document tracks major schema versions and their associated changes.
 
 **Description:** Simplified report generation schema focused on invoice workflows. Removed approval workflow, consolidated workflows into on-demand vs scheduled generation, integrated with billing_period table.
 
-**Reference:** `IMPLEMENTATION_GUIDE_REPORTS.md`
+**Reference:** `IMPLEMENTATION_GUIDE_REPORT_GENERATION.md`
 
 **Migrations:**
 - `database/migrations/018_export_and_reports_schema.sql` - Simplified report generation tables
@@ -650,9 +650,10 @@ This document tracks major schema versions and their associated changes.
 - `prevent_audit_log_modification()` - Immutability trigger function
   - PUBLIC execution revoked for security
 
-**New View: v_security_events**
+**New View: v_security_events** *(dropped in migration 024 — security vulnerability)*
 - Shows WARNING/ERROR/CRITICAL events with user and org info
 - Useful for security monitoring dashboards
+- **Removed:** LEFT JOIN on `auth.users` exposed email; SECURITY DEFINER bypassed RLS
 
 **RLS Helper Functions (migration 017):**
 - `is_org_member(p_org_id)` - Check if current user is a member of org (SECURITY DEFINER)
@@ -832,5 +833,244 @@ Policy Pattern (applied to all):
 - `exchange_rate_feed` deferred — will be added when auto-fetch scheduler is implemented
 - Default `invoice_direction = 'payable'` preserves backward compatibility for existing AP flows
 - Non-metered tariffs (capacity, O&M, penalties) have NULL `meter_aggregate_id` with quantity/price stored directly on line items
+
+---
+
+### v6.0 - 2026-02-10 (Actionable Ontology — Canonical Field Names)
+
+**Description:** Simplifies obligation_view COALESCE chains to use canonical ontology field names. Part of the Actionable Ontology Design that standardizes extracted clause payload fields across the pipeline.
+
+**Reference:** `contract-digitization/docs/TEMPORARY_PROPOSAL_ACTIONABLE_ONTOLOGY_DESIGN.md`
+
+**Migrations:**
+- `database/migrations/023_simplify_obligation_view.sql` - Simplified obligation VIEW with canonical fields
+
+**Changes:**
+
+**Simplified obligation_view:**
+- `threshold_value`: Reduced from 6-way COALESCE to 2-way (`threshold` canonical, `threshold_percent` legacy fallback)
+- `evaluation_period`: Simplified to prefer `measurement_period` → `invoice_frequency` → `'annual'`
+- Added `rate_value`: New column using `base_rate_per_kwh` canonical with `rate` legacy fallback
+- Added `DEFAULT` and `TERMINATION` to obligation category filter
+- Removed legacy `PERF_GUARANTEE` and `CAPACITY_FACTOR` codes (now unified as `PERFORMANCE_GUARANTEE`)
+
+**Recreated obligation_with_relationships:**
+- Same structure, rebuilt due to dependency on obligation_view
+
+**Recreated get_obligation_details():**
+- Same signature and behavior, rebuilt due to dependency on obligation_view
+
+**Python Backend Changes (same release):**
+- `python-backend/services/prompts/clause_examples.py` — Added `CANONICAL_SCHEMAS`, `CANONICAL_TERMINOLOGY`, `resolve_aliases()`, `get_schema_for_category()`, `get_required_fields()`, `format_schema_for_prompt()`. Updated all examples to use canonical field names.
+- `python-backend/services/ontology/payload_validator.py` — **New**: `validate_payload()`, `normalize_payload()` functions
+- `python-backend/services/contract_parser.py` — Added payload normalization step (Phase 1.5), contract type profiles (`CONTRACT_TYPE_PROFILES`), structure map builder, contract type profile warnings
+- `python-backend/services/prompts/clause_extraction_prompt.py` — Updated all field lists to canonical names with role annotations [T/FI/FD/S/C/R]
+- `python-backend/services/prompts/metadata_extraction_prompt.py` — Added SSA and PROJECT_AGREEMENT contract types
+- `python-backend/services/prompts/payload_enrichment_prompt.py` — Updated to reference canonical schemas
+- `python-backend/config/relationship_patterns.yaml` — Added MAINTENANCE→AVAILABILITY (GOVERNS), SECURITY_PACKAGE→CONDITIONS_PRECEDENT (INPUTS), SSA↔PPA cross-contract patterns
+- `lib/workflow/invoiceGenerator.ts` — Simplified rate fallback: `base_rate_per_kwh` → `rate` (2-way instead of 4-way)
+
+**Design Notes:**
+- Canonical field names resolve at extraction time via `resolve_aliases()` — no COALESCE chains needed for new extractions
+- Legacy fallbacks in VIEW ensure backward compatibility with pre-ontology clauses
+- `CONTRACT_TYPE_PROFILES` enables automatic detection of missing mandatory categories per contract type
+- Role annotations (T=Threshold, FI=Formula Input, FD=Formula Definition, S=Schedule, C=Configuration, R=Reference) guide extraction prompts
+
+---
+
+### v6.1 - 2026-02-11 (Security Fix: Drop Insecure View)
+
+**Description:** Dropped `v_security_events` view to fix two Supabase security linter findings: "Exposed Auth Users Entity" (LEFT JOIN on `auth.users` exposed email) and "SECURITY DEFINER property" (bypassed RLS, allowing any authenticated user to read all audit events across all organizations).
+
+**Migrations:**
+- `database/migrations/024_drop_insecure_security_events_view.sql` - Drop insecure view
+
+**Changes:**
+
+**Dropped view: v_security_events**
+- Previously defined in migration 016 (`016_audit_log.sql`)
+- LEFT JOINed `auth.users`, exposing `email` to `authenticated` role via PostgREST
+- Used `SECURITY DEFINER`, running with superuser permissions and bypassing all RLS on `audit_log`
+- Combined effect: any authenticated user could read ALL security events across ALL organizations
+- View was unused — zero references in `app/`, `lib/`, `python-backend/`
+- Secure alternative already exists: `get_audit_summary()` provides org-scoped audit access with admin authorization check
+
+**Design Notes:**
+- Dropping is preferred over fixing (`security_invoker = true`) because the view is dead code
+- `get_audit_summary()` (migration 016) remains the correct way to access audit data
+- No application code changes required (view had no consumers)
+
+---
+
+### v6.3 - 2026-02-11 (Billing Aggregate Dedup Index)
+
+**Description:** Adds a unique index on meter_aggregate business keys to enable row-level deduplication for monthly billing aggregates. The billing aggregate pipeline uses `ON CONFLICT DO NOTHING` for idempotent inserts.
+
+**Migrations:**
+- `database/migrations/026_meter_aggregate_dedup_index.sql` - Business-key unique index
+
+**Changes:**
+
+**New Unique Index: idx_meter_aggregate_billing_dedup**
+- Columns: `organization_id`, `COALESCE(billing_period_id, -1)`, `COALESCE(clause_tariff_id, -1)`
+- Partial index: `WHERE period_type = 'monthly'`
+- `COALESCE` handles NULL FKs (from unresolved tariffs/periods per the "Load with NULLs + warn" strategy)
+- Scoped to monthly billing aggregates only — does not affect hourly/daily physical meter aggregates
+
+**Design Notes:**
+- No application code changes required — the loader's `ON CONFLICT DO NOTHING` now has a conflict target
+- COALESCE ensures NULL FK values are treated as equal for dedup purposes
+- Partial index keeps storage minimal (only monthly rows indexed)
+
+---
+
+### v7.0 - 2026-02-14 (CBE Schema Design Review — Tariff Classification & Operational Tables)
+
+**Description:** Implements schema recommendations from CBE-to-FrontierMind mapping review. Adds org-scoped tariff classification lookup tables, customer contacts, and production forecasts/guarantees.
+
+**Reference:** `CBE_data_extracts/CBE_TO_FRONTIERMIND_MAPPING.md`
+
+**Migrations:**
+- `database/migrations/027_tariff_classification_lookup.sql` - Org-scoped lookup tables + clause_tariff FK extensions
+- `database/migrations/028_customer_contact.sql` - Customer contact table
+- `database/migrations/029_production_forecast_guarantee.sql` - Production forecast and guarantee tables
+
+**Key Changes:**
+
+**New Table: tariff_structure_type**
+- `id` - BIGSERIAL PRIMARY KEY
+- `code` - VARCHAR(50) NOT NULL
+- `name` - VARCHAR(255) NOT NULL
+- `description` - TEXT
+- `organization_id` - BIGINT REFERENCES organization(id) (NULL = platform-level canonical)
+- `is_active` - BOOLEAN DEFAULT true
+- UNIQUE(code, organization_id)
+- Seeded: FIXED, GRID, GENERATOR (platform-level)
+
+**New Table: energy_sale_type**
+- Same structure as tariff_structure_type
+- Seeded: TAKE_OR_PAY, MIN_OFFTAKE, FULL_OFFTAKE, AS_PRODUCED, DEEMED (platform-level)
+
+**New Table: escalation_type**
+- Same structure as tariff_structure_type
+- Seeded: FIXED, CPI, CUSTOM, NONE, GRID_PASSTHROUGH (platform-level)
+
+**Extended clause_tariff table:**
+- `tariff_structure_id` - BIGINT REFERENCES tariff_structure_type(id)
+- `energy_sale_type_id` - BIGINT REFERENCES energy_sale_type(id)
+- `escalation_type_id` - BIGINT REFERENCES escalation_type(id)
+- `market_ref_currency_id` - BIGINT REFERENCES currency(id)
+
+**New Table: customer_contact**
+- `id` - BIGSERIAL PRIMARY KEY
+- `counterparty_id` - BIGINT NOT NULL REFERENCES counterparty(id) ON DELETE CASCADE
+- `organization_id` - BIGINT NOT NULL REFERENCES organization(id)
+- `role` - VARCHAR(100) (accounting, cfo, operations_manager, etc.)
+- `full_name` - VARCHAR(255)
+- `email` - VARCHAR(255)
+- `phone` - VARCHAR(50)
+- `include_in_invoice_email` - BOOLEAN DEFAULT false
+- `escalation_only` - BOOLEAN DEFAULT false
+- `is_active` - BOOLEAN DEFAULT true
+- `source_metadata` - JSONB DEFAULT '{}'
+- Partial index on counterparty_id WHERE include_in_invoice_email AND is_active
+
+**New Table: production_forecast**
+- `id` - BIGSERIAL PRIMARY KEY
+- `project_id` - BIGINT NOT NULL REFERENCES project(id)
+- `organization_id` - BIGINT NOT NULL REFERENCES organization(id)
+- `billing_period_id` - BIGINT REFERENCES billing_period(id)
+- `forecast_month` - DATE NOT NULL
+- `operating_year` - INTEGER
+- `forecast_energy_kwh` - DECIMAL NOT NULL
+- `forecast_ghi_irradiance` - DECIMAL
+- `forecast_pr` - DECIMAL(5,4) (Performance Ratio)
+- `degradation_factor` - DECIMAL(6,5)
+- `forecast_source` - VARCHAR(100) DEFAULT 'p50'
+- UNIQUE(project_id, forecast_month)
+
+**New Table: production_guarantee**
+- `id` - BIGSERIAL PRIMARY KEY
+- `project_id` - BIGINT NOT NULL REFERENCES project(id)
+- `organization_id` - BIGINT NOT NULL REFERENCES organization(id)
+- `operating_year` - INTEGER NOT NULL
+- `year_start_date` - DATE NOT NULL
+- `year_end_date` - DATE NOT NULL
+- `guaranteed_kwh` - DECIMAL NOT NULL
+- `guarantee_pct_of_p50` - DECIMAL(5,4) (e.g., 0.9000 = 90% of P50)
+- `p50_annual_kwh` - DECIMAL
+- UNIQUE(project_id, operating_year)
+- **Note:** Evaluation data (actual_kwh, shortfall_kwh, evaluation_status) removed — year-end guarantee evaluation is modeled via `default_event` + `rule_output` pipeline (migration 000_baseline), which provides audit trail, LD amounts, breach/excuse flags, and clause linkage
+
+**energy_sale_type pruning (updated seed data in migration 027):**
+- Removed `FULL_OFFTAKE`, `AS_PRODUCED`, `DEEMED` — no CBE contract mappings, semantically overlapped with TAKE_OR_PAY or belonged at the invoice line item level
+- Added `TAKE_AND_PAY` and `LEASE` to migration 027's seed INSERT
+- Final canonical set: TAKE_OR_PAY, MIN_OFFTAKE, TAKE_AND_PAY, LEASE
+
+**Design Notes:**
+- Lookup tables use `organization_id` scoping: NULL = platform canonical, non-NULL = client-specific
+- METERED_AVAILABLE not promoted to column — `tariff_type_id` FK already carries this semantic; original label preserved in `source_metadata`
+- `customer_contact` is 1:many from `counterparty` — avoids flattened contact_N columns anti-pattern
+- `production_forecast` and `production_guarantee` are project-level, not clause-level — they are operational data, not pricing formula parameters
+- Deferred energy calculation deferred to rules engine / pricing calculator — same rationale as production guarantee evaluation: billing compliance calculations belong at runtime, not materialized as DB views
+- All new tables have RLS enabled with standard org member/admin/service policies
+
+---
+
+### v7.1 - 2026-02-15 (Schema Alignment — Billing Period Calendar & Report Direction)
+
+**Description:** Second round of schema alignment fixes. Seeds a full billing_period calendar (48 months) to prevent NULL FK collapse, and adds `invoice_direction` column to `generated_report` to complete the direction-filtering pipeline from API request through background report generation.
+
+**Migrations:**
+- `database/migrations/030_seed_billing_period_calendar.sql` - Full billing period calendar + UNIQUE constraint
+- `database/migrations/031_generated_report_invoice_direction.sql` - Add invoice_direction to generated_report
+
+**Changes:**
+
+**billing_period calendar (migration 033):**
+- Added `UNIQUE(start_date, end_date)` constraint on `billing_period`
+- Seeded 48 months: January 2024 through December 2027
+- Uses `ON CONFLICT (start_date, end_date) DO NOTHING` — preserves existing ID=1 row from migration 021
+- Covers historical CBE data (2024), current operations (2025-2026), and forecast periods (2027)
+- Fixes: ingestion of non-January data previously got NULL billing_period_id FK, collapsing via COALESCE(-1) dedup index
+
+**generated_report.invoice_direction (migration 034):**
+- Added nullable `invoice_direction` column (reuses existing `invoice_direction` enum from migration 022)
+- NULL means "all directions" — backward compatible with existing reports
+- Enables the report generation pipeline to persist and use direction filtering:
+  `GenerateReportRequest` → `create_generated_report()` → DB row → `_load_report()` → `ReportConfig` → `extractor.extract()`
+
+**Code changes (no migration):**
+- `models/reports.py`: Added `invoice_direction` to `GenerateReportRequest` and `ReportConfig`
+- `db/report_repository.py`: `create_generated_report()` accepts and inserts `invoice_direction`
+- `api/reports.py`: Passes `report_request.invoice_direction` to repository
+- `services/reports/generator.py`: Reads `invoice_direction` from DB, sets on config, passes to extractor
+- `services/reports/extractors/base.py`: Added `invoice_direction` to abstract `extract()` signature
+- `services/reports/extractors/invoice_expected.py`: Passes `invoice_direction` to repository
+- `services/reports/extractors/invoice_received.py`: Passes `invoice_direction` to repository
+- `services/reports/extractors/invoice_comparison.py`: Passes `invoice_direction` to repository
+- `services/reports/extractors/invoice_to_client.py`: Accepts param for interface consistency (no-op)
+
+---
+
+### v6.2 - 2026-02-11 (Meter Reading Dedup Index)
+
+**Description:** Adds a unique index on meter_reading business keys to enable row-level deduplication. The existing `ON CONFLICT DO NOTHING` in the loader had no conflict target (PK uses auto-increment `id`), so duplicate readings were never detected.
+
+**Migrations:**
+- `database/migrations/025_meter_reading_dedup_index.sql` - Business-key unique index
+
+**Changes:**
+
+**New Unique Index: idx_meter_reading_dedup**
+- Columns: `organization_id`, `reading_timestamp`, `COALESCE(external_site_id, '')`, `COALESCE(external_device_id, '')`
+- `COALESCE` handles NULLs (PostgreSQL treats NULLs as distinct in unique constraints)
+- Includes `reading_timestamp` (the partition key) — required for partitioned table unique indexes
+- Existing `ON CONFLICT DO NOTHING` in `meter_reading_loader.py` automatically leverages this index
+
+**Design Notes:**
+- No application code changes required — the loader's `ON CONFLICT DO NOTHING` now has a conflict target
+- Pre-migration dedup query included in migration comments for environments with existing duplicate rows
+- COALESCE ensures NULL site/device IDs are treated as equal for dedup purposes
 
 ---

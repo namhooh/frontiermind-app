@@ -55,7 +55,8 @@ class BaseExtractor(ABC):
         billing_period_id: int,
         org_id: int,
         contract_id: Optional[int] = None,
-        project_id: Optional[int] = None
+        project_id: Optional[int] = None,
+        invoice_direction: Optional[str] = None
     ) -> ExtractedData:
         """
         Extract invoice data for report generation.
@@ -65,6 +66,7 @@ class BaseExtractor(ABC):
             org_id: Organization ID (required for security filtering)
             contract_id: Optional contract filter
             project_id: Optional project filter
+            invoice_direction: Optional direction filter (receivable/payable)
 
         Returns:
             ExtractedData containing headers, line items, and metadata

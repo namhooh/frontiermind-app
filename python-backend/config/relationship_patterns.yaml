@@ -33,19 +33,11 @@ intra_contract:
 
   # Performance guarantee breach triggers liquidated damages
   - name: "performance_triggers_ld"
-    source_category: "PERF_GUARANTEE"
+    source_category: "PERFORMANCE_GUARANTEE"
     target_category: "LIQUIDATED_DAMAGES"
     relationship_type: "TRIGGERS"
     default_confidence: 0.95
     description: "Performance ratio shortfall triggers liquidated damages"
-
-  # Capacity factor breach triggers liquidated damages
-  - name: "capacity_factor_triggers_ld"
-    source_category: "CAPACITY_FACTOR"
-    target_category: "LIQUIDATED_DAMAGES"
-    relationship_type: "TRIGGERS"
-    default_confidence: 0.90
-    description: "Capacity factor shortfall triggers liquidated damages"
 
   # Default triggers termination rights
   - name: "default_triggers_termination"
@@ -71,6 +63,17 @@ intra_contract:
     default_confidence: 0.80
     description: "Compliance failure can trigger default event"
 
+  # Default triggers security draw
+  # (Strengthened from implicit to explicit pattern)
+
+  # Security package as condition precedent input
+  - name: "security_inputs_cp"
+    source_category: "SECURITY_PACKAGE"
+    target_category: "CONDITIONS_PRECEDENT"
+    relationship_type: "INPUTS"
+    default_confidence: 0.80
+    description: "Security instrument delivery is often a CP requirement"
+
   # -------------------------------------------------
   # EXCUSES: Event type → Excused Obligation
   # -------------------------------------------------
@@ -86,18 +89,10 @@ intra_contract:
   # Force majeure excuses performance guarantee
   - name: "fm_excuses_performance"
     source_category: "FORCE_MAJEURE"
-    target_category: "PERF_GUARANTEE"
+    target_category: "PERFORMANCE_GUARANTEE"
     relationship_type: "EXCUSES"
     default_confidence: 0.95
     description: "Force majeure events excuse performance ratio guarantee"
-
-  # Force majeure excuses capacity factor
-  - name: "fm_excuses_capacity_factor"
-    source_category: "FORCE_MAJEURE"
-    target_category: "CAPACITY_FACTOR"
-    relationship_type: "EXCUSES"
-    default_confidence: 0.90
-    description: "Force majeure events excuse capacity factor guarantee"
 
   # Scheduled maintenance excuses availability (with limits)
   - name: "maintenance_excuses_availability"
@@ -110,22 +105,6 @@ intra_contract:
     parameters:
       requires_notice: true
       limit_type: "hours_per_year"
-
-  # Grid curtailment excuses availability
-  - name: "curtailment_excuses_availability"
-    source_category: "CURTAILMENT"
-    target_category: "AVAILABILITY"
-    relationship_type: "EXCUSES"
-    default_confidence: 0.95
-    description: "Utility-ordered curtailment excuses availability"
-
-  # Grid curtailment excuses performance
-  - name: "curtailment_excuses_performance"
-    source_category: "CURTAILMENT"
-    target_category: "PERF_GUARANTEE"
-    relationship_type: "EXCUSES"
-    default_confidence: 0.90
-    description: "Utility-ordered curtailment excuses performance ratio"
 
   # -------------------------------------------------
   # INPUTS: Data flow between clauses
@@ -148,22 +127,6 @@ intra_contract:
     description: "Contract price may be used in LD calculations"
     condition: "target.calculation_type == 'per_kwh'"
 
-  # Metering inputs to availability
-  - name: "metering_inputs_availability"
-    source_category: "METERING"
-    target_category: "AVAILABILITY"
-    relationship_type: "INPUTS"
-    default_confidence: 0.90
-    description: "Metering requirements define availability measurement"
-
-  # Metering inputs to performance
-  - name: "metering_inputs_performance"
-    source_category: "METERING"
-    target_category: "PERF_GUARANTEE"
-    relationship_type: "INPUTS"
-    default_confidence: 0.90
-    description: "Metering requirements define performance measurement"
-
   # -------------------------------------------------
   # GOVERNS: Context setting
   # -------------------------------------------------
@@ -173,12 +136,19 @@ intra_contract:
     source_category: "CONDITIONS_PRECEDENT"
     target_categories:
       - "AVAILABILITY"
-      - "PERF_GUARANTEE"
-      - "CAPACITY_FACTOR"
+      - "PERFORMANCE_GUARANTEE"
       - "PAYMENT_TERMS"
     relationship_type: "GOVERNS"
     default_confidence: 0.90
     description: "CP satisfaction unlocks all commercial obligations"
+
+  # Maintenance windows govern availability calculation
+  - name: "maintenance_governs_availability"
+    source_category: "MAINTENANCE"
+    target_category: "AVAILABILITY"
+    relationship_type: "GOVERNS"
+    default_confidence: 0.85
+    description: "Maintenance windows and SLAs affect availability calculation"
 
   # General provisions govern all clauses
   - name: "general_governs_all"
@@ -190,10 +160,10 @@ intra_contract:
 
   # Term clause governs all obligations
   - name: "term_governs_obligations"
-    source_category: "TERM"
+    source_category: "TERMINATION"
     target_categories:
       - "AVAILABILITY"
-      - "PERF_GUARANTEE"
+      - "PERFORMANCE_GUARANTEE"
       - "PAYMENT_TERMS"
       - "LIQUIDATED_DAMAGES"
     relationship_type: "GOVERNS"
@@ -238,6 +208,36 @@ cross_contract:
     relationship_type: "GOVERNS"
     default_confidence: 0.80
     description: "O&M SLA requirements govern what counts as valid maintenance excuse"
+
+  # SSA pricing inputs PPA payment terms
+  - name: "ssa_pricing_inputs_ppa_payment"
+    source_contract_type: "SSA"
+    target_contract_type: "PPA"
+    source_category: "PRICING"
+    target_category: "PAYMENT_TERMS"
+    relationship_type: "INPUTS"
+    default_confidence: 0.75
+    description: "SSA equipment/service pricing feeds into PPA payment calculations"
+
+  # SSA maintenance governs PPA availability
+  - name: "ssa_maintenance_governs_ppa_availability"
+    source_contract_type: "SSA"
+    target_contract_type: "PPA"
+    source_category: "MAINTENANCE"
+    target_category: "AVAILABILITY"
+    relationship_type: "GOVERNS"
+    default_confidence: 0.70
+    description: "SSA maintenance obligations affect PPA availability guarantees"
+
+  # SSA default triggers PPA availability review
+  - name: "ssa_default_triggers_ppa_review"
+    source_contract_type: "SSA"
+    target_contract_type: "PPA"
+    source_category: "DEFAULT"
+    target_category: "AVAILABILITY"
+    relationship_type: "TRIGGERS"
+    default_confidence: 0.65
+    description: "SSA supplier default may trigger PPA availability impact review"
 
 
 # =====================================================

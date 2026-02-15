@@ -125,7 +125,7 @@ export function InvoiceGenerationStep() {
       return
     }
 
-    if (!invoicePreview || !parseResult || !state.projectId || !state.organizationId) {
+    if (!invoicePreview || !parseResult || !meterDataSummary || !state.projectId || !state.organizationId) {
       setError('Missing required data to save invoice')
       return
     }
@@ -161,7 +161,7 @@ export function InvoiceGenerationStep() {
         ?.filter((adj) => adj.ruleType === 'availability_guarantee')
         .map((adj) => ({
           description: adj.description,
-          rule_type: adj.ruleType,
+          rule_type: adj.ruleType ?? 'availability_guarantee',
           calculated_value: meterDataSummary.availabilityPercentage,
           threshold_value: 95, // Standard availability threshold
           shortfall: 95 - meterDataSummary.availabilityPercentage,
@@ -170,11 +170,16 @@ export function InvoiceGenerationStep() {
           time_end: meterDataSummary.dateRange.end,
         }))
 
+      // FIXME: billing_period_id is currently hardcoded to 1.
+      // This should either:
+      // 1. Be derived from the invoice date range (meterDataSummary.dateRange)
+      // 2. Be selected by the user via a dropdown
+      // 3. Pass null and let the backend auto-create/lookup based on dates
       const result = await invoicesClient.createInvoice({
         project_id: state.projectId,
         organization_id: state.organizationId,
         contract_id: parseResult.contract_id,
-        billing_period_id: 1, // TODO: Add billing period selection
+        billing_period_id: 1,
         invoice_data: {
           invoice_number: invoicePreview.invoiceNumber,
           invoice_date: invoicePreview.invoiceDate,

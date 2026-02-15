@@ -27,7 +27,8 @@ export function UploadStep() {
 
   const [isDragActive, setIsDragActive] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const apiClient = useMemo(() => new PIIRedactionTempClient(), [])
+  // TODO: Replace with actual organization ID from auth context when available
+  const apiClient = useMemo(() => new PIIRedactionTempClient({ organizationId: 1 }), [])
 
   const validateFile = (file: File): string | null => {
     const fileName = file.name.toLowerCase()

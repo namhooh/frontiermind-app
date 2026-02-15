@@ -6,7 +6,7 @@
 
 ## 1. Core Philosophy
 
-**"The Database is a Temple. Nothing enters unless it is clean. S3 is the Loading Dock."**
+**"The Database is a Temple. Nothing enters unless it is clean. The API is the Single Gate."**
 
 ### Backend API Endpoint
 
@@ -20,82 +20,95 @@ The Python backend for data processing is deployed to AWS ECS Fargate:
 
 **For full deployment documentation, see `CLAUDE.md` in the project root.**
 
-- All data lands in S3 first as raw files (JSON/CSV/Parquet)
-- Validator Lambda checks, cleans, and loads to database
-- Invalid files quarantined for review
-- Immutable audit trail enables replayability
+- All data ingestion flows through the ECS backend API (single pipeline)
+- SchemaValidator checks, Transformer cleans, MeterReadingLoader inserts
+- Invalid data quarantined with detailed error messages
+- S3 serves as optional audit archive, not the critical path
+- Synchronous validation feedback (no need to poll)
 
 ---
 
 ## 2. Architecture Overview
 
+### API-First Architecture
+
+All three ingestion channels converge into a single processing pipeline on the ECS backend:
+
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         DATA SOURCES                             │
-└─────────────────────────────────────────────────────────────────┘
-        │                      │                      │
-        ▼                      ▼                      ▼
-┌───────────────┐      ┌───────────────┐      ┌───────────────┐
-│ INVERTER APIs │      │    CLIENT     │      │    MANUAL     │
-│               │      │  SNOWFLAKE    │      │   UPLOADS     │
-│ SolarEdge     │      │               │      │               │
-│ Enphase       │      │ COPY INTO     │      │ CSV/Parquet   │
-│ SMA           │      │ (client push) │      │ via UI        │
-│ GoodWe        │      │               │      │               │
-└───────┬───────┘      └───────┬───────┘      └───────┬───────┘
-        │                      │                      │
-        ▼                      ▼                      ▼
-┌───────────────┐      ┌───────────────┐      ┌───────────────┐
-│   FETCHER     │      │   SNOWFLAKE   │      │  PRESIGNED    │
-│   WORKERS     │      │   TASK        │      │  URL UPLOAD   │
-│               │      │               │      │               │
-│ GitHub Actions│      │ Scheduled     │      │ Direct to S3  │
-│ or Lambda     │      │ export to S3  │      │               │
-└───────┬───────┘      └───────┬───────┘      └───────┬───────┘
-        │                      │                      │
-        └──────────────────────┼──────────────────────┘
-                               │
-                               ▼
-                ┌─────────────────────────┐
-                │        S3 BUCKET        │
-                │       (Lake-House)      │
-                │                         │
-                │  raw/{source}/{org}/    │
-                │  validated/             │
-                │  quarantine/            │
-                │  archive/               │
-                └────────────┬────────────┘
-                             │
-                        S3 Event
-                    (ObjectCreated)
-                             │
-                             ▼
-                ┌─────────────────────────┐
-                │    VALIDATOR LAMBDA     │
-                │                         │
-                │  • Schema validation    │
-                │  • Data cleaning        │
-                │  • Transform to         │
-                │    canonical model      │
-                │  • Load OR quarantine   │
-                └────────────┬────────────┘
-                             │
-              ┌──────────────┴──────────────┐
-              │                             │
-              ▼                             ▼
-┌─────────────────────────┐   ┌─────────────────────────┐
-│    SUPABASE POSTGRES    │   │   AWS ECS FARGATE       │
-│                         │   │   (Python Backend)      │
-│  meter_reading          │   │                         │
-│  meter_aggregate        │   │  Rules engine           │
-│  default_event          │   │  Contract parsing       │
-│  integration_credential │   │  API endpoints          │
-│  integration_site       │   │                         │
-└─────────────────────────┘   └─────────────────────────┘
-                                        │
-                              Backend API URL:
-              http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com
+DATA SOURCES                              ECS FARGATE BACKEND
+
+┌──────────────┐                       ┌──────────────────────────────┐
+│ CLIENT PUSH  │  POST /api/ingest/    │                              │
+│ (Snowflake)  │──── meter-data ──────>│   IngestService              │
+└──────────────┘                       │     │                        │
+                                       │     ├─> SchemaValidator      │
+┌──────────────┐  POST /api/ingest/    │     │   .validate()          │
+│ MANUAL       │──── upload ──────────>│     │                        │
+│ (CSV via UI) │  (multipart file)     │     ├─> Transformer          │
+└──────────────┘                       │     │   .transform()         │
+                                       │     │                        │
+┌──────────────┐  POST /api/ingest/    │     ├─> MeterReadingLoader   │
+│ INVERTER API │──── sync/{site_id} ──>│     │   .batch_insert()      │
+│ (SolarEdge,  │                       │     │                        │
+│  Enphase...) │                       │     └─> IntegrationRepo      │
+└──────────────┘                       │         .ingestion_log()     │
+                                       │                              │
+                                       │   (async, optional)          │
+                                       │     └─> S3 archive write     │
+                                       └──────────────┬───────────────┘
+                                                      │
+                                                      v
+                                       ┌──────────────────────────────┐
+                                       │  SUPABASE POSTGRES           │
+                                       │  meter_reading (partitioned) │
+                                       │  ingestion_log (audit trail) │
+                                       └──────────────────────────────┘
+
+┌──────────────┐                       ┌──────────────────────────────┐
+│ BILLING DATA │  POST /api/ingest/    │                              │
+│ (CBE monthly │──── billing-reads ──>│   IngestService              │
+│  aggregates) │                       │     │                        │
+└──────────────┘                       │     ├─> Adapter Registry     │
+                                       │     │   (CBE / future)       │
+                                       │     │                        │
+                                       │     ├─> BillingResolver      │
+                                       │     │   (FK resolution)      │
+                                       │     │                        │
+                                       │     ├─> MeterAggregateLoader │
+                                       │     │   .batch_insert()      │
+                                       │     │                        │
+                                       │     └─> IntegrationRepo      │
+                                       │         .ingestion_log()     │
+                                       │                              │
+                                       └──────────────┬───────────────┘
+                                                      │
+                                                      v
+                                       ┌──────────────────────────────┐
+                                       │  SUPABASE POSTGRES           │
+                                       │  meter_aggregate (permanent) │
+                                       │  ingestion_log (audit trail) │
+                                       └──────────────────────────────┘
 ```
+
+### Ingestion Endpoints
+
+| Endpoint | Use Case | Input | Target Table |
+|----------|----------|-------|--------------|
+| `POST /api/ingest/meter-data` | Snowflake client, any API push partner | JSON body with readings array | `meter_reading` |
+| `POST /api/ingest/upload` | Manual CSV/Parquet upload from UI | Multipart file | `meter_reading` |
+| `POST /api/ingest/sync/{site_id}` | Inverter API fetch (SolarEdge, Enphase, etc.) | Triggers fetch, feeds into pipeline | `meter_reading` |
+| `POST /api/ingest/billing-reads` | Monthly billing aggregates (CBE, future clients) | JSON body with billing readings | `meter_aggregate` |
+
+### Why API-First vs S3-First
+
+| Concern | S3-First (original) | API-First (current) |
+|---------|---------------------|---------------------|
+| Validation paths | 2 (Lambda + backend) | **1 (backend only)** |
+| Connection patterns | 2 (raw psycopg2 + pool) | **1 (pool only)** |
+| Deployment units | 3 (ECS + Lambda + GH Actions) | **1 (ECS only)** |
+| Client onboarding | IAM cross-account + Snowflake ACCOUNTADMIN | **API key + endpoint URL** |
+| Validation feedback | Async (poll status endpoint) | **Synchronous** |
+| Cold starts | Lambda cold start on first event | **None (ECS always warm)** |
 
 **AWS Infrastructure:**
 - **Region:** us-east-1
@@ -534,45 +547,45 @@ CLIENT                     YOUR APP                        S3
 
 | Phase | Focus | Components | Status |
 |-------|-------|------------|--------|
-| **Phase 1** | Foundation | S3 bucket, Validator Lambda, DB schema, manual upload | NOT DEPLOYED |
-| **Phase 2** | API Key Inverters | SolarEdge + GoodWe fetchers, credential storage | CODE COMPLETE (schedules disabled) |
-| **Phase 3** | OAuth Inverters | OAuth callback endpoint, Enphase + SMA fetchers | CODE COMPLETE (schedules disabled) |
-| **Phase 4** | Client Platforms | Snowflake integration, documentation for clients | NOT STARTED |
-| **Phase 5** | Polish | Monitoring, alerting, credential health checks | NOT STARTED |
+| **Phase 1** | Core Pipeline | API-first ingestion, IngestService, meter-data + upload endpoints | **COMPLETE** |
+| **Phase 2** | Auth & Client Onboarding | API key auth middleware, Snowflake client instructions | **COMPLETE** |
+| **Phase 3** | Inverter Migration | base_fetcher.py uses IngestService, sync endpoint | **COMPLETE** |
+| **Phase 4** | Frontend & Cleanup | Frontend upload refactor, documentation | **IN PROGRESS** |
+| **Phase 5** | Monitoring | CloudWatch metrics, alerting, credential health checks | NOT STARTED |
 
-> **Note:** Fetcher GitHub Actions workflows are disabled until AWS infrastructure (S3 bucket, Secrets Manager, IAM roles) is deployed. Workflows can still be triggered manually for testing via `workflow_dispatch`.
+> **Note:** The S3/Lambda pipeline code is archived in `data-ingestion/processing/s3-lambda/`. Fetcher GitHub Actions workflows remain disabled. All ingestion now routes through the ECS backend API.
 
 ### Phase Implementation Details
 
-#### Phase 1: Foundation (NOT DEPLOYED)
-- [ ] S3 bucket structure (`raw/`, `validated/`, `quarantine/`, `archive/`) - infrastructure not created
-- [ ] Validator Lambda with S3 trigger - code exists but not deployed
+#### Phase 1: Core Pipeline (COMPLETE)
 - [x] Database schema (meter_reading partitioned, meter_aggregate, ingestion_log)
 - [x] Integration credential table with encryption
 - [x] Integration site table with sync tracking
+- [x] SchemaValidator and Transformer shared modules (`data-ingestion/processing/`)
+- [x] MeterReadingLoader using backend connection pool
+- [x] IngestService orchestrator (validate → transform → load → log)
+- [x] `POST /api/ingest/meter-data` endpoint (JSON batch push)
+- [x] `POST /api/ingest/upload` endpoint (CSV/JSON/Parquet file upload)
+- [x] Dockerfile and deploy script updated for project-root build context
+- [x] S3/Lambda code archived to `data-ingestion/processing/s3-lambda/`
 
-#### Phase 2: API Key Inverters (CODE COMPLETE - schedules disabled)
-- [x] Base fetcher class (`data-ingestion/sources/inverter-api/base_fetcher.py`)
-- [x] SolarEdge fetcher (`data-ingestion/sources/inverter-api/solaredge/fetcher.py`)
-- [x] GoodWe fetcher (`data-ingestion/sources/inverter-api/goodwe/fetcher.py`)
-- [x] GitHub Actions workflows (`fetcher-solaredge.yml`, `fetcher-goodwe.yml`) - schedules disabled
+#### Phase 2: Auth & Client Onboarding (COMPLETE)
+- [x] API key auth middleware (`python-backend/middleware/api_key_auth.py`)
+- [x] `find_credential_by_api_key()` in IntegrationRepository
+- [x] Snowflake client instructions rewritten for API push
+- [x] Status-by-hash API endpoint for Snowflake clients
+
+#### Phase 3: Inverter Migration (COMPLETE)
+- [x] Base fetcher `ingest_data()` replaces `upload_to_s3()` (with S3 fallback)
+- [x] `POST /api/ingest/sync/{site_id}` endpoint
+- [x] SolarEdge, Enphase, SMA, GoodWe fetchers (code complete, schedules disabled)
+- [x] OAuth token refresh in base_fetcher.py
 - [x] Credential CRUD API endpoints
 
-#### Phase 3: OAuth Inverters (CODE COMPLETE - schedules disabled)
-- [x] OAuth token refresh in base_fetcher.py
-- [x] Enphase fetcher (`data-ingestion/sources/inverter-api/enphase/fetcher.py`)
-- [x] SMA fetcher (`data-ingestion/sources/inverter-api/sma/fetcher.py`)
-- [x] OAuth callback Edge Function (`data-ingestion/oauth/supabase-callback/`)
-- [x] GitHub Actions workflows (`fetcher-enphase.yml`, `fetcher-sma.yml`) - schedules disabled
-- [x] Config updates for OAuth client credentials
-
-#### Phase 4: Snowflake Integration (NOT STARTED)
-- [x] FILE_FORMAT_SPEC.md - Canonical data format documentation (`data-ingestion/sources/file-upload/README.md`)
-- [x] SNOWFLAKE_INTEGRATION.md - Client setup guide with SQL templates (`data-ingestion/sources/snowflake/README.md`)
-- [x] SNOWFLAKE_ONBOARDING_CHECKLIST.md - Onboarding process (`data-ingestion/sources/snowflake/ONBOARDING_CHECKLIST.md`)
-- [ ] Database migration to seed data_source ID 5
-- [ ] Status-by-hash API endpoint for Snowflake clients
-- [ ] IAM role for cross-account S3 access (Terraform)
+#### Phase 4: Frontend & Cleanup (IN PROGRESS)
+- [ ] Frontend upload component uses `/api/ingest/upload` instead of local CSV parsing
+- [ ] `lib/api/ingestClient.ts` — add `uploadFile()` and `pushMeterData()` methods
+- [x] Architecture documentation updated
 
 #### Phase 5: Monitoring & Health (NOT STARTED)
 - [ ] CloudWatch custom metrics (ingestion success rate, processing time)
@@ -588,53 +601,66 @@ CLIENT                     YOUR APP                        S3
 ```
 project/
 ├── data-ingestion/                  # All data ingestion components
+│   ├── __init__.py                  # Package init
 │   ├── README.md                    # Overview and links
+│   │
+│   ├── processing/                  # Shared processing pipeline
+│   │   ├── __init__.py              # Exports SchemaValidator, Transformer
+│   │   ├── schema_validator.py      # Schema validation (shared by all paths)
+│   │   ├── transformer.py           # Transform to canonical model (shared)
+│   │   ├── meter_reading_loader.py  # DB batch insert for meter_reading
+│   │   ├── meter_aggregate_loader.py # DB batch insert for meter_aggregate (billing)
+│   │   ├── billing_resolver.py      # FK resolution (tariff + billing period)
+│   │   ├── ingest_service.py        # Orchestrator (validate → transform → load)
+│   │   ├── adapters/               # Client-specific billing adapters
+│   │   │   ├── __init__.py         # Adapter registry + base protocol
+│   │   │   └── cbe_billing_adapter.py  # CBE field mapping/validation
+│   │   │
+│   │   ├── s3-lambda/               # ARCHIVED — S3/Lambda pipeline code
+│   │   │   ├── handler.py           # Lambda entry point (S3 event trigger)
+│   │   │   ├── loader.py            # Original loader (raw psycopg2)
+│   │   │   ├── template.yaml        # SAM deployment template
+│   │   │   └── requirements.txt     # Lambda-specific dependencies
+│   │   │
+│   │   ├── validator-lambda/        # Original location (kept for reference)
+│   │   └── infrastructure/          # AWS infrastructure configs
 │   │
 │   ├── sources/                     # Data source integrations
 │   │   ├── file-upload/
 │   │   │   └── README.md            # File format specification
 │   │   │
 │   │   ├── inverter-api/            # Manufacturer API fetchers
-│   │   │   ├── base_fetcher.py      # Base class with common logic
+│   │   │   ├── base_fetcher.py      # Base class (uses IngestService or S3 fallback)
 │   │   │   ├── config.py            # Configuration management
-│   │   │   ├── requirements.txt     # Python dependencies
 │   │   │   ├── solaredge/fetcher.py # SolarEdge API fetcher
 │   │   │   ├── enphase/fetcher.py   # Enphase API fetcher (OAuth)
 │   │   │   ├── goodwe/fetcher.py    # GoodWe API fetcher
 │   │   │   └── sma/fetcher.py       # SMA API fetcher (OAuth)
 │   │   │
 │   │   └── snowflake/               # Client Snowflake integration
+│   │       ├── CLIENT_INSTRUCTIONS.md # API push instructions (primary)
 │   │       ├── README.md            # Integration guide
-│   │       ├── ONBOARDING_CHECKLIST.md
-│   │       └── terraform/           # IAM resources
-│   │
-│   ├── processing/                  # S3 event processing
-│   │   ├── validator-lambda/
-│   │   │   ├── handler.py           # Lambda entry point
-│   │   │   ├── schema_validator.py  # Schema validation logic
-│   │   │   ├── transformer.py       # Transform to canonical model
-│   │   │   ├── loader.py            # Load to Supabase
-│   │   │   └── template.yaml        # SAM deployment template
-│   │   └── infrastructure/          # AWS infrastructure configs
+│   │       └── ONBOARDING_CHECKLIST.md
 │   │
 │   └── oauth/                       # OAuth callback handling
 │       └── supabase-callback/
 │           └── index.ts             # OAuth callback handler
 │
-├── .github/
-│   └── workflows/
-│       ├── fetcher-solaredge.yml
-│       ├── fetcher-enphase.yml
-│       ├── fetcher-goodwe.yml
-│       └── fetcher-sma.yml
+├── python-backend/                  # ECS Fargate backend
+│   ├── api/
+│   │   └── ingest.py                # Ingestion endpoints (meter-data, upload, sync)
+│   ├── middleware/
+│   │   ├── rate_limiter.py          # Rate limiting
+│   │   └── api_key_auth.py          # API key authentication for push clients
+│   ├── models/
+│   │   └── ingestion.py             # Request/response models
+│   ├── db/
+│   │   ├── database.py              # Connection pool
+│   │   └── integration_repository.py # CRUD + find_credential_by_api_key
+│   └── Dockerfile                   # Builds from project root, copies data-ingestion/
 │
 └── database/
     └── migrations/
-        ├── 001_integration_credential.sql
-        ├── 002_integration_site.sql
-        ├── 003_meter_reading_partitioned.sql
-        ├── 004_meter_aggregate.sql
-        └── 005_default_event_evidence.sql
 ```
 
 ---
@@ -655,11 +681,11 @@ project/
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Ingestion strategy | S3-first (Lake-House) | Audit trail, replayability, decoupling |
+| Ingestion strategy | **API-first** (ECS backend) | Single pipeline, synchronous feedback, simpler client onboarding |
+| S3 role | Optional audit archive | S3 bucket exists but is not in the critical path |
+| Client platform integration | **API push** (HTTP POST) | No IAM cross-account needed, any HTTP client works |
+| Validation | Backend IngestService | Single validation path, uses connection pool |
 | Inverter API integration | Custom Fetcher Workers | No pre-built connectors, need credential management |
-| Fetcher runtime | GitHub Actions | Free, ephemeral, simple |
-| Client platform integration | Client pushes to S3 | Simpler than pulling, client controls schedule |
-| Validation | Lambda triggered by S3 | Serverless, event-driven |
 | Time-series storage | Native Postgres partitioning | Simpler than TimescaleDB, sufficient for scale |
 | Raw data retention | 90 days | Balance storage cost vs debugging needs |
 | Evidence preservation | JSONB in default_event | Proof survives raw data deletion |

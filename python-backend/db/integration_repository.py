@@ -7,10 +7,12 @@ Handles CRUD operations for:
 - Ingestion logs (audit trail)
 """
 
+import hmac
+import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Union
 
 from cryptography.fernet import Fernet
 from psycopg2.extras import Json
@@ -34,48 +36,124 @@ class IntegrationRepository:
                 logger.warning(f"Invalid encryption key, credentials will not be encrypted: {e}")
 
     # =====================================================
+    # Encryption Helpers
+    # =====================================================
+
+    def _encrypt(self, value: str) -> Optional[bytes]:
+        """Encrypt a value using Fernet and return bytes for BYTEA storage."""
+        if not value:
+            return None
+        if not self._fernet:
+            logger.warning("Encryption not configured, storing value as plaintext bytes")
+            return value.encode("utf-8")
+        return self._fernet.encrypt(value.encode("utf-8"))
+
+    def _decrypt(self, value: Union[bytes, bytearray, memoryview, str]) -> Optional[str]:
+        """Decrypt a BYTEA value using Fernet and return UTF-8 text."""
+        if not value:
+            return None
+
+        if isinstance(value, memoryview):
+            raw = value.tobytes()
+        elif isinstance(value, bytearray):
+            raw = bytes(value)
+        elif isinstance(value, bytes):
+            raw = value
+        elif isinstance(value, str):
+            raw = value.encode("utf-8")
+        else:
+            return str(value)
+
+        if not self._fernet:
+            return raw.decode("utf-8", errors="ignore")
+
+        try:
+            return self._fernet.decrypt(raw).decode("utf-8")
+        except Exception:
+            # Migration fallback: value may have been stored unencrypted.
+            return raw.decode("utf-8", errors="ignore")
+
+    def _build_credentials_json(
+        self,
+        auth_type: str,
+        credentials: Optional[Dict[str, str]] = None,
+        api_key: Optional[str] = None,
+        access_token: Optional[str] = None,
+        refresh_token: Optional[str] = None,
+        scope: Optional[str] = None,
+    ) -> Optional[bytes]:
+        """Build and encrypt a credentials JSON blob.
+
+        Accepts either a pre-built credentials dict or individual fields.
+        Returns the Fernet-encrypted string of the JSON.
+        """
+        if credentials:
+            blob = credentials
+        elif auth_type == "api_key" and api_key:
+            blob = {"api_key": api_key}
+        elif auth_type == "oauth2" and (access_token or refresh_token):
+            blob = {}
+            if access_token:
+                blob["access_token"] = access_token
+            if refresh_token:
+                blob["refresh_token"] = refresh_token
+            if scope:
+                blob["scope"] = scope
+        else:
+            return None
+
+        json_str = json.dumps(blob)
+        return self._encrypt(json_str)
+
+    def _unpack_credentials(
+        self, encrypted_blob: Union[bytes, bytearray, memoryview, str]
+    ) -> Dict[str, str]:
+        """Decrypt and parse the encrypted_credentials BYTEA column."""
+        decrypted = self._decrypt(encrypted_blob)
+        if not decrypted:
+            return {}
+        try:
+            return json.loads(decrypted)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    # =====================================================
     # Credential Operations
     # =====================================================
 
     def create_credential(
         self,
         organization_id: int,
-        source_type: str,
+        data_source_id: int,
         auth_type: str,
+        credentials: Optional[Dict[str, str]] = None,
         api_key: Optional[str] = None,
         access_token: Optional[str] = None,
         refresh_token: Optional[str] = None,
         token_expires_at: Optional[datetime] = None,
         label: Optional[str] = None
     ) -> Dict[str, Any]:
-        """
-        Create a new integration credential.
-
-        Args:
-            organization_id: Organization ID
-            source_type: Source type (solaredge, enphase, etc.)
-            auth_type: Authentication type (api_key, oauth2)
-            api_key: API key for API key auth
-            access_token: OAuth access token
-            refresh_token: OAuth refresh token
-            token_expires_at: Token expiration time
-            label: Optional label for this credential
-
-        Returns:
-            Created credential (without sensitive data)
-        """
-        # Encrypt sensitive data
-        encrypted_api_key = self._encrypt(api_key) if api_key else None
-        encrypted_access_token = self._encrypt(access_token) if access_token else None
-        encrypted_refresh_token = self._encrypt(refresh_token) if refresh_token else None
+        """Create a new integration credential."""
+        encrypted_creds = self._build_credentials_json(
+            auth_type=auth_type,
+            credentials=credentials,
+            api_key=api_key,
+            access_token=access_token,
+            refresh_token=refresh_token,
+        )
+        if not encrypted_creds:
+            raise ValueError(
+                "Missing or invalid credentials payload for auth_type "
+                f"'{auth_type}'."
+            )
 
         sql = """
             INSERT INTO integration_credential (
-                organization_id, source_type, auth_type,
-                api_key_encrypted, access_token_encrypted, refresh_token_encrypted,
+                organization_id, data_source_id, auth_type,
+                encrypted_credentials, encryption_method,
                 token_expires_at, label
-            ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
-            RETURNING id, organization_id, source_type, auth_type, label,
+            ) VALUES (%s, %s, %s, %s, 'fernet', %s, %s)
+            RETURNING id, organization_id, data_source_id, auth_type, label,
                       is_active, last_used_at, last_error, error_count,
                       token_expires_at, created_at, updated_at
         """
@@ -83,8 +161,8 @@ class IntegrationRepository:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, (
-                    organization_id, source_type, auth_type,
-                    encrypted_api_key, encrypted_access_token, encrypted_refresh_token,
+                    organization_id, data_source_id, auth_type,
+                    encrypted_creds,
                     token_expires_at, label
                 ))
                 result = cursor.fetchone()
@@ -98,21 +176,11 @@ class IntegrationRepository:
         organization_id: int,
         include_secrets: bool = False
     ) -> Optional[Dict[str, Any]]:
-        """
-        Get a credential by ID.
-
-        Args:
-            credential_id: Credential ID
-            organization_id: Organization ID (for RLS)
-            include_secrets: If True, decrypt and include sensitive data
-
-        Returns:
-            Credential dict or None if not found
-        """
+        """Get a credential by ID."""
         if include_secrets:
             sql = """
-                SELECT id, organization_id, source_type, auth_type, label,
-                       api_key_encrypted, access_token_encrypted, refresh_token_encrypted,
+                SELECT id, organization_id, data_source_id, auth_type, label,
+                       encrypted_credentials,
                        is_active, last_used_at, last_error, error_count,
                        token_expires_at, created_at, updated_at
                 FROM integration_credential
@@ -120,7 +188,7 @@ class IntegrationRepository:
             """
         else:
             sql = """
-                SELECT id, organization_id, source_type, auth_type, label,
+                SELECT id, organization_id, data_source_id, auth_type, label,
                        is_active, last_used_at, last_error, error_count,
                        token_expires_at, created_at, updated_at
                 FROM integration_credential
@@ -137,41 +205,22 @@ class IntegrationRepository:
 
         credential = dict(result)
 
-        # Decrypt secrets if requested
-        if include_secrets:
-            if credential.get('api_key_encrypted'):
-                credential['api_key'] = self._decrypt(credential['api_key_encrypted'])
-            if credential.get('access_token_encrypted'):
-                credential['access_token'] = self._decrypt(credential['access_token_encrypted'])
-            if credential.get('refresh_token_encrypted'):
-                credential['refresh_token'] = self._decrypt(credential['refresh_token_encrypted'])
-
-            # Remove encrypted fields from response
-            credential.pop('api_key_encrypted', None)
-            credential.pop('access_token_encrypted', None)
-            credential.pop('refresh_token_encrypted', None)
+        if include_secrets and credential.get('encrypted_credentials'):
+            secrets = self._unpack_credentials(credential['encrypted_credentials'])
+            credential.update(secrets)
+            credential.pop('encrypted_credentials', None)
 
         return credential
 
     def list_credentials(
         self,
         organization_id: int,
-        source_type: Optional[str] = None,
+        data_source_id: Optional[int] = None,
         is_active: Optional[bool] = None
     ) -> List[Dict[str, Any]]:
-        """
-        List credentials for an organization.
-
-        Args:
-            organization_id: Organization ID
-            source_type: Optional filter by source type
-            is_active: Optional filter by active status
-
-        Returns:
-            List of credentials (without sensitive data)
-        """
+        """List credentials for an organization."""
         sql = """
-            SELECT id, organization_id, source_type, auth_type, label,
+            SELECT id, organization_id, data_source_id, auth_type, label,
                    is_active, last_used_at, last_error, error_count,
                    token_expires_at, created_at, updated_at
             FROM integration_credential
@@ -179,9 +228,9 @@ class IntegrationRepository:
         """
         params = [organization_id]
 
-        if source_type:
-            sql += " AND source_type = %s"
-            params.append(source_type)
+        if data_source_id is not None:
+            sql += " AND data_source_id = %s"
+            params.append(data_source_id)
 
         if is_active is not None:
             sql += " AND is_active = %s"
@@ -202,27 +251,13 @@ class IntegrationRepository:
         organization_id: int,
         label: Optional[str] = None,
         is_active: Optional[bool] = None,
+        credentials: Optional[Dict[str, str]] = None,
         api_key: Optional[str] = None,
         access_token: Optional[str] = None,
         refresh_token: Optional[str] = None,
         token_expires_at: Optional[datetime] = None
     ) -> Optional[Dict[str, Any]]:
-        """
-        Update a credential.
-
-        Args:
-            credential_id: Credential ID
-            organization_id: Organization ID (for RLS)
-            label: New label
-            is_active: New active status
-            api_key: New API key
-            access_token: New access token
-            refresh_token: New refresh token
-            token_expires_at: New token expiration
-
-        Returns:
-            Updated credential or None if not found
-        """
+        """Update a credential."""
         updates = []
         params = []
 
@@ -234,17 +269,28 @@ class IntegrationRepository:
             updates.append("is_active = %s")
             params.append(is_active)
 
-        if api_key is not None:
-            updates.append("api_key_encrypted = %s")
-            params.append(self._encrypt(api_key))
-
-        if access_token is not None:
-            updates.append("access_token_encrypted = %s")
-            params.append(self._encrypt(access_token))
-
-        if refresh_token is not None:
-            updates.append("refresh_token_encrypted = %s")
-            params.append(self._encrypt(refresh_token))
+        # Rebuild encrypted_credentials if any secret field is provided
+        needs_cred_update = credentials or api_key or access_token or refresh_token
+        if needs_cred_update:
+            # Fetch existing credential to get auth_type and merge secrets
+            existing = self.get_credential(credential_id, organization_id, include_secrets=True)
+            if not existing:
+                return None
+            auth_type = existing.get("auth_type", "api_key")
+            encrypted_creds = self._build_credentials_json(
+                auth_type=auth_type,
+                credentials=credentials,
+                api_key=api_key,
+                access_token=access_token,
+                refresh_token=refresh_token,
+            )
+            if encrypted_creds:
+                updates.append("encrypted_credentials = %s")
+                params.append(encrypted_creds)
+            else:
+                raise ValueError(
+                    "Invalid credentials payload for credential update."
+                )
 
         if token_expires_at is not None:
             updates.append("token_expires_at = %s")
@@ -259,7 +305,7 @@ class IntegrationRepository:
             UPDATE integration_credential
             SET {', '.join(updates)}
             WHERE id = %s AND organization_id = %s
-            RETURNING id, organization_id, source_type, auth_type, label,
+            RETURNING id, organization_id, data_source_id, auth_type, label,
                       is_active, last_used_at, last_error, error_count,
                       token_expires_at, created_at, updated_at
         """
@@ -281,14 +327,7 @@ class IntegrationRepository:
         organization_id: int,
         error: Optional[str] = None
     ) -> None:
-        """
-        Record credential usage (success or error).
-
-        Args:
-            credential_id: Credential ID
-            organization_id: Organization ID
-            error: Error message if failed
-        """
+        """Record credential usage (success or error)."""
         if error:
             sql = """
                 UPDATE integration_credential
@@ -319,16 +358,7 @@ class IntegrationRepository:
         credential_id: int,
         organization_id: int
     ) -> bool:
-        """
-        Delete a credential (also deletes associated sites).
-
-        Args:
-            credential_id: Credential ID
-            organization_id: Organization ID
-
-        Returns:
-            True if deleted, False if not found
-        """
+        """Delete a credential (also deletes associated sites)."""
         sql = """
             DELETE FROM integration_credential
             WHERE id = %s AND organization_id = %s
@@ -352,8 +382,8 @@ class IntegrationRepository:
     def create_site(
         self,
         organization_id: int,
-        credential_id: int,
-        source_type: str,
+        integration_credential_id: int,
+        data_source_id: int,
         external_site_id: str,
         external_site_name: Optional[str] = None,
         project_id: Optional[int] = None,
@@ -361,26 +391,10 @@ class IntegrationRepository:
         external_metadata: Optional[Dict[str, Any]] = None,
         sync_interval_minutes: int = 60
     ) -> Dict[str, Any]:
-        """
-        Create an integration site mapping.
-
-        Args:
-            organization_id: Organization ID
-            credential_id: Credential ID to use for this site
-            source_type: Source type
-            external_site_id: External system's site ID
-            external_site_name: External system's site name
-            project_id: Internal project ID mapping
-            meter_id: Internal meter ID mapping
-            external_metadata: Additional metadata from external system
-            sync_interval_minutes: How often to sync (default 60)
-
-        Returns:
-            Created site
-        """
+        """Create an integration site mapping."""
         sql = """
             INSERT INTO integration_site (
-                organization_id, credential_id, source_type,
+                organization_id, integration_credential_id, data_source_id,
                 external_site_id, external_site_name,
                 project_id, meter_id, external_metadata,
                 sync_interval_minutes
@@ -391,7 +405,7 @@ class IntegrationRepository:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, (
-                    organization_id, credential_id, source_type,
+                    organization_id, integration_credential_id, data_source_id,
                     external_site_id, external_site_name,
                     project_id, meter_id,
                     Json(external_metadata) if external_metadata else None,
@@ -423,36 +437,23 @@ class IntegrationRepository:
     def list_sites(
         self,
         organization_id: int,
-        credential_id: Optional[int] = None,
-        source_type: Optional[str] = None,
+        integration_credential_id: Optional[int] = None,
+        data_source_id: Optional[int] = None,
         project_id: Optional[int] = None,
         sync_enabled: Optional[bool] = None,
         is_active: Optional[bool] = None
     ) -> List[Dict[str, Any]]:
-        """
-        List sites for an organization with optional filters.
-
-        Args:
-            organization_id: Organization ID
-            credential_id: Optional filter by credential
-            source_type: Optional filter by source type
-            project_id: Optional filter by project
-            sync_enabled: Optional filter by sync enabled
-            is_active: Optional filter by active status
-
-        Returns:
-            List of sites
-        """
+        """List sites for an organization with optional filters."""
         sql = "SELECT * FROM integration_site WHERE organization_id = %s"
         params = [organization_id]
 
-        if credential_id is not None:
-            sql += " AND credential_id = %s"
-            params.append(credential_id)
+        if integration_credential_id is not None:
+            sql += " AND integration_credential_id = %s"
+            params.append(integration_credential_id)
 
-        if source_type:
-            sql += " AND source_type = %s"
-            params.append(source_type)
+        if data_source_id is not None:
+            sql += " AND data_source_id = %s"
+            params.append(data_source_id)
 
         if project_id is not None:
             sql += " AND project_id = %s"
@@ -545,16 +546,7 @@ class IntegrationRepository:
         records_count: Optional[int] = None,
         error: Optional[str] = None
     ) -> None:
-        """
-        Update site sync status after a sync attempt.
-
-        Args:
-            site_id: Site ID
-            organization_id: Organization ID
-            status: Sync status (success, error, partial)
-            records_count: Number of records synced
-            error: Error message if failed
-        """
+        """Update site sync status after a sync attempt."""
         sql = """
             UPDATE integration_site
             SET last_sync_at = NOW(),
@@ -573,19 +565,11 @@ class IntegrationRepository:
         self,
         organization_id: Optional[int] = None
     ) -> List[Dict[str, Any]]:
-        """
-        Get sites that are due for sync.
-
-        Args:
-            organization_id: Optional filter by organization
-
-        Returns:
-            List of sites due for sync
-        """
+        """Get sites that are due for sync."""
         sql = """
-            SELECT s.*, c.source_type as credential_source_type
+            SELECT s.*, c.data_source_id as credential_data_source_id
             FROM integration_site s
-            JOIN integration_credential c ON s.credential_id = c.id
+            JOIN integration_credential c ON s.integration_credential_id = c.id
             WHERE s.is_active = true
               AND s.sync_enabled = true
               AND c.is_active = true
@@ -608,6 +592,52 @@ class IntegrationRepository:
                 results = cursor.fetchall()
 
         return [dict(row) for row in results]
+
+    def resolve_sites_batch(
+        self,
+        external_site_ids: List[str],
+        organization_id: int,
+        credential_id: Optional[int] = None,
+    ) -> Dict[str, Dict[str, Optional[int]]]:
+        """Resolve external_site_ids to project_id/meter_id via integration_site.
+
+        Args:
+            external_site_ids: List of external site identifiers to look up.
+            organization_id: Organization scope.
+            credential_id: Optional credential to narrow the lookup.
+
+        Returns:
+            Mapping of external_site_id -> {"project_id": ..., "meter_id": ...}
+            for every active match found.
+        """
+        if not external_site_ids:
+            return {}
+
+        sql = """
+            SELECT external_site_id, project_id, meter_id
+            FROM integration_site
+            WHERE organization_id = %s
+              AND external_site_id = ANY(%s)
+              AND is_active = true
+        """
+        params: list = [organization_id, list(external_site_ids)]
+
+        if credential_id is not None:
+            sql += " AND integration_credential_id = %s"
+            params.append(credential_id)
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, tuple(params))
+                results = cursor.fetchall()
+
+        return {
+            row["external_site_id"]: {
+                "project_id": row["project_id"],
+                "meter_id": row["meter_id"],
+            }
+            for row in results
+        }
 
     def delete_site(
         self,
@@ -638,36 +668,21 @@ class IntegrationRepository:
     def start_ingestion_log(
         self,
         organization_id: int,
-        source_type: str,
+        data_source_id: int,
         file_path: str,
         file_size_bytes: Optional[int] = None,
         file_format: Optional[str] = None,
         file_hash: Optional[str] = None,
         integration_site_id: Optional[int] = None
     ) -> int:
-        """
-        Create an ingestion log entry when processing starts.
-
-        Args:
-            organization_id: Organization ID
-            source_type: Source type
-            file_path: S3 file path
-            file_size_bytes: File size
-            file_format: File format (json, csv, parquet)
-            file_hash: SHA256 hash for deduplication
-            integration_site_id: Associated integration site
-
-        Returns:
-            Log entry ID
-        """
-        # Extract filename from path
+        """Create an ingestion log entry when processing starts."""
         file_name = file_path.split('/')[-1] if '/' in file_path else file_path
 
         sql = """
             INSERT INTO ingestion_log (
-                organization_id, integration_site_id, source_type,
+                organization_id, integration_site_id, data_source_id,
                 file_path, file_name, file_size_bytes, file_format, file_hash,
-                status, stage
+                ingestion_status, ingestion_stage
             ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, 'processing', 'validating')
             RETURNING id
         """
@@ -675,7 +690,7 @@ class IntegrationRepository:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(sql, (
-                    organization_id, integration_site_id, source_type,
+                    organization_id, integration_site_id, data_source_id,
                     file_path, file_name, file_size_bytes, file_format, file_hash
                 ))
                 result = cursor.fetchone()
@@ -690,37 +705,23 @@ class IntegrationRepository:
         status: str,
         rows_loaded: Optional[int] = None,
         rows_valid: Optional[int] = None,
-        rows_invalid: Optional[int] = None,
+        rows_failed: Optional[int] = None,
         data_start_timestamp: Optional[datetime] = None,
         data_end_timestamp: Optional[datetime] = None,
         destination_path: Optional[str] = None,
         validation_errors: Optional[List[Dict]] = None,
         error_message: Optional[str] = None
     ) -> None:
-        """
-        Complete an ingestion log entry.
-
-        Args:
-            log_id: Log entry ID
-            status: Final status (success, quarantined, skipped, error)
-            rows_loaded: Number of rows successfully loaded
-            rows_valid: Number of valid rows
-            rows_invalid: Number of invalid rows
-            data_start_timestamp: Earliest timestamp in data
-            data_end_timestamp: Latest timestamp in data
-            destination_path: Final S3 destination path
-            validation_errors: List of validation errors
-            error_message: Error message if failed
-        """
+        """Complete an ingestion log entry."""
         stage = 'complete' if status in ('success', 'skipped') else 'validating'
 
         sql = """
             UPDATE ingestion_log
-            SET status = %s,
-                stage = %s,
+            SET ingestion_status = %s,
+                ingestion_stage = %s,
                 rows_loaded = %s,
                 rows_valid = %s,
-                rows_invalid = %s,
+                rows_failed = %s,
                 data_start_timestamp = %s,
                 data_end_timestamp = %s,
                 destination_path = %s,
@@ -735,7 +736,7 @@ class IntegrationRepository:
             with conn.cursor() as cursor:
                 cursor.execute(sql, (
                     status, stage,
-                    rows_loaded, rows_valid, rows_invalid,
+                    rows_loaded, rows_valid, rows_failed,
                     data_start_timestamp, data_end_timestamp,
                     destination_path,
                     Json(validation_errors) if validation_errors else None,
@@ -750,21 +751,12 @@ class IntegrationRepository:
         file_hash: str,
         organization_id: int
     ) -> bool:
-        """
-        Check if a file with the same hash was already successfully processed.
-
-        Args:
-            file_hash: SHA256 hash of file
-            organization_id: Organization ID
-
-        Returns:
-            True if duplicate found
-        """
+        """Check if a file with the same hash was already successfully processed."""
         sql = """
             SELECT 1 FROM ingestion_log
             WHERE file_hash = %s
               AND organization_id = %s
-              AND status = 'success'
+              AND ingestion_status = 'success'
             LIMIT 1
         """
 
@@ -778,19 +770,7 @@ class IntegrationRepository:
         file_hash: str,
         organization_id: int
     ) -> Optional[Dict[str, Any]]:
-        """
-        Get an ingestion log entry by file hash.
-
-        This is used by Snowflake COPY INTO clients who don't have a file_id
-        from the presigned URL flow, but know the SHA256 hash of their uploaded file.
-
-        Args:
-            file_hash: SHA256 hash of the file
-            organization_id: Organization ID (for RLS)
-
-        Returns:
-            Ingestion log dict or None if not found
-        """
+        """Get an ingestion log entry by file hash."""
         sql = """
             SELECT * FROM ingestion_log
             WHERE file_hash = %s AND organization_id = %s
@@ -826,36 +806,22 @@ class IntegrationRepository:
     def list_ingestion_logs(
         self,
         organization_id: int,
-        source_type: Optional[str] = None,
+        data_source_id: Optional[int] = None,
         status: Optional[str] = None,
         integration_site_id: Optional[int] = None,
         limit: int = 50,
         offset: int = 0
     ) -> tuple[List[Dict[str, Any]], int]:
-        """
-        List ingestion logs with pagination.
-
-        Args:
-            organization_id: Organization ID
-            source_type: Optional filter by source type
-            status: Optional filter by status
-            integration_site_id: Optional filter by site
-            limit: Max results per page
-            offset: Offset for pagination
-
-        Returns:
-            Tuple of (logs list, total count)
-        """
-        # Build WHERE clause
+        """List ingestion logs with pagination."""
         where_clauses = ["organization_id = %s"]
         params = [organization_id]
 
-        if source_type:
-            where_clauses.append("source_type = %s")
-            params.append(source_type)
+        if data_source_id is not None:
+            where_clauses.append("data_source_id = %s")
+            params.append(data_source_id)
 
         if status:
-            where_clauses.append("status = %s")
+            where_clauses.append("ingestion_status = %s")
             params.append(status)
 
         if integration_site_id:
@@ -864,10 +830,8 @@ class IntegrationRepository:
 
         where_sql = " AND ".join(where_clauses)
 
-        # Get total count
         count_sql = f"SELECT COUNT(*) as count FROM ingestion_log WHERE {where_sql}"
 
-        # Get paginated results
         list_sql = f"""
             SELECT * FROM ingestion_log
             WHERE {where_sql}
@@ -877,11 +841,9 @@ class IntegrationRepository:
 
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # Get count
                 cursor.execute(count_sql, tuple(params))
                 total = cursor.fetchone()['count']
 
-                # Get logs
                 cursor.execute(list_sql, tuple(params) + (limit, offset))
                 results = cursor.fetchall()
 
@@ -892,22 +854,13 @@ class IntegrationRepository:
         organization_id: int,
         days: int = 30
     ) -> List[Dict[str, Any]]:
-        """
-        Get ingestion statistics by day.
-
-        Args:
-            organization_id: Organization ID
-            days: Number of days to look back
-
-        Returns:
-            List of daily stats
-        """
+        """Get ingestion statistics by day."""
         sql = """
             SELECT
                 DATE(created_at) as date,
                 COUNT(*) as files_processed,
-                COUNT(*) FILTER (WHERE status = 'success') as files_success,
-                COUNT(*) FILTER (WHERE status = 'quarantined') as files_quarantined,
+                COUNT(*) FILTER (WHERE ingestion_status = 'success') as files_success,
+                COUNT(*) FILTER (WHERE ingestion_status = 'quarantined') as files_quarantined,
                 COALESCE(SUM(rows_loaded), 0) as rows_loaded,
                 AVG(processing_time_ms) as avg_processing_ms
             FROM ingestion_log
@@ -925,27 +878,41 @@ class IntegrationRepository:
         return [dict(row) for row in results]
 
     # =====================================================
-    # Encryption Helpers
+    # API Key Lookup (for API-first auth)
     # =====================================================
 
-    def _encrypt(self, value: str) -> Optional[str]:
-        """Encrypt a value using Fernet."""
-        if not value:
-            return None
-        if not self._fernet:
-            logger.warning("Encryption not configured, storing value unencrypted")
-            return value
-        return self._fernet.encrypt(value.encode()).decode()
+    def find_credential_by_api_key(self, api_key: str) -> Optional[Dict[str, Any]]:
+        """Find a credential by its plaintext API key.
 
-    def _decrypt(self, value: str) -> Optional[str]:
-        """Decrypt a value using Fernet."""
-        if not value:
-            return None
-        if not self._fernet:
-            # Value might be stored unencrypted
-            return value
-        try:
-            return self._fernet.decrypt(value.encode()).decode()
-        except Exception:
-            # Value might be stored unencrypted (migration period)
-            return value
+        Iterates active api_key credentials and uses timing-safe comparison.
+        """
+        sql = """
+            SELECT id, organization_id, data_source_id, auth_type,
+                   encrypted_credentials, is_active,
+                   created_at, updated_at
+            FROM integration_credential
+            WHERE auth_type = 'api_key'
+              AND is_active = true
+        """
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql)
+                results = cursor.fetchall()
+
+        for row in results:
+            stored_blob = row.get('encrypted_credentials')
+            if not stored_blob:
+                continue
+
+            secrets = self._unpack_credentials(stored_blob)
+            stored_key = secrets.get('api_key')
+            if not stored_key:
+                continue
+
+            if hmac.compare_digest(stored_key, api_key):
+                credential = dict(row)
+                credential.pop('encrypted_credentials', None)
+                return credential
+
+        return None

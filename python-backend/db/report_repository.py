@@ -308,7 +308,8 @@ class ReportRepository:
         scheduled_report_id: Optional[int] = None,
         project_id: Optional[int] = None,
         contract_id: Optional[int] = None,
-        requested_by: Optional[str] = None
+        requested_by: Optional[str] = None,
+        invoice_direction: Optional[str] = None
     ) -> int:
         """
         Create a new generated report record with pending status.
@@ -325,6 +326,7 @@ class ReportRepository:
             project_id: Project filter
             contract_id: Contract filter
             requested_by: UUID of user who requested the report
+            invoice_direction: Optional direction filter (receivable/payable)
 
         Returns:
             New generated report ID
@@ -340,16 +342,16 @@ class ReportRepository:
                         organization_id, report_template_id, scheduled_report_id,
                         generation_source, report_type, name, report_status,
                         project_id, contract_id, billing_period_id,
-                        file_format, requested_by
+                        file_format, requested_by, invoice_direction
                     )
-                    VALUES (%s, %s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s)
+                    VALUES (%s, %s, %s, %s, %s, %s, 'pending', %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
                         org_id, template_id, scheduled_report_id,
                         generation_source, report_type, name,
                         project_id, contract_id, billing_period_id,
-                        file_format, requested_by
+                        file_format, requested_by, invoice_direction
                     )
                 )
                 report_id = cursor.fetchone()['id']

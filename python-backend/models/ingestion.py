@@ -59,46 +59,57 @@ class SyncStatus(str, Enum):
     PARTIAL = "partial"
 
 
+# Maps data_source_id → SourceType enum for API responses
+DS_ID_TO_SOURCE_TYPE = {
+    5: SourceType.SNOWFLAKE,
+    6: SourceType.MANUAL,
+    7: SourceType.SOLAREDGE,
+    8: SourceType.ENPHASE,
+    9: SourceType.GOODWE,
+    10: SourceType.SMA,
+}
+
+# Maps SourceType → data_source_id for API requests
+SOURCE_TYPE_TO_DS_ID = {
+    SourceType.SNOWFLAKE: 5,
+    SourceType.MANUAL: 6,
+    SourceType.SOLAREDGE: 7,
+    SourceType.ENPHASE: 8,
+    SourceType.GOODWE: 9,
+    SourceType.SMA: 10,
+}
+
+
 # =====================================================
 # Integration Credential Models
 # =====================================================
 
-class IntegrationCredentialBase(BaseModel):
-    """Base model for integration credentials."""
-    source_type: SourceType
-    auth_type: AuthType
-    label: Optional[str] = None
-
-
-class IntegrationCredentialCreate(IntegrationCredentialBase):
+class IntegrationCredentialCreate(BaseModel):
     """Model for creating an integration credential."""
-    # For API key auth
-    api_key: Optional[str] = Field(None, description="API key for API key authentication")
-
-    # For OAuth2 auth
-    access_token: Optional[str] = None
-    refresh_token: Optional[str] = None
+    data_source_id: int = Field(..., description="FK to data_source table")
+    auth_type: AuthType
+    credentials: Dict[str, str] = Field(
+        ..., description="Credential secrets: {'api_key': '...'} or {'access_token': '...', 'refresh_token': '...', 'scope': '...'}"
+    )
     token_expires_at: Optional[datetime] = None
+    label: Optional[str] = None
 
 
 class IntegrationCredentialUpdate(BaseModel):
     """Model for updating an integration credential."""
     label: Optional[str] = None
     is_active: Optional[bool] = None
-
-    # For API key update
-    api_key: Optional[str] = None
-
-    # For OAuth2 token update
-    access_token: Optional[str] = None
-    refresh_token: Optional[str] = None
+    credentials: Optional[Dict[str, str]] = Field(None, description="Replacement credential secrets")
     token_expires_at: Optional[datetime] = None
 
 
-class IntegrationCredentialResponse(IntegrationCredentialBase):
+class IntegrationCredentialResponse(BaseModel):
     """Response model for integration credential (without sensitive data)."""
     id: int
     organization_id: int
+    data_source_id: int
+    auth_type: str
+    label: Optional[str] = None
     is_active: bool
     last_used_at: Optional[datetime] = None
     last_error: Optional[str] = None
@@ -123,10 +134,10 @@ class IntegrationSiteBase(BaseModel):
 
 class IntegrationSiteCreate(IntegrationSiteBase):
     """Model for creating an integration site."""
-    credential_id: int
+    integration_credential_id: int
     project_id: Optional[int] = None
     meter_id: Optional[int] = None
-    source_type: SourceType
+    data_source_id: int
     external_metadata: Optional[Dict[str, Any]] = None
     sync_interval_minutes: int = 60
 
@@ -145,10 +156,10 @@ class IntegrationSiteResponse(IntegrationSiteBase):
     """Response model for integration site."""
     id: int
     organization_id: int
-    credential_id: int
+    integration_credential_id: int
     project_id: Optional[int] = None
     meter_id: Optional[int] = None
-    source_type: SourceType
+    data_source_id: int
     external_metadata: Optional[Dict[str, Any]] = None
     is_active: bool
     sync_enabled: bool
@@ -177,7 +188,7 @@ class MeterReadingCanonical(BaseModel):
     external_site_id: Optional[str] = None
     external_device_id: Optional[str] = None
     reading_timestamp: datetime
-    reading_interval_seconds: int = 900
+    reading_interval: str = "15min"
     energy_wh: Optional[Decimal] = None
     power_w: Optional[Decimal] = None
     irradiance_wm2: Optional[Decimal] = None
@@ -232,7 +243,7 @@ class IngestionHistoryItem(BaseModel):
     id: int
     file_path: str
     file_name: Optional[str] = None
-    source_type: SourceType
+    data_source_id: int
     status: IngestionStatus
     rows_loaded: Optional[int] = None
     error_message: Optional[str] = None
@@ -265,3 +276,91 @@ class IngestionStatsResponse(BaseModel):
     """Response for ingestion statistics."""
     stats: List[IngestionStats]
     period_days: int
+
+
+# =====================================================
+# API-First Ingestion Models (meter-data & upload)
+# =====================================================
+
+class MeterDataReading(BaseModel):
+    """Single meter reading in an API push request."""
+    timestamp: str = Field(..., description="ISO 8601 or Unix timestamp (UTC)")
+    site_id: Optional[str] = Field(None, description="External site identifier")
+    device_id: Optional[str] = Field(None, description="External device identifier")
+    energy_wh: Optional[float] = Field(None, description="Energy in Watt-hours")
+    power_w: Optional[float] = Field(None, description="Power in Watts")
+    irradiance_wm2: Optional[float] = Field(None, description="Solar irradiance W/m²")
+    temperature_c: Optional[float] = Field(None, description="Temperature in Celsius")
+    quality: Optional[str] = Field(None, description="measured, estimated, or missing")
+    interval_seconds: Optional[int] = Field(None, description="Reading interval in seconds")
+
+
+class MeterDataBatchRequest(BaseModel):
+    """Request body for POST /api/ingest/meter-data."""
+    readings: List[MeterDataReading] = Field(
+        ...,
+        min_length=1,
+        max_length=5000,
+        description="Array of meter readings (max 5,000 per batch)",
+    )
+    source_type: SourceType = Field(
+        default=SourceType.SNOWFLAKE,
+        description="Data source type",
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Optional metadata (project_id, meter_id, etc.)",
+    )
+
+
+class BillingReadsBatchRequest(BaseModel):
+    """Request body for POST /api/ingest/billing-reads.
+
+    Readings are untyped dicts because field names vary by client:
+    - CBE sends: OPENING_READING, CLOSING_READING, CONTRACT_LINE_UNIQUE_ID, BILL_DATE, etc.
+    - Future clients will send different field names.
+    The client adapter maps these to canonical meter_aggregate columns.
+    """
+    readings: List[Dict[str, Any]] = Field(
+        ...,
+        min_length=1,
+        max_length=5000,
+        description="Array of billing aggregate readings (max 5,000 per batch)",
+    )
+    source_type: SourceType = Field(
+        default=SourceType.SNOWFLAKE,
+        description="Data source type",
+    )
+    metadata: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Optional metadata (project_id, etc.)",
+    )
+
+
+class GenerateAPIKeyRequest(BaseModel):
+    """Request body for POST /api/ingest/credentials/generate-key."""
+    data_source_id: int = Field(..., description="FK to data_source table")
+    label: Optional[str] = Field(None, description="Human-readable label for the key")
+
+
+class GenerateAPIKeyResponse(BaseModel):
+    """Response for generate-key (includes plaintext key shown only once)."""
+    credential_id: int
+    organization_id: int
+    data_source_id: int
+    api_key: str = Field(..., description="Plaintext API key (shown only once)")
+    label: Optional[str] = None
+    created_at: datetime
+
+
+class IngestionResultResponse(BaseModel):
+    """Synchronous response from meter-data and upload endpoints."""
+    ingestion_id: int = Field(..., description="Ingestion log entry ID")
+    status: IngestionStatus = Field(..., description="Processing result")
+    rows_accepted: int = Field(0, description="Rows successfully loaded")
+    rows_rejected: int = Field(0, description="Rows that failed validation or transformation")
+    errors: Optional[List[Dict[str, Any]]] = Field(None, description="Validation errors (first 10)")
+    processing_time_ms: Optional[int] = Field(None, description="Total processing time in ms")
+    data_start: Optional[datetime] = Field(None, description="Earliest reading timestamp")
+    data_end: Optional[datetime] = Field(None, description="Latest reading timestamp")
+    message: Optional[str] = Field(None, description="Human-readable status message")

@@ -87,6 +87,10 @@ class GenerateReportRequest(BaseModel):
         max_length=255,
         description="Custom report name"
     )
+    invoice_direction: Optional[str] = Field(
+        None,
+        description="Filter by invoice direction: 'receivable' or 'payable'. NULL = all directions."
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -94,7 +98,8 @@ class GenerateReportRequest(BaseModel):
                 "template_id": 1,
                 "billing_period_id": 12,
                 "contract_id": 5,
-                "file_format": "pdf"
+                "file_format": "pdf",
+                "invoice_direction": "receivable"
             }
         }
     )
@@ -454,6 +459,7 @@ class ReportConfig(BaseModel):
     organization_id: int
     contract_id: Optional[int] = None
     project_id: Optional[int] = None
+    invoice_direction: Optional[str] = None
 
     # Template config options
     include_charts: bool = True

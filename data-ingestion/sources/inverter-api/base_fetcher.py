@@ -155,35 +155,64 @@ class BaseFetcher(ABC):
 
         return response.json()
 
-    def upload_to_s3(
+    def ingest_data(
         self,
         data: Dict[str, Any],
         organization_id: int,
         site_id: str,
-        timestamp: Optional[datetime] = None,
-    ) -> str:
+        integration_site_id: Optional[int] = None,
+    ) -> Dict[str, Any]:
         """
-        Upload data to S3 raw folder.
+        Ingest data through the API-first pipeline.
+
+        Falls back to S3 upload if IngestService is not available.
 
         Args:
-            data: Data to upload as JSON.
-            organization_id: Organization ID for path.
-            site_id: External site ID for filename.
-            timestamp: Timestamp for path. Defaults to now.
+            data: Data dict with 'readings' key.
+            organization_id: Organization ID.
+            site_id: External site ID.
+            integration_site_id: Optional internal site ID for audit.
 
         Returns:
-            S3 key of uploaded file.
+            Dict with ingestion result (status, rows_accepted, etc.)
         """
-        timestamp = timestamp or datetime.now(timezone.utc)
+        readings = data.get("readings", [])
+
+        if self.dry_run:
+            logger.info(f"[DRY RUN] Would ingest {len(readings)} readings for site {site_id}")
+            return {"status": "dry_run", "rows_accepted": len(readings)}
+
+        try:
+            from data_ingestion.processing.ingest_service import IngestService
+            svc = IngestService()
+            result = svc.ingest_records(
+                records=readings,
+                source_type=self.SOURCE_TYPE,
+                organization_id=organization_id,
+                site_id=integration_site_id,
+            )
+            return {
+                "status": result.status,
+                "rows_accepted": result.rows_accepted,
+                "ingestion_id": result.ingestion_id,
+            }
+        except ImportError:
+            logger.warning("IngestService not available, falling back to S3 upload")
+            s3_key = self._upload_to_s3(data, organization_id, site_id)
+            return {"status": "s3_upload", "s3_key": s3_key}
+
+    def _upload_to_s3(
+        self,
+        data: Dict[str, Any],
+        organization_id: int,
+        site_id: str,
+    ) -> str:
+        """Legacy S3 upload fallback."""
+        timestamp = datetime.now(timezone.utc)
         date_str = timestamp.strftime("%Y-%m-%d")
         time_str = timestamp.strftime("%H%M%S")
 
         s3_key = f"raw/{self.SOURCE_TYPE}/{organization_id}/{date_str}/site_{site_id}_{time_str}.json"
-
-        if self.dry_run:
-            logger.info(f"[DRY RUN] Would upload to s3://{self.config.s3_bucket}/{s3_key}")
-            logger.debug(f"Data: {json.dumps(data, indent=2)}")
-            return s3_key
 
         self.s3_client.put_object(
             Bucket=self.config.s3_bucket,
@@ -613,16 +642,20 @@ class BaseFetcher(ABC):
                             end_time=end_time,
                         )
 
-                        # Upload to S3
-                        self.upload_to_s3(
+                        # Ingest through pipeline (falls back to S3 if needed)
+                        ingest_result = self.ingest_data(
                             data=data,
                             organization_id=site["organization_id"],
                             site_id=external_site_id,
+                            integration_site_id=site.get("id"),
                         )
                         results["files_uploaded"] += 1
 
                         # Update sync status
-                        records_count = len(data.get("readings", []))
+                        records_count = ingest_result.get(
+                            "rows_accepted",
+                            len(data.get("readings", [])),
+                        )
                         self.update_site_sync_status(
                             site_id=site["id"],
                             status="success",

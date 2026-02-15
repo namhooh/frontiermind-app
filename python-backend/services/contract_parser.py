@@ -82,6 +82,45 @@ logger = logging.getLogger(__name__)
 
 
 # =============================================================================
+# CONTRACT TYPE PROFILES — expected categories per contract type
+# =============================================================================
+# Maps contract_type → mandatory/optional clause categories.
+# After extraction, missing mandatory categories trigger warnings.
+
+CONTRACT_TYPE_PROFILES = {
+    "PPA": {
+        "mandatory": ["PRICING", "PAYMENT_TERMS", "AVAILABILITY", "PERFORMANCE_GUARANTEE"],
+        "optional": ["CONDITIONS_PRECEDENT", "DEFAULT", "TERMINATION", "FORCE_MAJEURE",
+                      "LIQUIDATED_DAMAGES", "SECURITY_PACKAGE", "COMPLIANCE", "MAINTENANCE", "GENERAL"],
+    },
+    "ESA": {
+        "mandatory": ["PRICING", "PAYMENT_TERMS", "AVAILABILITY"],
+        "optional": ["MAINTENANCE", "DEFAULT", "TERMINATION", "FORCE_MAJEURE",
+                      "LIQUIDATED_DAMAGES", "SECURITY_PACKAGE", "GENERAL"],
+    },
+    "SSA": {
+        "mandatory": ["PRICING", "PAYMENT_TERMS", "MAINTENANCE"],
+        "optional": ["DEFAULT", "TERMINATION", "SECURITY_PACKAGE", "COMPLIANCE",
+                      "FORCE_MAJEURE", "GENERAL"],
+    },
+    "O_M": {
+        "mandatory": ["MAINTENANCE", "PAYMENT_TERMS"],
+        "optional": ["AVAILABILITY", "DEFAULT", "TERMINATION", "FORCE_MAJEURE",
+                      "COMPLIANCE", "SECURITY_PACKAGE", "GENERAL"],
+    },
+    "EPC": {
+        "mandatory": ["PRICING", "PAYMENT_TERMS", "CONDITIONS_PRECEDENT"],
+        "optional": ["DEFAULT", "TERMINATION", "FORCE_MAJEURE", "LIQUIDATED_DAMAGES",
+                      "SECURITY_PACKAGE", "COMPLIANCE", "GENERAL"],
+    },
+    "VPPA": {
+        "mandatory": ["PRICING", "PAYMENT_TERMS"],
+        "optional": ["DEFAULT", "TERMINATION", "FORCE_MAJEURE", "SECURITY_PACKAGE", "GENERAL"],
+    },
+}
+
+
+# =============================================================================
 # TOKEN BUDGET CONFIGURATION
 # =============================================================================
 # Token budgets configured for Claude 3.5 Haiku (max 8192 output tokens).
@@ -417,6 +456,19 @@ class ContractParser:
             logger.info("Step 5: Extracting clauses with Claude API (13-category structure)")
             clauses, extraction_summary = self._extract_clauses(anonymized_result.anonymized_text)
             logger.info(f"Clause extraction: {len(clauses)} clauses, {extraction_summary.unidentified_count} unidentified")
+
+            # Step 5.5: Log contract type profile warnings
+            detected_type = (
+                contract_metadata.get('extraction_metadata', {}).get('contract_type_extracted')
+                if contract_metadata else None
+            )
+            if detected_type:
+                extracted_cats = set()
+                for clause in clauses:
+                    cat = clause.category or clause.clause_category
+                    if cat:
+                        extracted_cats.add(cat)
+                self._log_contract_type_warnings(detected_type, extracted_cats)
 
             # Step 6: Store clauses in database with FK resolution
             logger.info("Step 6: Resolving foreign keys and storing clauses")
@@ -1147,68 +1199,34 @@ class ContractParser:
 
         return clauses, summary
 
-    def _build_clause_extraction_prompt(self, text: str) -> str:
+    def _log_contract_type_warnings(
+        self,
+        contract_type: str,
+        extracted_categories: set
+    ):
         """
-        Build the prompt for Claude to extract clauses.
-
-        Includes valid clause types and categories from database when available,
-        guiding Claude to use existing codes for better FK resolution.
+        Log warnings for missing mandatory categories based on contract type profile.
 
         Args:
-            text: Anonymized contract text
-
-        Returns:
-            Formatted prompt for Claude API
+            contract_type: Detected contract type (e.g., "PPA", "O_M")
+            extracted_categories: Set of category codes found in extraction
         """
-        # Get valid codes from database if lookup service is available
-        valid_types_hint = ""
-        valid_categories_hint = ""
+        profile = CONTRACT_TYPE_PROFILES.get(contract_type)
+        if not profile:
+            return
 
-        if self.lookup_service:
-            valid_types = self.lookup_service.get_valid_clause_types()
-            valid_categories = self.lookup_service.get_valid_clause_categories()
+        mandatory = set(profile["mandatory"])
+        missing = mandatory - extracted_categories
 
-            if valid_types:
-                valid_types_hint = f"\n   PREFERRED values (map to database): {', '.join(valid_types)}"
-            if valid_categories:
-                valid_categories_hint = f"\n   PREFERRED values (map to database): {', '.join(valid_categories)}"
-
-        return f"""You are an expert at analyzing energy contracts. Extract all key clauses from the contract below.
-
-For each clause, identify:
-- clause_name: The name/title of the clause
-- section_reference: Section number (e.g., "4.1", "5.2")
-- clause_type: Classification of the clause (availability, liquidated_damages, pricing, payment_terms, force_majeure, termination, general){valid_types_hint}
-- clause_category: Specific category (availability, pricing, compliance, general){valid_categories_hint}
-- raw_text: The exact text of the clause
-- summary: A brief 1-2 sentence summary
-- responsible_party: Who must fulfill this clause (Seller/Buyer/Both)
-- beneficiary_party: Who benefits from this clause (optional, can be null)
-- normalized_payload: Structured data for rules engine. For availability clauses: {{"threshold": 95.0, "metric": "availability", "period": "annual"}}. For LD clauses: {{"ld_per_point": 50000, "cap_annual": 10000000}}. For pricing: {{"base_price": 0.05, "escalation": "CPI"}}.
-- confidence_score: Your confidence in the extraction (0.0-1.0)
-
-Return ONLY a JSON object in this format:
-{{
-  "clauses": [
-    {{
-      "clause_name": "Availability Guarantee",
-      "section_reference": "4.1",
-      "clause_type": "availability",
-      "clause_category": "availability",
-      "raw_text": "Seller shall ensure...",
-      "summary": "Requires 95% annual availability",
-      "responsible_party": "Seller",
-      "beneficiary_party": "Buyer",
-      "normalized_payload": {{"threshold": 95.0, "metric": "availability", "period": "annual"}},
-      "confidence_score": 0.95
-    }}
-  ]
-}}
-
-Contract text:
-{text}
-
-Remember: Return ONLY the JSON object, no additional text."""
+        if missing:
+            logger.warning(
+                f"Contract type '{contract_type}' is missing mandatory categories: "
+                f"{sorted(missing)}"
+            )
+        else:
+            logger.info(
+                f"Contract type '{contract_type}': all mandatory categories present"
+            )
 
     def _post_process_clauses(
         self,
@@ -1301,6 +1319,40 @@ Remember: Return ONLY the JSON object, no additional text."""
                         logger.warning(f"Targeted extraction failed for {target_category}: {e}")
             else:
                 logger.info("All targeted categories already present")
+
+        # ===== PHASE 1.5: PAYLOAD NORMALIZATION (Canonical Ontology) =====
+        try:
+            from services.ontology.payload_validator import normalize_payload, validate_payload
+            normalization_count = 0
+            validation_warnings = []
+
+            for clause in clauses:
+                category = clause.category or clause.clause_category
+                if not category or category == 'UNIDENTIFIED':
+                    continue
+
+                if clause.normalized_payload:
+                    # Normalize: resolve aliases and coerce types
+                    clause.normalized_payload = normalize_payload(category, clause.normalized_payload)
+                    normalization_count += 1
+
+                    # Validate: check required fields and types
+                    result = validate_payload(category, clause.normalized_payload)
+                    if not result.valid:
+                        validation_warnings.append(
+                            f"{clause.clause_name} ({category}): "
+                            f"missing={result.missing_required}, type_errors={result.type_errors}"
+                        )
+
+            logger.info(
+                f"Payload normalization: {normalization_count} payloads normalized, "
+                f"{len(validation_warnings)} validation warnings"
+            )
+            if validation_warnings:
+                for w in validation_warnings[:5]:  # Log first 5
+                    logger.warning(f"Validation: {w}")
+        except Exception as e:
+            logger.warning(f"Payload normalization failed (non-critical): {e}")
 
         # ===== PHASE 2: PAYLOAD ENRICHMENT =====
         if enable_payload_enrichment:

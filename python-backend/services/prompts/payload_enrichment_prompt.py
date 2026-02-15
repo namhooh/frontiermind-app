@@ -7,7 +7,7 @@ Takes clauses with basic payloads and enriches them with complete field extracti
 
 from typing import List, Dict, Optional
 import json
-from .clause_examples import CLAUSE_EXAMPLES
+from .clause_examples import CLAUSE_EXAMPLES, get_required_fields, format_schema_for_prompt
 
 
 ENRICHMENT_SYSTEM_PROMPT = """You are an expert contract analyst specializing in extracting structured data from energy contract clauses.
@@ -77,7 +77,16 @@ Return the enriched clause:
 
 
 def _get_expected_fields(category: str) -> str:
-    """Get the expected payload fields for a category from examples."""
+    """Get the expected payload fields for a category from canonical schema."""
+    # Use canonical schema for authoritative field list with role annotations
+    schema_text = format_schema_for_prompt(category)
+    if schema_text:
+        required = get_required_fields(category)
+        if required:
+            schema_text += f"\n\nREQUIRED fields: {', '.join(required)}"
+        return schema_text
+
+    # Fallback to example if no schema
     example = CLAUSE_EXAMPLES.get(category)
     if not example:
         return "No example available - extract all relevant fields"

@@ -88,7 +88,15 @@ echo -e "${GREEN}  Authenticated${NC}"
 # Step 2: Build Docker Image
 # ============================================================================
 echo -e "${YELLOW}Step 2: Building Docker image...${NC}"
-docker build --platform linux/amd64 -t ${SERVICE_NAME}:${GIT_HASH} -t ${SERVICE_NAME}:latest .
+
+# Build from project root so Dockerfile can access both python-backend/ and data-ingestion/
+PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+docker build --platform linux/amd64 \
+  -f "${SCRIPT_DIR}/Dockerfile" \
+  -t ${SERVICE_NAME}:${GIT_HASH} \
+  -t ${SERVICE_NAME}:latest \
+  "${PROJECT_ROOT}"
 echo -e "${GREEN}  Build complete${NC}"
 
 # ============================================================================

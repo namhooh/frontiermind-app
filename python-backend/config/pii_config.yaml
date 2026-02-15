@@ -69,6 +69,11 @@ pii_sections:
   - '(?:^|\n)\s*(?:IN WITNESS WHEREOF|EXECUTION|SIGNATURES?)\b'
   - '(?:^|\n)\s*(?:RECITALS?|WHEREAS|PREAMBLE)\b'
   - '(?:^|\n)\s*(?:SCHEDULES?|APPENDIX|ANNEX|EXHIBIT)\s'
+  # Representative and contact sections often contain names
+  - '(?:^|\n)\s*(?:Designated\s+)?Representative'
+  - '(?:^|\n)\s*Notice\s+Address'
+  # Signature blocks with common seal
+  - '(?:^|\n)\s*(?:THE\s+)?COMMON\s+SEAL'
 
 # Context triggers for PERSON entities within PII sections.
 # Even inside a PII section, a PERSON entity must appear near a contextual
@@ -142,6 +147,139 @@ custom_recognizers:
       - name: po_box
         regex: 'P\.?\s?O\.?\s*Box\s+\d+'
         score: 0.9
+
+  # --- Signature Block Names ---
+  # Captures names in structured signature fields (including ALL-CAPS names)
+  # These patterns use fixed-length lookbehinds where possible or match the
+  # full structure. Presidio will redact the matched span.
+  - name: signature_name
+    entity_type: PERSON
+    patterns:
+      # "Name: John Smith" - fixed lookbehind for "Name: "
+      # Character class includes digits (0-9) and hyphens for OCR-garbled names like "CHArONFSN 2AD"
+      - name: name_field_lower
+        regex: '(?<=Name: )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*(?:Title|TITLE|Name|NAME|By|BY|\[|\n|$))'
+        score: 0.95
+      # "NAME: LOKECH KUMAR" - fixed lookbehind for "NAME: "
+      - name: name_field_upper
+        regex: '(?<=NAME: )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*(?:Title|TITLE|Name|NAME|By|BY|\[|\n|$))'
+        score: 0.95
+      # "By: John Smith" - fixed lookbehind
+      - name: by_field_lower
+        regex: '(?<=By: )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*(?:Title|TITLE|Name|NAME|Date|\n|$))'
+        score: 0.90
+      # "BY: JOHN SMITH" - fixed lookbehind
+      - name: by_field_upper
+        regex: '(?<=BY: )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*(?:Title|TITLE|Name|NAME|Date|\n|$))'
+        score: 0.90
+      # "Signed by John Smith" - terminates at newline or common delimiters
+      - name: signed_by
+        regex: '(?<=Signed by )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*[\n,;]|$)'
+        score: 0.90
+      # "signed by John Smith" (lowercase)
+      - name: signed_by_lc
+        regex: '(?<=signed by )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*[\n,;]|$)'
+        score: 0.90
+      # "Executed by John Smith" - terminates at newline
+      - name: executed_by
+        regex: '(?<=Executed by )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*[\n,;]|$)'
+        score: 0.90
+      # "executed by John Smith" (lowercase)
+      - name: executed_by_lc
+        regex: '(?<=executed by )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*[\n,;]|$)'
+        score: 0.90
+      # "Witnessed by John Smith" - terminates at newline
+      - name: witnessed_by
+        regex: '(?<=Witnessed by )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*[\n,;]|$)'
+        score: 0.90
+      # "witnessed by John Smith" (lowercase)
+      - name: witnessed_by_lc
+        regex: '(?<=witnessed by )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*[\n,;]|$)'
+        score: 0.90
+
+  # --- Notice Address Section Names ---
+  # Captures names in notice/contact sections
+  # Character class includes digits (0-9) and hyphens for OCR-garbled names
+  - name: notice_address_name
+    entity_type: PERSON
+    patterns:
+      # "Attention: John Smith"
+      - name: attention_field
+        regex: '(?<=Attention: )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*(?:\n|,|;|$))'
+        score: 0.95
+      # "ATTENTION: JOHN SMITH"
+      - name: attention_field_upper
+        regex: '(?<=ATTENTION: )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*(?:\n|,|;|$))'
+        score: 0.95
+      # "Attn: John Smith"
+      - name: attn_field
+        regex: '(?<=Attn: )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*(?:\n|,|;|$))'
+        score: 0.95
+      # "ATTN: JOHN SMITH"
+      - name: attn_field_upper
+        regex: '(?<=ATTN: )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*(?:\n|,|;|$))'
+        score: 0.95
+      # "Contact: John Smith"
+      - name: contact_field
+        regex: '(?<=Contact: )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*(?:\n|,|;|\(|$))'
+        score: 0.90
+      # "CONTACT: JOHN SMITH"
+      - name: contact_field_upper
+        regex: '(?<=CONTACT: )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*(?:\n|,|;|\(|$))'
+        score: 0.90
+
+  # --- Designated Representative Section ---
+  # Captures names with corporate titles in representative sections
+  # Character class includes digits (0-9) and hyphens for OCR-garbled names
+  - name: designated_rep
+    entity_type: PERSON
+    patterns:
+      # "Chandresh Jagad (Director)" or "LOKECH KUMAR (Director)"
+      # Name followed by corporate title in parentheses - handles ALL-CAPS
+      - name: rep_with_title
+        regex: '[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*\((?:Director|Secretary|Manager|CEO|CFO|President|Chairman|Representative|DIRECTOR|SECRETARY|MANAGER)\))'
+        score: 0.95
+      # "Mr. Matthew Tilleard" - with honorific (4-char fixed lookbehind)
+      - name: rep_with_mr
+        regex: '(?<=Mr\. )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*\((?:Director|Secretary|Manager|CEO|CFO|President|Chairman|Representative|DIRECTOR|SECRETARY|MANAGER)\))'
+        score: 0.95
+      # "Mrs. Jane Smith" - with honorific (5-char fixed lookbehind)
+      - name: rep_with_mrs
+        regex: '(?<=Mrs\. )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*\((?:Director|Secretary|Manager|CEO|CFO|President|Chairman|Representative|DIRECTOR|SECRETARY|MANAGER)\))'
+        score: 0.95
+      # "Ms. Jane Smith" - with honorific (4-char fixed lookbehind)
+      - name: rep_with_ms
+        regex: '(?<=Ms\. )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*\((?:Director|Secretary|Manager|CEO|CFO|President|Chairman|Representative|DIRECTOR|SECRETARY|MANAGER)\))'
+        score: 0.95
+      # "Dr. John Smith" - with honorific (4-char fixed lookbehind)
+      - name: rep_with_dr
+        regex: '(?<=Dr\. )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*\((?:Director|Secretary|Manager|CEO|CFO|President|Chairman|Representative|DIRECTOR|SECRETARY|MANAGER)\))'
+        score: 0.95
+      # "Representative: John Smith"
+      - name: rep_label
+        regex: '(?<=Representative: )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*(?:\n|\(|$))'
+        score: 0.90
+      # "REPRESENTATIVE: JOHN SMITH"
+      - name: rep_label_upper
+        regex: '(?<=REPRESENTATIVE: )[A-Za-z][A-Za-z0-9\s\.\''-]{2,40}?(?=\s*(?:\n|\(|$))'
+        score: 0.90
+
+  # --- Title Field Names (captures name on same line) ---
+  # Captures names adjacent to Title fields in signature blocks
+  # These patterns look for 2-3 word names immediately before "Title:"
+  # Uses [ ]+ (space only) instead of \s+ to avoid matching across newlines
+  # Score is set high (0.95) to win overlap resolution vs spaCy NER
+  - name: title_field_name
+    entity_type: PERSON
+    patterns:
+      # Pattern: "JOHN SMITH Title: Director" - captures 2-word name
+      - name: name_before_title_2word
+        regex: '\b[A-Z][a-zA-Z\.\'']+[ ]+[A-Z][a-zA-Z\.\'']+(?=[ ]+(?:Title|TITLE)\s*:)'
+        score: 0.95
+      # Pattern: "JOHN MIDDLE SMITH Title: Director" - captures 3-word name
+      - name: name_before_title_3word
+        regex: '\b[A-Z][a-zA-Z\.\'']+[ ]+[A-Z][a-zA-Z\.\'']+[ ]+[A-Z][a-zA-Z\.\'']+(?=[ ]+(?:Title|TITLE)\s*:)'
+        score: 0.95
 
 anonymization:
   # "replace" = swap with placeholder, "redact" = remove entirely, "keep" = do not anonymize

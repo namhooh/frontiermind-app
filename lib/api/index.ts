@@ -133,3 +133,18 @@ export {
   type OAuthProviderConfig,
   type OAuthProvider,
 } from './oauthClient'
+
+// Admin Client
+export {
+  AdminClient,
+  adminClient,
+  AdminAPIError,
+  type OrganizationResponse as AdminOrganizationResponse,
+  type CreateOrganizationRequest,
+  type DataSourceResponse,
+  type CredentialResponse,
+  type GenerateAPIKeyRequest,
+  type GenerateAPIKeyResponse,
+  type UpdateCredentialRequest,
+  type AdminClientConfig,
+} from './adminClient'

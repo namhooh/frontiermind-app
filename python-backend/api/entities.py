@@ -38,16 +38,26 @@ except Exception as e:
 # ============================================================================
 
 
+class OrganizationCreate(BaseModel):
+    """Request body for creating an organization."""
+    name: str = Field(..., description="Organization name")
+    country: Optional[str] = Field(None, description="Country code or name")
+
+
 class OrganizationResponse(BaseModel):
     """Organization entity response."""
     id: int = Field(..., description="Organization ID")
     name: str = Field(..., description="Organization name")
+    country: Optional[str] = Field(None, description="Country")
+    created_at: Optional[str] = Field(None, description="Creation timestamp")
 
     class Config:
         json_schema_extra = {
             "example": {
                 "id": 1,
-                "name": "Acme Energy Corp"
+                "name": "Acme Energy Corp",
+                "country": "KE",
+                "created_at": "2026-01-01T00:00:00"
             }
         }
 
@@ -78,6 +88,19 @@ class ProjectsListResponse(BaseModel):
     """Response for listing projects."""
     success: bool = Field(True, description="Request succeeded")
     projects: List[ProjectResponse] = Field(..., description="List of projects")
+
+
+class DataSourceResponse(BaseModel):
+    """Data source entity response."""
+    id: int = Field(..., description="Data source ID")
+    name: str = Field(..., description="Data source name")
+    description: Optional[str] = Field(None, description="Data source description")
+
+
+class DataSourcesListResponse(BaseModel):
+    """Response for listing data sources."""
+    success: bool = Field(True, description="Request succeeded")
+    data_sources: List[DataSourceResponse] = Field(..., description="List of data sources")
 
 
 # ============================================================================
@@ -116,16 +139,21 @@ async def list_organizations() -> OrganizationsListResponse:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT id, name
+                    SELECT id, name, country, created_at
                     FROM organization
                     ORDER BY name
                     """
                 )
                 rows = cursor.fetchall()
-                logger.info(f"Organizations query returned {len(rows)} rows: {rows}")
+                logger.info(f"Organizations query returned {len(rows)} rows")
 
                 organizations = [
-                    OrganizationResponse(id=row['id'], name=row['name'])
+                    OrganizationResponse(
+                        id=row['id'],
+                        name=row['name'],
+                        country=row.get('country'),
+                        created_at=str(row['created_at']) if row.get('created_at') else None,
+                    )
                     for row in rows
                 ]
 
@@ -228,4 +256,91 @@ async def list_projects(
                 "error": "DatabaseError",
                 "message": f"Failed to list projects: {str(e)}",
             },
+        )
+
+
+@router.post(
+    "/organizations",
+    response_model=OrganizationResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create an organization",
+    description="Create a new organization for client onboarding.",
+)
+async def create_organization(body: OrganizationCreate) -> OrganizationResponse:
+    if not USE_DATABASE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"success": False, "error": "DatabaseNotAvailable", "message": "Database storage not available"},
+        )
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    INSERT INTO organization (name, country)
+                    VALUES (%s, %s)
+                    RETURNING id, name, country, created_at
+                    """,
+                    (body.name, body.country),
+                )
+                row = cursor.fetchone()
+                conn.commit()
+
+                return OrganizationResponse(
+                    id=row['id'],
+                    name=row['name'],
+                    country=row.get('country'),
+                    created_at=str(row['created_at']) if row.get('created_at') else None,
+                )
+
+    except Exception as e:
+        logger.error(f"Error creating organization: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"success": False, "error": "DatabaseError", "message": f"Failed to create organization: {str(e)}"},
+        )
+
+
+@router.get(
+    "/data-sources",
+    response_model=DataSourcesListResponse,
+    summary="List all data sources",
+    description="Retrieve all data sources for dropdown selection.",
+)
+async def list_data_sources() -> DataSourcesListResponse:
+    if not USE_DATABASE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"success": False, "error": "DatabaseNotAvailable", "message": "Database storage not available"},
+        )
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT id, name, description
+                    FROM data_source
+                    ORDER BY name
+                    """
+                )
+                rows = cursor.fetchall()
+
+                data_sources = [
+                    DataSourceResponse(
+                        id=row['id'],
+                        name=row['name'],
+                        description=row.get('description'),
+                    )
+                    for row in rows
+                ]
+
+                return DataSourcesListResponse(success=True, data_sources=data_sources)
+
+    except Exception as e:
+        logger.error(f"Error listing data sources: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"success": False, "error": "DatabaseError", "message": f"Failed to list data sources: {str(e)}"},
         )

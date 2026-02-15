@@ -33,7 +33,8 @@ class InvoiceComparisonExtractor(BaseExtractor):
         billing_period_id: int,
         org_id: int,
         contract_id: Optional[int] = None,
-        project_id: Optional[int] = None
+        project_id: Optional[int] = None,
+        invoice_direction: Optional[str] = None
     ) -> ExtractedData:
         """
         Extract invoice comparison data for report generation.
@@ -43,6 +44,7 @@ class InvoiceComparisonExtractor(BaseExtractor):
             org_id: Organization ID (required for security filtering)
             contract_id: Optional contract filter
             project_id: Optional project filter
+            invoice_direction: Optional direction filter (receivable/payable)
 
         Returns:
             ExtractedData containing comparison records, line items,
@@ -58,7 +60,8 @@ class InvoiceComparisonExtractor(BaseExtractor):
         logger.info(
             f"Extracting invoice_comparison data: "
             f"billing_period_id={billing_period_id}, org_id={org_id}, "
-            f"contract_id={contract_id}, project_id={project_id}"
+            f"contract_id={contract_id}, project_id={project_id}, "
+            f"invoice_direction={invoice_direction}"
         )
 
         # Query the repository
@@ -66,7 +69,8 @@ class InvoiceComparisonExtractor(BaseExtractor):
             billing_period_id=billing_period_id,
             org_id=org_id,
             contract_id=contract_id,
-            project_id=project_id
+            project_id=project_id,
+            invoice_direction=invoice_direction
         )
 
         # Handle empty results

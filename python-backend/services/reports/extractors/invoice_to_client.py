@@ -31,7 +31,8 @@ class InvoiceToClientExtractor(BaseExtractor):
         billing_period_id: int,
         org_id: int,
         contract_id: Optional[int] = None,
-        project_id: Optional[int] = None
+        project_id: Optional[int] = None,
+        invoice_direction: Optional[str] = None
     ) -> ExtractedData:
         """
         Extract invoice-to-client data for report generation.
@@ -41,6 +42,8 @@ class InvoiceToClientExtractor(BaseExtractor):
             org_id: Organization ID (required for security filtering)
             contract_id: Optional contract filter
             project_id: Optional project filter
+            invoice_direction: Accepted for interface consistency but not used
+                (invoice_header has no direction column)
 
         Returns:
             ExtractedData containing invoice headers, line items, and metadata

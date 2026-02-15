@@ -41,3 +41,6 @@ apscheduler>=3.10.0        # Background job scheduling
 
 # Contract Metadata Extraction
 rapidfuzz>=3.6.0           # Fuzzy string matching for counterparty matching
+
+# Data Ingestion (Parquet support)
+pyarrow>=14.0.0            # Parquet file reading for meter data upload

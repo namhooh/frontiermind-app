@@ -50,16 +50,22 @@ router = APIRouter(
     },
 )
 
-# Initialize database connection and repository
+# Initialize database connection and repository (independently)
+report_repository = None
+storage = None
+
 try:
     init_connection_pool()
     report_repository = ReportRepository()
-    storage = get_storage()
-    logger.info("Report API initialized with database and storage")
+    logger.info("Report API: Database initialized")
 except Exception as e:
-    logger.warning(f"Report API initialization warning: {e}")
-    report_repository = None
-    storage = None
+    logger.warning(f"Report API: Database initialization failed: {e}")
+
+try:
+    storage = get_storage()
+    logger.info("Report API: Storage initialized")
+except Exception as e:
+    logger.warning(f"Report API: Storage initialization failed: {e}")
 
 
 # ============================================================================
@@ -69,19 +75,30 @@ except Exception as e:
 
 def get_org_id(request: Request) -> int:
     """
-    Extract organization ID from request.
-
-    In production, this would come from JWT token or session.
-    For now, uses header or defaults to 1 for development.
+    Extract and validate organization ID from request header.
+    Raises HTTPException if missing or invalid.
     """
     org_id = request.headers.get("X-Organization-ID")
-    if org_id:
-        try:
-            return int(org_id)
-        except ValueError:
-            pass
-    # Default for development - in production, require auth
-    return 1
+    if not org_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail={
+                "success": False,
+                "error": "MissingOrganization",
+                "message": "X-Organization-ID header required",
+            },
+        )
+    try:
+        return int(org_id)
+    except ValueError:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={
+                "success": False,
+                "error": "InvalidOrganization",
+                "message": "X-Organization-ID must be an integer",
+            },
+        )
 
 
 def require_repository():
@@ -93,6 +110,19 @@ def require_repository():
                 "success": False,
                 "error": "DatabaseNotAvailable",
                 "message": "Database connection not available",
+            },
+        )
+
+
+def require_storage():
+    """Raise exception if storage not available."""
+    if not storage:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={
+                "success": False,
+                "error": "StorageNotAvailable",
+                "message": "Storage service not available",
             },
         )
 
@@ -421,6 +451,7 @@ async def generate_report(
             template_id=report_request.template_id,
             contract_id=report_request.contract_id,
             project_id=report_request.project_id,
+            invoice_direction=report_request.invoice_direction,
         )
 
         # Queue background generation
@@ -584,6 +615,7 @@ async def get_download_url(
 ) -> DownloadUrlResponse:
     """Get a presigned download URL for a report."""
     require_repository()
+    require_storage()
     org_id = get_org_id(request)
 
     try:

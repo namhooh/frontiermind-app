@@ -7,6 +7,11 @@ import type { PIIRedactionResult, ProcessingStage } from '@/lib/pii-redaction-te
 const API_BASE_URL =
   process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000'
 
+export interface PIIRedactionTempClientConfig {
+  baseUrl?: string
+  organizationId: number
+}
+
 export class PIIRedactionAPIError extends Error {
   constructor(
     message: string,
@@ -20,9 +25,11 @@ export class PIIRedactionAPIError extends Error {
 
 export class PIIRedactionTempClient {
   private baseUrl: string
+  private organizationId: number
 
-  constructor(baseUrl?: string) {
-    this.baseUrl = baseUrl || API_BASE_URL
+  constructor(config: PIIRedactionTempClientConfig) {
+    this.baseUrl = config.baseUrl || API_BASE_URL
+    this.organizationId = config.organizationId
   }
 
   async redactDocument(options: {
@@ -40,6 +47,9 @@ export class PIIRedactionTempClient {
 
     const response = await fetch(`${this.baseUrl}/api/pii-redaction-temp/process`, {
       method: 'POST',
+      headers: {
+        'X-Organization-ID': this.organizationId.toString(),
+      },
       body: formData,
     })
 
