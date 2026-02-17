@@ -6,15 +6,17 @@
  * Displays a list of generated reports with filtering and sorting.
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { FileText, Loader2, RefreshCw, Filter, X } from 'lucide-react'
 import { Button } from '@/app/components/ui/button'
 import { ReportCard } from './ReportCard'
-import { ReportsClient, ReportsAPIError } from '@/lib/api'
+import { ReportsAPIError } from '@/lib/api'
+import type { ReportsClient } from '@/lib/api'
 import type { GeneratedReport, ReportFilters, ReportStatus, InvoiceReportType } from '@/lib/api'
 
 interface ReportsListProps {
   refreshTrigger?: number
+  reportsClient: ReportsClient
 }
 
 const STATUS_OPTIONS: { value: ReportStatus | ''; label: string }[] = [
@@ -33,7 +35,7 @@ const TYPE_OPTIONS: { value: InvoiceReportType | ''; label: string }[] = [
   { value: 'invoice_comparison', label: 'Invoice Comparison' },
 ]
 
-export function ReportsList({ refreshTrigger }: ReportsListProps) {
+export function ReportsList({ refreshTrigger, reportsClient }: ReportsListProps) {
   const [reports, setReports] = useState<GeneratedReport[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -43,14 +45,6 @@ export function ReportsList({ refreshTrigger }: ReportsListProps) {
   const [statusFilter, setStatusFilter] = useState<ReportStatus | ''>('')
   const [typeFilter, setTypeFilter] = useState<InvoiceReportType | ''>('')
   const [showFilters, setShowFilters] = useState(false)
-
-  const reportsClient = useMemo(
-    () =>
-      new ReportsClient({
-        enableLogging: process.env.NODE_ENV === 'development',
-      }),
-    []
-  )
 
   const fetchReports = useCallback(async () => {
     setIsLoading(true)

@@ -14,6 +14,8 @@ import numpy as np
 from services.rules.base_rule import BaseRule
 from services.rules.availability_rule import AvailabilityRule
 from services.rules.capacity_factor_rule import CapacityFactorRule
+from services.rules.pricing_rule import PricingRule
+from services.rules.production_guarantee_rule import ProductionGuaranteeRule
 from services.meter_aggregator import MeterAggregator
 from services.event_detector import EventDetector
 from db.rules_repository import RulesRepository
@@ -74,9 +76,10 @@ class RulesEngine:
     # Map clause category codes to rule classes
     RULE_CLASSES: Dict[str, Type[BaseRule]] = {
         'AVAILABILITY': AvailabilityRule,
-        'PERF_GUARANTEE': AvailabilityRule,  # Performance guarantees use availability logic
+        'PERFORMANCE_GUARANTEE': AvailabilityRule,  # Performance guarantees use availability logic
         'capacity_factor': CapacityFactorRule,
-        # 'PRICING': PricingRule,  # TODO: Implement in future
+        'PRICING': PricingRule,
+        'PRODUCTION_GUARANTEE': ProductionGuaranteeRule,
     }
 
     def __init__(

@@ -582,7 +582,7 @@ SELECT calculate_next_run_time('monthly', 1, '06:00', 'UTC', now());
 ## 13. Future Enhancements
 
 - [ ] Dashboard widget for report generation status
-- [ ] Email notifications for scheduled report delivery
+- [x] Email notifications for scheduled report delivery (see `services/reports/delivery.py`)
 - [ ] Bulk report generation for multiple billing periods
 - [ ] Report comparison (period-over-period)
 - [ ] Custom report builder UI
@@ -1116,43 +1116,34 @@ Add to `main.py`:
 
 ---
 
-### 15.7 Phase 6: Automation (Deferrable)
+### 15.7 Phase 6: Automation (Implemented)
 
-Tasks for scheduled reports and email notifications. This phase can be deferred after Phases 1-5 deliver a working on-demand MVP.
+Report scheduling and email delivery are now implemented via the shared email notification scheduler.
 
-| Task ID | Task | File to Create | Purpose | References |
-|---------|------|----------------|---------|------------|
-| 6.1 | Implement background scheduler | `services/reports/scheduler.py` | APScheduler for scheduled_report execution | Section 3.2 |
-| 6.2 | Implement email service | `services/email_service.py` | AWS SES for report delivery | Section 14.1 |
+| Task ID | Task | File | Status |
+|---------|------|------|--------|
+| 6.1 | Report schedule processor | `services/reports/scheduler.py` | Done |
+| 6.2 | Report email delivery | `services/reports/delivery.py` | Done |
 
-#### Task 6.1: Background Scheduler
+#### Implementation Details
 
-Implement `ReportScheduler` class with:
-- `start()` - Initialize APScheduler with persistent job store
-- `stop()` - Graceful shutdown
-- `check_due_schedules()` - Periodic job that:
-  1. Query `scheduled_report` where `next_run_at <= now()` and `is_active = true`
-  2. For each due schedule:
-     - Create `generated_report` with `generation_source='scheduled'`
-     - If `billing_period_id` is NULL, call `get_latest_completed_billing_period()`
-     - Trigger async generation
-     - Update `scheduled_report.next_run_at` using `calculate_next_run_time()`
-     - Update `scheduled_report.last_run_at`
+**Report schedule processor** (`services/reports/scheduler.py`):
+- `process_due_report_schedules()` — async APScheduler job registered on the shared scheduler in `services/email/scheduler.py`
+- Polls `scheduled_report` where `next_run_at <= now()` and `is_active = true` every 5 minutes
+- For each due schedule:
+  1. Resolves `billing_period_id` (auto-selects latest completed if NULL)
+  2. Creates `generated_report` with `generation_source='scheduled'`
+  3. Calls `ReportGenerator.generate(report_id)`
+  4. If `delivery_method` is `email` or `both`, sends via `ReportDeliveryService`
+  5. Updates `scheduled_report.last_run_at` and status
 
-Integration with FastAPI:
-- Add startup event to call `scheduler.start()`
-- Add shutdown event to call `scheduler.stop()`
-- Configure interval from `SCHEDULER_CHECK_INTERVAL_SECONDS`
+**Report email delivery** (`services/reports/delivery.py`):
+- `ReportDeliveryService.deliver_report_email()` — sends a "report ready" email with presigned S3 download link (24-hour expiry)
+- Reuses `services/email/ses_client.SESClient` for sending
+- Reuses `services/email/template_renderer.EmailTemplateRenderer` for rendering
+- Uses `report_ready.html` template (extends `base_email.html`)
 
-#### Task 6.2: Email Service
-
-Implement `EmailService` class with:
-- `send_report_email(recipients: list[str], report_path: str, report_name: str)` - Send report notification
-- `send_report_failure_notification(admin_email: str, schedule_id: int, error: str)` - Alert on failure
-
-Email templates:
-- Report delivery: Subject, body with download link, expiry notice
-- Failure notification: Error details, schedule info
+**No separate scheduler instance needed.** The report job runs on the same `AsyncIOScheduler` as the email notification jobs. No changes to `main.py` were required.
 
 ---
 
@@ -1252,6 +1243,19 @@ Pre-deployment verification steps to ensure the system is production-ready.
 - [ ] Download and verify JSON output
 - [ ] Verify S3 file stored in correct path
 - [ ] Verify `generated_report` record status is `completed`
+
+---
+
+## 16. Known Limitations
+
+| Limitation | Impact | Status |
+|------------|--------|--------|
+| **`s3_destination` field defined but not used** | S3 delivery is not implemented; the field exists in `scheduled_report` and `CreateScheduleRequest` but is never acted on. Only email delivery is functional. | Open — implement when S3 delivery is needed |
+| **No retry/backoff for transient failures** | When a scheduled report generation fails, `next_run_at` advances to the next cycle. Transient failures (e.g., temporary DB outage) are not retried within the same cycle. | Open — add retry logic if transient failures become common |
+| **`invoice_direction` in API responses** | The field is persisted on creation and now returned in `GET /api/reports/generated` and `GET /api/reports/generated/{id}` responses. | Fixed (Round 2 remediation) |
+| **Report-ready emails logged to `email_log`** | Scheduled report delivery emails are now recorded in `email_log` for audit trail, providing visibility in the notification email history tab. | Fixed (Round 2 remediation) |
+| **Event loop blocking resolved** | Sync DB queries, PDF rendering, S3 uploads, and SES sends in scheduler jobs are now offloaded to thread pool via `asyncio.to_thread()`. | Fixed (Round 2 remediation) |
+| **Report scheduler row locking** | `get_due_schedules()` now uses `FOR UPDATE OF sr SKIP LOCKED` to prevent double-processing in concurrent instances. | Fixed (Round 2 remediation) |
 
 ---
 

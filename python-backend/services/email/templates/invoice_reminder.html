@@ -1,0 +1,38 @@
+{% extends "base_email.html" %}
+
+{% block header_subtitle %}Payment Reminder{% endblock %}
+
+{% block content %}
+<p>Dear {{ counterparty_name }},</p>
+
+<p>This is a friendly reminder that invoice <strong>{{ invoice_number }}</strong> is now
+<strong>{{ days_overdue }} days overdue</strong>.</p>
+
+<table class="info-table">
+    <tr>
+        <td>Invoice Number</td>
+        <td>{{ invoice_number }}</td>
+    </tr>
+    <tr>
+        <td>Amount Due</td>
+        <td>{{ total_amount | format_currency }}</td>
+    </tr>
+    <tr>
+        <td>Original Due Date</td>
+        <td>{{ due_date | format_date }}</td>
+    </tr>
+    <tr>
+        <td>Days Overdue</td>
+        <td>{{ days_overdue }}</td>
+    </tr>
+</table>
+
+<p>This is reminder <strong>{{ reminder_count }}</strong> of <strong>{{ max_reminders }}</strong>.</p>
+
+{% if submission_url %}
+<p>Please confirm payment or provide an update:</p>
+<a href="{{ submission_url }}" class="cta-button">Confirm Payment / Provide Update</a>
+{% endif %}
+
+<p>Regards,<br/>{{ sender_name }}</p>
+{% endblock %}

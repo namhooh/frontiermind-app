@@ -53,13 +53,22 @@ CANONICAL_SCHEMAS = {
             {"name": "scheduled_outage_notice_days", "type": "number", "role": "C", "required": False,
              "aliases": ["notice_days", "advance_notice_days"],
              "description": "Advance notice required for scheduled outages"},
+            {"name": "available_energy_method", "type": "string", "role": "FD", "required": False,
+             "aliases": ["available_energy_formula", "deemed_energy_method"],
+             "description": "Available energy calculation method: irradiance_interval_adjusted, monthly_average_irradiance, fixed_deemed, none"},
+            {"name": "irradiance_threshold_wm2", "type": "number", "role": "FI", "required": False,
+             "aliases": ["irradiance_threshold", "normal_operation_threshold"],
+             "description": "Irradiance threshold (W/m2) for qualifying Normal Operation intervals (e.g., 100 W/m2)"},
+            {"name": "interval_minutes", "type": "number", "role": "C", "required": False,
+             "aliases": ["reading_interval", "data_interval"],
+             "description": "Meter reading interval in minutes (e.g., 15 for 15-minute intervals)"},
         ]
     },
     "PERFORMANCE_GUARANTEE": {
         "fields": [
             {"name": "variant", "type": "string", "role": "C", "required": False,
              "aliases": ["guarantee_type", "performance_type"],
-             "description": "Type: performance_ratio, capacity_factor, annual_production"},
+             "description": "Type: performance_ratio, capacity_factor, energy_output"},
             {"name": "threshold", "type": "number", "role": "T", "required": True,
              "aliases": ["threshold_percent", "guaranteed_performance_ratio_percent", "guaranteed_capacity_factor_percent"],
              "description": "Guaranteed performance threshold"},
@@ -81,6 +90,12 @@ CANONICAL_SCHEMAS = {
             {"name": "performance_ratio_schedule", "type": "list", "role": "S", "required": False,
              "aliases": ["pr_schedule", "monthly_pr_targets"],
              "description": "Monthly or periodic performance ratio targets (list of {month, target_percent} objects)"},
+            {"name": "shortfall_formula_type", "type": "string", "role": "FD", "required": False,
+             "aliases": ["shortfall_method", "shortfall_calculation"],
+             "description": "Shortfall payment formula: price_differential, fixed_rate_per_kwh, capacity_adjusted, none"},
+            {"name": "shortfall_excused_events", "type": "list", "role": "S", "required": False,
+             "aliases": ["shortfall_exceptions", "liability_exceptions"],
+             "description": "Events that excuse shortfall liability (e.g., customer acts, force majeure, manufacturer claims)"},
         ]
     },
     "PRICING": {

@@ -1027,14 +1027,14 @@ Policy Pattern (applied to all):
 
 **Changes:**
 
-**billing_period calendar (migration 033):**
+**billing_period calendar (migration 030):**
 - Added `UNIQUE(start_date, end_date)` constraint on `billing_period`
 - Seeded 48 months: January 2024 through December 2027
 - Uses `ON CONFLICT (start_date, end_date) DO NOTHING` — preserves existing ID=1 row from migration 021
 - Covers historical CBE data (2024), current operations (2025-2026), and forecast periods (2027)
 - Fixes: ingestion of non-January data previously got NULL billing_period_id FK, collapsing via COALESCE(-1) dedup index
 
-**generated_report.invoice_direction (migration 034):**
+**generated_report.invoice_direction (migration 031):**
 - Added nullable `invoice_direction` column (reuses existing `invoice_direction` enum from migration 022)
 - NULL means "all directions" — backward compatible with existing reports
 - Enables the report generation pipeline to persist and use direction filtering:
@@ -1072,5 +1072,219 @@ Policy Pattern (applied to all):
 - No application code changes required — the loader's `ON CONFLICT DO NOTHING` now has a conflict target
 - Pre-migration dedup query included in migration comments for environments with existing duplicate rows
 - COALESCE ensures NULL site/device IDs are treated as equal for dedup purposes
+
+---
+
+### v8.0 - 2026-02-15 (Email Notification Engine)
+
+**Description:** Automated email notification system with scheduling, template management,
+and token-based external submission collection.
+
+**Migrations:**
+- `database/migrations/032_email_notification_engine.sql`
+
+**New Enums:**
+- `email_schedule_type`: `invoice_reminder`, `invoice_initial`, `invoice_escalation`, `compliance_alert`, `meter_data_missing`, `report_ready`, `custom`
+- `email_status`: `pending`, `sending`, `delivered`, `bounced`, `failed`, `suppressed`
+- `submission_token_status`: `active`, `used`, `expired`, `revoked`
+
+**Extended Enums:**
+- `audit_action_type`: Added `EMAIL_SENT`, `EMAIL_FAILED`, `SUBMISSION_RECEIVED`, `SUBMISSION_TOKEN_CREATED`
+
+**New Tables:**
+
+**email_template** - Reusable Jinja2 email templates
+- `id`, `organization_id`, `email_schedule_type`, `name`, `description`
+- `subject_template`, `body_html`, `body_text` (Jinja2 template strings)
+- `available_variables` (JSONB), `is_system`, `is_active`
+- Unique index on `(organization_id, name)`
+
+**email_notification_schedule** - When/what/who to email
+- `id`, `organization_id`, `email_template_id`, `name`, `email_schedule_type`
+- `report_frequency` (reuses `report_frequency` enum), `day_of_month`, `time_of_day`, `timezone`
+- `conditions` (JSONB), `max_reminders`, `escalation_after`
+- `include_submission_link`, `submission_fields` (JSONB)
+- `next_run_at` (calculated by trigger using `calculate_next_run_time()` from migration 018)
+- Scoping FKs: `project_id`, `contract_id`, `counterparty_id`
+
+**email_log** - Every email sent
+- `id`, `organization_id`, `email_notification_schedule_id`, `email_template_id`
+- `recipient_email`, `recipient_name`, `subject`, `email_status`
+- `ses_message_id`, `reminder_count`, `invoice_header_id`, `submission_token_id`
+- `error_message`, `bounce_type`, `sent_at`, `delivered_at`, `bounced_at`
+
+**submission_token** - Secure tokens for external data collection
+- `id`, `organization_id`, `token_hash` (SHA-256, unique indexed)
+- `submission_fields` (JSONB), `submission_token_status`, `max_uses`, `use_count`, `expires_at`
+- Linked entity FKs: `invoice_header_id`, `counterparty_id`, `email_log_id`
+
+**submission_response** - Data submitted by counterparties
+- `id`, `organization_id`, `submission_token_id`
+- `response_data` (JSONB), `submitted_by_email`, `ip_address`, `invoice_header_id`
+
+**Helper Functions:**
+- `update_email_template_timestamp()` - Timestamp trigger for email_template
+- `update_email_schedule_next_run()` - Reuses `calculate_next_run_time()` from migration 018
+
+**RLS Policies:**
+- All 5 tables have RLS enabled
+- SELECT: `is_org_member(organization_id)` for authenticated role
+- ALL: `is_org_admin(organization_id)` for admin modifications
+- Service role: full access on all tables
+
+**Seed Data:**
+- 4 system email templates seeded per organization: Invoice Delivery, Payment Reminder, Invoice Escalation, Compliance Alert
+
+---
+
+### v9.0 - 2026-02-17 (Project Onboarding — COD Data Capture, Amendment Versioning & Reference Price)
+
+**Description:** Redesigned migration 033 with amendment versioning, reference price table (renamed from grid_reference_price), and cleanup of dropped tables (project_document, project_onboarding_snapshot). Removes received_invoice_line_item ALTER (charge_type/is_tax/tou_bucket) in favor of invoice_line_item_type seeds. Adds contract amendment tracking with supersedes chains and is_current semantics on clause and clause_tariff.
+
+**Reference:** `IMPLEMENTATION_GUIDE_PROJECT_ONBOARDING.md`
+
+**Migrations:**
+- `database/migrations/033_project_onboarding.sql` - Combined migration (ALTERs + CREATEs + seeds + RLS + amendment tracking)
+
+**ETL Script:**
+- `database/scripts/onboard_project.sql` - Staged ETL with batch validation and post-load assertions
+
+**Key Changes:**
+
+**A. ALTER Existing Tables**
+
+**Extended project table:**
+- `external_project_id` - VARCHAR(50) — Client-defined project identifier
+- `sage_id` - VARCHAR(50) — Finance/ERP system reference
+- `country` - VARCHAR(100) — Physical site location
+- `cod_date` - DATE — Commercial Operations Date
+- `installed_dc_capacity_kwp` - DECIMAL — DC capacity in kWp
+- `installed_ac_capacity_kw` - DECIMAL — AC capacity in kW
+- `installation_location_url` - TEXT — Google Maps URL
+- New unique index: `uq_project_org_external(organization_id, external_project_id)`
+
+**Extended contract table:**
+- `external_contract_id` - VARCHAR(50) — Client-defined contract identifier
+- `contract_term_years` - INTEGER — PPA duration
+- `interconnection_voltage_kv` - DECIMAL — Grid interconnection voltage
+- `has_amendments` - BOOLEAN DEFAULT false — Whether contract has amendments (replaces `amendments_post_ppa` TEXT)
+- `payment_security_required` - BOOLEAN — Whether payment security is required
+- `payment_security_details` - TEXT — Payment security details
+- `ppa_confirmed_uploaded` - BOOLEAN — Document upload flag
+- `agreed_fx_rate_source` - VARCHAR(255) — Contractual FX reference
+- **Renamed:** `updated_by` → `created_by` (UUID of auth.users who created the record)
+- New unique index: `uq_contract_project_external(project_id, external_contract_id)`
+
+**Extended counterparty table:**
+- `registered_name` - VARCHAR(255) — Official registered company name (legally distinct from trading name)
+- `registration_number` - VARCHAR(100) — Company registration number
+- `tax_pin` - VARCHAR(100) — Tax identification number
+- `registered_address` - TEXT — Registered address from Notices clause
+
+**Extended asset table:**
+- `capacity` - DECIMAL — Rated capacity
+- `capacity_unit` - VARCHAR(20) — Unit: kWp, kW, kWh, kVA
+- `quantity` - INTEGER DEFAULT 1 — Count of units
+
+**Extended meter table:**
+- `serial_number` - VARCHAR(100) — Billing meter serial number
+- `location_description` - TEXT — Installation location
+- `metering_type` - VARCHAR(20) — net or export_only (separate dimension from meter_type)
+
+**Extended production_forecast table:**
+- `forecast_poa_irradiance` - DECIMAL — POA irradiance from PVSyst
+
+**Extended production_guarantee table:**
+- `shortfall_cap_usd` - DECIMAL — Annual shortfall payment cap in USD
+- `shortfall_cap_fx_rule` - VARCHAR(255) — FX conversion rule for the cap
+
+**Extended clause table (amendment versioning):**
+- `contract_amendment_id` - BIGINT REFERENCES contract_amendment(id) — NULL for original clauses
+- `supersedes_clause_id` - BIGINT REFERENCES clause(id) — Version chain pointer
+- `is_current` - BOOLEAN NOT NULL DEFAULT true — Active version flag
+- `change_action` - change_action ENUM — ADDED, MODIFIED, REMOVED (NULL for originals)
+
+**Extended clause_tariff table (amendment versioning):**
+- `contract_amendment_id` - BIGINT REFERENCES contract_amendment(id)
+- `supersedes_tariff_id` - BIGINT REFERENCES clause_tariff(id)
+- `version` - INTEGER NOT NULL DEFAULT 1
+- `is_current` - BOOLEAN NOT NULL DEFAULT true
+- `change_action` - change_action ENUM
+
+**B. CREATE New Tables**
+
+**New Table: contract_amendment**
+- `id` - BIGSERIAL PRIMARY KEY
+- `contract_id` - BIGINT NOT NULL REFERENCES contract(id)
+- `organization_id` - BIGINT NOT NULL REFERENCES organization(id)
+- `amendment_number` - INTEGER NOT NULL
+- `amendment_date` - DATE NOT NULL
+- `effective_date` - DATE
+- `description` - TEXT
+- `file_path` - TEXT
+- `source_metadata` - JSONB DEFAULT '{}'
+- UNIQUE(contract_id, amendment_number)
+
+**New Table: reference_price** (renamed from grid_reference_price)
+- `id` - BIGSERIAL PRIMARY KEY
+- `project_id` - BIGINT NOT NULL REFERENCES project(id)
+- `organization_id` - BIGINT NOT NULL REFERENCES organization(id)
+- `operating_year` - INTEGER NOT NULL
+- `period_start` - DATE NOT NULL
+- `period_end` - DATE NOT NULL
+- `calculated_grp_per_kwh` - DECIMAL — GRP in local currency per kWh
+- `currency_id` - BIGINT REFERENCES currency(id)
+- `total_variable_charges` - DECIMAL
+- `total_kwh_invoiced` - DECIMAL
+- `verification_status` - verification_status ENUM — pending, jointly_verified, disputed, estimated
+- `verified_at` - TIMESTAMPTZ
+- UNIQUE(project_id, operating_year)
+
+**New Table: onboarding_preview** (kept from original)
+- Server-side preview state for two-phase onboarding workflow
+
+**Dropped tables** (removed from migration):
+- `project_document` — Not needed; document tracking deferred
+- `project_onboarding_snapshot` — Not needed; audit trail via contract_amendment
+
+**C. New Enum Types**
+- `verification_status` — ('pending', 'jointly_verified', 'disputed', 'estimated')
+- `change_action` — ('ADDED', 'MODIFIED', 'REMOVED')
+
+**D. Seed Data**
+- **asset_type seeds:** pv_module, inverter, bess, pcs, generator, transformer, ppc, data_logger
+- **invoice_line_item_type seeds:** VARIABLE_ENERGY, DEMAND, FIXED, TAX (replaces charge_type/is_tax/tou_bucket columns on received_invoice_line_item)
+
+**E. Triggers**
+- `trg_clause_supersede()` — When inserting a clause with supersedes_clause_id, auto-flips prior row is_current=false and sets contract.has_amendments=true
+- `trg_clause_tariff_supersede()` — Same pattern for clause_tariff
+
+**F. Views**
+- `clause_current_v` — SELECT * FROM clause WHERE is_current = true
+- `clause_tariff_current_v` — SELECT * FROM clause_tariff WHERE is_current = true
+
+**G. Unique Indexes**
+- `uq_clause_current_per_type_section` — Partial unique on clause(contract_id, clause_type_id, section_ref) WHERE is_current = true
+- `uq_clause_tariff_current_group_validity` — Partial unique scoped to is_current = true (replaces non-versioned index)
+- `uq_meter_project_serial` — meter(project_id, serial_number) WHERE serial_number IS NOT NULL
+- `uq_counterparty_type_name` — counterparty(counterparty_type_id, LOWER(name))
+- `uq_invoice_line_item_type_code` — invoice_line_item_type(code)
+
+**H. Python Backend Changes**
+- `db/contract_repository.py`: Renamed `updated_by` → `created_by` in contract SELECT
+- `db/rules_repository.py`: Added `AND c.is_current = true` filter to evaluable clause query
+- `services/calculations/grid_reference_price.py`: Refactored to use `invoice_line_item_type_code` instead of charge_type/is_tax/tou_bucket
+- `services/onboarding/onboarding_service.py`: Removed project_document from count, removed document staging
+- `models/onboarding.py`: Removed DocumentChecklistItem, removed documents fields
+- `services/onboarding/excel_parser.py`: Removed _extract_documents() method + import
+- **New:** `services/amendments/__init__.py` — Package init
+- **New:** `services/amendments/amendment_diff.py` — Clause/tariff version comparison and amendment summary
+
+**Design Notes:**
+- Amendment versioning uses supersedes chains + is_current flags (not separate history tables)
+- Triggers enforce cross-contract validation and auto-maintain contract.has_amendments
+- metering_type (net/export_only) kept separate from meter_type (REVENUE/PRODUCTION/IRRADIANCE)
+- GRP charge classification moved from received_invoice_line_item columns to invoice_line_item_type FK
+- project_document and project_onboarding_snapshot dropped — not needed for current workflow
 
 ---

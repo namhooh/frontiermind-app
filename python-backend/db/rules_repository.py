@@ -53,6 +53,7 @@ class RulesRepository:
             LEFT JOIN clause_category cc ON cc.id = c.clause_category_id
             WHERE c.contract_id = %s
               AND c.normalized_payload IS NOT NULL
+              AND c.is_current = true
             ORDER BY c.id
         """
 

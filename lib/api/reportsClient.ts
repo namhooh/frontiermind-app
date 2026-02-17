@@ -38,8 +38,9 @@ export type FileFormat = 'csv' | 'xlsx' | 'json' | 'pdf'
 /** Report generation lifecycle status */
 export type ReportStatus = 'pending' | 'processing' | 'completed' | 'failed'
 
-/** Frequency options for scheduled reports */
-export type ReportFrequency = 'monthly' | 'quarterly' | 'annual' | 'on_demand'
+/** Frequency options for scheduled reports (from shared types) */
+import type { ReportFrequency as _ReportFrequency } from './types'
+export type ReportFrequency = _ReportFrequency
 
 /** Identifies how a report was triggered */
 export type GenerationSource = 'on_demand' | 'scheduled'
@@ -95,6 +96,7 @@ export interface GeneratedReport {
   download_count: number
   processing_time_ms?: number
   processing_error?: string
+  invoice_direction?: string
   created_at: string
   expires_at?: string
 }
@@ -193,7 +195,7 @@ export interface UpdateTemplateRequest {
 /** Request to create a scheduled report */
 export interface CreateScheduleRequest {
   name: string
-  template_id: number
+  report_template_id: number
   report_frequency: ReportFrequency
   day_of_month?: number
   time_of_day?: string

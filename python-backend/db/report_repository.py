@@ -392,7 +392,7 @@ class ReportRepository:
                         requested_by, processing_started_at, processing_completed_at,
                         processing_error, processing_time_ms, record_count,
                         summary_data, download_count, expires_at,
-                        archived_at, archived_path, created_at
+                        archived_at, archived_path, invoice_direction, created_at
                     FROM generated_report
                     WHERE id = %s AND organization_id = %s
                     """,
@@ -462,6 +462,10 @@ class ReportRepository:
                     where_parts.append("contract_id = %s")
                     params.append(filters['contract_id'])
 
+                if filters.get('template_id'):
+                    where_parts.append("report_template_id = %s")
+                    params.append(filters['template_id'])
+
                 where_clause = " AND ".join(where_parts)
 
                 # Get total count
@@ -480,7 +484,7 @@ class ReportRepository:
                         project_id, contract_id, billing_period_id,
                         file_format, file_path, file_size_bytes,
                         processing_time_ms, record_count, summary_data,
-                        download_count, expires_at, created_at
+                        download_count, expires_at, invoice_direction, created_at
                     FROM generated_report
                     WHERE {where_clause}
                     ORDER BY created_at DESC
@@ -874,6 +878,7 @@ class ReportRepository:
                       AND sr.next_run_at IS NOT NULL
                       AND sr.next_run_at <= NOW()
                     ORDER BY sr.next_run_at
+                    FOR UPDATE OF sr SKIP LOCKED
                     """
                 )
                 schedules = [dict(row) for row in cursor.fetchall()]

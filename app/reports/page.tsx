@@ -7,7 +7,7 @@
  * Provides report history, filtering, and generation capabilities.
  */
 
-import { useState, useMemo } from 'react'
+import { useState, useEffect, useMemo, useRef } from 'react'
 import { FileText, Plus, ArrowLeft } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/app/components/ui/button'
@@ -15,6 +15,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/app/components/ui/ca
 import { ReportsList } from './components/ReportsList'
 import { GenerateReportDialog } from './components/GenerateReportDialog'
 import { ReportsClient, ReportsAPIError } from '@/lib/api'
+import { createClient } from '@/lib/supabase/client'
 import type { GenerateReportRequest } from '@/lib/api'
 
 export default function ReportsPage() {
@@ -23,12 +24,37 @@ export default function ReportsPage() {
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [error, setError] = useState<string | null>(null)
 
+  const supabase = useRef(createClient())
+  const [organizationId, setOrganizationId] = useState<number | undefined>()
+
+  useEffect(() => {
+    async function loadOrg() {
+      const { data: { user } } = await supabase.current.auth.getUser()
+      if (user) {
+        const { data } = await supabase.current
+          .from('role')
+          .select('organization_id')
+          .eq('user_id', user.id)
+          .eq('is_active', true)
+          .limit(1)
+          .single()
+        if (data) setOrganizationId(data.organization_id)
+      }
+    }
+    loadOrg()
+  }, [])
+
   const reportsClient = useMemo(
     () =>
       new ReportsClient({
         enableLogging: process.env.NODE_ENV === 'development',
+        getAuthToken: async () => {
+          const { data: { session } } = await supabase.current.auth.getSession()
+          return session?.access_token ?? null
+        },
+        organizationId,
       }),
-    []
+    [organizationId]
   )
 
   const handleGenerateReport = async (request: GenerateReportRequest) => {
@@ -109,7 +135,7 @@ export default function ReportsPage() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ReportsList refreshTrigger={refreshTrigger} />
+            <ReportsList refreshTrigger={refreshTrigger} reportsClient={reportsClient} />
           </CardContent>
         </Card>
       </main>

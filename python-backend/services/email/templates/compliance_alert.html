@@ -1,0 +1,26 @@
+{% extends "base_email.html" %}
+
+{% block header_subtitle %}Compliance Alert{% endblock %}
+
+{% block content %}
+<p>Dear {{ counterparty_name }},</p>
+
+<p>A compliance issue has been detected for contract <strong>{{ contract_name }}</strong>.</p>
+
+<table class="info-table">
+    <tr>
+        <td>Contract</td>
+        <td>{{ contract_name }}</td>
+    </tr>
+    <tr>
+        <td>Alert Type</td>
+        <td>{{ alert_type }}</td>
+    </tr>
+</table>
+
+<p><strong>Details:</strong> {{ alert_details }}</p>
+
+<p>Please review and take appropriate action at your earliest convenience.</p>
+
+<p>Regards,<br/>{{ sender_name }}</p>
+{% endblock %}

@@ -1,0 +1,37 @@
+{% extends "base_email.html" %}
+
+{% block header_subtitle %}Invoice Escalation{% endblock %}
+
+{% block content %}
+<p>Dear {{ counterparty_name }},</p>
+
+<p>This is an <strong>escalation notice</strong> regarding invoice <strong>{{ invoice_number }}</strong>,
+which is now <strong>{{ days_overdue }} days overdue</strong>.</p>
+
+<table class="info-table">
+    <tr>
+        <td>Invoice Number</td>
+        <td>{{ invoice_number }}</td>
+    </tr>
+    <tr>
+        <td>Amount Due</td>
+        <td>{{ total_amount | format_currency }}</td>
+    </tr>
+    <tr>
+        <td>Original Due Date</td>
+        <td>{{ due_date | format_date }}</td>
+    </tr>
+    <tr>
+        <td>Days Overdue</td>
+        <td>{{ days_overdue }}</td>
+    </tr>
+</table>
+
+<p>Previous reminders have been sent without response. Please address this matter urgently.</p>
+
+{% if submission_url %}
+<a href="{{ submission_url }}" class="cta-button">Provide Payment Update</a>
+{% endif %}
+
+<p>Regards,<br/>{{ sender_name }}</p>
+{% endblock %}

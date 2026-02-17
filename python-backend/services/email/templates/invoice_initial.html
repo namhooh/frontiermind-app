@@ -1,0 +1,35 @@
+{% extends "base_email.html" %}
+
+{% block header_subtitle %}Invoice Delivery{% endblock %}
+
+{% block content %}
+<p>Dear {{ counterparty_name }},</p>
+
+<p>Please find the details for invoice <strong>{{ invoice_number }}</strong> below.</p>
+
+<table class="info-table">
+    <tr>
+        <td>Invoice Number</td>
+        <td>{{ invoice_number }}</td>
+    </tr>
+    <tr>
+        <td>Period</td>
+        <td>{{ period_start | format_date }} &ndash; {{ period_end | format_date }}</td>
+    </tr>
+    <tr>
+        <td>Amount Due</td>
+        <td>{{ total_amount | format_currency }}</td>
+    </tr>
+    <tr>
+        <td>Due Date</td>
+        <td>{{ due_date | format_date }}</td>
+    </tr>
+</table>
+
+{% if submission_url %}
+<p>Please confirm receipt or provide your PO number:</p>
+<a href="{{ submission_url }}" class="cta-button">Submit PO / Confirm Receipt</a>
+{% endif %}
+
+<p>Regards,<br/>{{ sender_name }}</p>
+{% endblock %}

@@ -175,7 +175,7 @@ class CreateScheduleRequest(BaseModel):
     """Request to create a scheduled report."""
 
     name: str = Field(..., min_length=1, max_length=255, description="Schedule name")
-    template_id: int = Field(..., description="Report template to use")
+    report_template_id: int = Field(..., description="Report template to use")
     report_frequency: ReportFrequency = Field(..., description="How often to run")
     day_of_month: Optional[int] = Field(
         None,
@@ -208,7 +208,7 @@ class CreateScheduleRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "name": "Monthly Invoice Report",
-                "template_id": 1,
+                "report_template_id": 1,
                 "report_frequency": "monthly",
                 "day_of_month": 1,
                 "time_of_day": "06:00:00",
@@ -291,6 +291,7 @@ class GeneratedReportResponse(BaseModel):
     download_count: int = 0
     processing_time_ms: Optional[int] = None
     processing_error: Optional[str] = None
+    invoice_direction: Optional[str] = None
     created_at: datetime
     expires_at: Optional[datetime] = None
 

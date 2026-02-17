@@ -6,6 +6,7 @@ This is the main entry point for the Python backend that handles:
 - Clause extraction using AI
 - Rules engine for compliance monitoring
 - Liquidated damages calculations
+- Email notifications and scheduling
 """
 
 from dotenv import load_dotenv
@@ -14,6 +15,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Now import modules that depend on environment variables
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
@@ -31,6 +33,12 @@ from api.entities import router as entities_router
 from api.invoices import router as invoices_router
 from api.pii_redaction_temp import router as pii_redaction_temp_router
 from api.oauth import router as oauth_router
+from api.notifications import router as notifications_router
+from api.submissions import router as submissions_router
+from api.onboarding import router as onboarding_router
+
+# Import email notification scheduler
+from services.email import scheduler as email_scheduler
 
 # Import rate limiting middleware
 from middleware.rate_limiter import setup_rate_limiting, limiter, limit_health
@@ -39,6 +47,25 @@ from middleware.rate_limiter import setup_rate_limiting, limiter, limit_health
 logging.basicConfig(level=os.getenv("LOG_LEVEL", "INFO").upper())
 logger = logging.getLogger(__name__)
 
+
+# Lifespan handler for startup/shutdown events
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup: start email notification scheduler
+    try:
+        email_scheduler.start()
+        logger.info("Email notification scheduler started")
+    except Exception as e:
+        logger.warning(f"Email scheduler failed to start: {e}")
+    yield
+    # Shutdown: stop scheduler
+    try:
+        email_scheduler.shutdown()
+        logger.info("Email notification scheduler stopped")
+    except Exception as e:
+        logger.warning(f"Email scheduler shutdown error: {e}")
+
+
 # Initialize FastAPI application
 app = FastAPI(
     title="Energy Contract Compliance API",
@@ -46,6 +73,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/docs",
     redoc_url="/redoc",
+    lifespan=lifespan,
 )
 
 # Setup rate limiting (before other middleware)
@@ -75,6 +103,9 @@ app.include_router(entities_router)
 app.include_router(invoices_router)
 app.include_router(pii_redaction_temp_router)
 app.include_router(oauth_router)
+app.include_router(notifications_router)
+app.include_router(submissions_router)
+app.include_router(onboarding_router)
 
 
 @app.get("/", response_model=Dict[str, str])

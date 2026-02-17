@@ -783,14 +783,14 @@ async def create_scheduled_report(
 
     try:
         # Verify template exists
-        template = report_repository.get_template(schedule_data.template_id, org_id)
+        template = report_repository.get_template(schedule_data.report_template_id, org_id)
         if not template:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail={
                     "success": False,
                     "error": "NotFound",
-                    "message": f"Template {schedule_data.template_id} not found",
+                    "message": f"Template {schedule_data.report_template_id} not found",
                 },
             )
 

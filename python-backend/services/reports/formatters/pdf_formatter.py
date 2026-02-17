@@ -5,8 +5,7 @@ Renders HTML templates with data and converts to PDF.
 """
 
 import logging
-from datetime import datetime, date
-from decimal import Decimal
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any
 
@@ -18,6 +17,7 @@ logger = logging.getLogger(__name__)
 # Lazy import dependencies
 try:
     from jinja2 import Environment, FileSystemLoader, select_autoescape
+    from utils.jinja_filters import register_filters
     JINJA2_AVAILABLE = True
 except ImportError:
     JINJA2_AVAILABLE = False
@@ -72,10 +72,8 @@ class PDFFormatter(BaseFormatter):
             autoescape=select_autoescape(['html', 'xml'])
         )
 
-        # Register custom filters
-        self._env.filters['format_currency'] = self._format_currency
-        self._env.filters['format_date'] = self._format_date
-        self._env.filters['format_number'] = self._format_number
+        # Register custom filters from shared utility
+        register_filters(self._env)
 
     def get_file_format(self) -> FileFormat:
         """Return PDF file format."""
@@ -215,37 +213,3 @@ class PDFFormatter(BaseFormatter):
         }
         return labels.get(report_type, report_type.value)
 
-    @staticmethod
-    def _format_currency(value: Any, symbol: str = "$") -> str:
-        """Format a value as currency."""
-        if value is None:
-            return "-"
-        try:
-            if isinstance(value, Decimal):
-                return f"{symbol}{value:,.2f}"
-            return f"{symbol}{float(value):,.2f}"
-        except (ValueError, TypeError):
-            return str(value)
-
-    @staticmethod
-    def _format_date(value: Any, fmt: str = "%Y-%m-%d") -> str:
-        """Format a date value."""
-        if value is None:
-            return "-"
-        if isinstance(value, str):
-            return value
-        if isinstance(value, (datetime, date)):
-            return value.strftime(fmt)
-        return str(value)
-
-    @staticmethod
-    def _format_number(value: Any, decimals: int = 2) -> str:
-        """Format a number with thousand separators."""
-        if value is None:
-            return "-"
-        try:
-            if isinstance(value, Decimal):
-                return f"{value:,.{decimals}f}"
-            return f"{float(value):,.{decimals}f}"
-        except (ValueError, TypeError):
-            return str(value)

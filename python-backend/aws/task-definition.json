@@ -42,6 +42,10 @@
         {
           "name": "PORT",
           "value": "8080"
+        },
+        {
+          "name": "APP_BASE_URL",
+          "value": "https://frontiermind.app"
         }
       ],
       "secrets": [
@@ -64,6 +68,10 @@
         {
           "name": "ENCRYPTION_KEY",
           "valueFrom": "arn:aws:secretsmanager:us-east-1:724772070642:secret:frontiermind/backend/encryption-key"
+        },
+        {
+          "name": "SES_SENDER_EMAIL",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:724772070642:secret:frontiermind/backend/ses-sender-email"
         }
       ],
       "logConfiguration": {

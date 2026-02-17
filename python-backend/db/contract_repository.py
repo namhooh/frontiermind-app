@@ -470,7 +470,7 @@ class ContractRepository:
                         contract_status_id,
                         created_at,
                         updated_at,
-                        updated_by,
+                        created_by,
                         version
                     FROM contract
                     WHERE id = %s

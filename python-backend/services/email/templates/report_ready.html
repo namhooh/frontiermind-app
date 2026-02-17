@@ -1,0 +1,43 @@
+{% extends "base_email.html" %}
+
+{% block header_subtitle %}Scheduled Report{% endblock %}
+
+{% block content %}
+<p>Your scheduled report is ready for download.</p>
+
+<table class="info-table">
+    <tr>
+        <td>Report</td>
+        <td>{{ report_name }}</td>
+    </tr>
+    <tr>
+        <td>Schedule</td>
+        <td>{{ schedule_name }}</td>
+    </tr>
+    <tr>
+        <td>Format</td>
+        <td>{{ file_format }}</td>
+    </tr>
+    {% if record_count %}
+    <tr>
+        <td>Records</td>
+        <td>{{ record_count }}</td>
+    </tr>
+    {% endif %}
+    {% if file_size_display %}
+    <tr>
+        <td>File Size</td>
+        <td>{{ file_size_display }}</td>
+    </tr>
+    {% endif %}
+</table>
+
+<p>
+    <a href="{{ download_url }}" class="cta-button">Download Report</a>
+</p>
+
+<p style="font-size: 13px; color: #64748b;">
+    This download link expires in {{ expiry_hours }} hours.
+    After that, you can download the report from the FrontierMind dashboard.
+</p>
+{% endblock %}

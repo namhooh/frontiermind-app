@@ -102,7 +102,9 @@
       "Bash(aws lambda get-function:*)",
       "Bash(npx next lint:*)",
       "Bash(docker builder prune:*)",
-      "Bash(docker context:*)"
+      "Bash(docker context:*)",
+      "mcp__postgres__query",
+      "Bash(source:*)"
     ]
   }
 }

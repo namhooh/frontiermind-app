@@ -3,7 +3,7 @@
 
 Quick links: [Directory Structure](#directory-structure) | [Workflows](#common-workflows) | [Scripts](#scripts-reference) | [Troubleshooting](#troubleshooting)
 
-Last updated: 2026-01-31
+Last updated: 2026-02-17
 
 ---
 
@@ -73,6 +73,8 @@ database/
 │   ├── 029_production_forecast_guarantee.sql          # Phase 7.0: Production forecast (monthly) and guarantee (annual)
 │   ├── 030_seed_billing_period_calendar.sql           # Phase 7.1: Full billing period calendar (Jan 2024 - Dec 2027)
 │   ├── 031_generated_report_invoice_direction.sql     # Phase 7.1: Add invoice_direction to generated_report
+│   ├── 032_email_notification_engine.sql              # Phase 8.0: Email notifications, scheduling, submission tokens
+│   ├── 033_project_onboarding.sql                     # Phase 9.0: COD data capture, amendment versioning, reference_price, contract_amendment, upsert indexes, preview table
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -97,7 +99,8 @@ database/
 ├── scripts/                               # Database management scripts
 │   ├── apply_schema.sh                    # Apply all migrations
 │   ├── create-phase-snapshot.sh           # Create schema snapshot
-│   └── load_test_data.sh                  # Load seed data
+│   ├── load_test_data.sh                  # Load seed data
+│   └── onboard_project.sql               # Staged ETL for COD project onboarding
 │
 ├── functions/                             # PostgreSQL functions (future)
 ├── views/                                 # Database views (future)
@@ -1016,6 +1019,35 @@ database/
 - Extended: `clause_tariff` with `tariff_structure_id`, `energy_sale_type_id`, `escalation_type_id`, `market_ref_currency_id`
 - Deferred energy calculation deferred to pricing calculator / rules engine (not a DB view)
 - Reference: `CBE_data_extracts/CBE_TO_FRONTIERMIND_MAPPING.md`
+
+**v8.0 (Email Notification Engine)** - Completed
+- Migration: `032_email_notification_engine.sql`
+- New: `email_template` — Jinja2 email templates per org (system + custom); uses `email_schedule_type` column
+- New: `email_notification_schedule` — Scheduling rules with conditions, escalation, submission links; uses `email_schedule_type` column
+- New: `email_log` — Full email delivery audit trail (SES integration)
+- New: `submission_token` — Secure SHA-256 hashed tokens for external data collection
+- New: `submission_response` — Counterparty-submitted data (PO numbers, payment confirmations)
+- New enums: `email_schedule_type`, `email_status`, `submission_token_status`
+- Extended: `audit_action_type` with EMAIL_SENT, EMAIL_FAILED, SUBMISSION_RECEIVED, SUBMISSION_TOKEN_CREATED
+- Reuses `calculate_next_run_time()` from migration 018 for schedule timing
+- Reuses `customer_contact` from migration 028 for recipient resolution
+- Backend: APScheduler in-process, AWS SES for delivery, Jinja2 templates
+- Frontend: `/notifications` page, `/submit/[token]` public submission page
+
+**v9.0 (Project Onboarding — COD Data Capture, Amendment Versioning)** - Completed
+- Migration: `033_project_onboarding.sql`
+- Extended: `project`, `contract`, `counterparty`, `asset`, `meter`, `production_forecast`, `production_guarantee`, `clause`, `clause_tariff`
+- New tables: `contract_amendment`, `reference_price`, `onboarding_preview`
+- New enums: `verification_status`, `change_action`
+- Amendment tracking: `is_current`, `supersedes_clause_id`, `contract_amendment_id` on clause/clause_tariff
+- Triggers: `trg_clause_supersede()`, `trg_clause_tariff_supersede()` for version chain integrity
+- Views: `clause_current_v`, `clause_tariff_current_v`
+- Renamed: `contract.updated_by` → `contract.created_by`
+- Dropped: `project_document`, `project_onboarding_snapshot`, `received_invoice_line_item` ALTERs (charge_type/is_tax/tou_bucket)
+- Seeded: `asset_type` (8 codes), `invoice_line_item_type` (4 GRP charge types)
+- ETL script: `database/scripts/onboard_project.sql`
+- Python: Amendment diff service, GRP calculator refactored for invoice_line_item_type_code
+- Reference: `IMPLEMENTATION_GUIDE_PROJECT_ONBOARDING.md`
 
 ---
 
