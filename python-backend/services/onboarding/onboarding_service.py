@@ -224,9 +224,71 @@ class OnboardingService:
         discrepancies: List[Discrepancy] = []
         low_confidence: List[Dict[str, Any]] = []
 
+        # Critical field completeness checks
+        critical_fields = {
+            "cod_date": excel.cod_date,
+            "customer_name": excel.customer_name,
+            "contract_term_years": excel.contract_term_years,
+            "installed_dc_capacity_kwp": excel.installed_dc_capacity_kwp,
+            "billing_currency": excel.billing_currency,
+            "base_rate": excel.base_rate,
+        }
+        for field, value in critical_fields.items():
+            if value is None:
+                discrepancies.append(Discrepancy(
+                    field=field,
+                    excel_value=None,
+                    pdf_value=getattr(ppa, field, None) if ppa else None,
+                    severity="error",
+                    explanation=(
+                        f"Critical field '{field}' not found in Excel. "
+                        f"Provide via override or fix the source file."
+                    ),
+                    recommended_value=getattr(ppa, field, None) if ppa else None,
+                    recommended_source="override",
+                ))
+
+        # Empty collections warnings (run for both PPA and Excel-only paths)
+        if not excel.contacts:
+            discrepancies.append(Discrepancy(
+                field="contacts",
+                severity="warning",
+                explanation="No customer contacts extracted — billing emails will be missing.",
+            ))
+        if not excel.meters:
+            discrepancies.append(Discrepancy(
+                field="meters",
+                severity="warning",
+                explanation="No meters extracted — meter readings cannot be linked.",
+            ))
+
+        # Data sparseness score
+        total_fields = 15
+        populated = sum(1 for v in [
+            excel.cod_date, excel.customer_name, excel.contract_term_years,
+            excel.installed_dc_capacity_kwp, excel.billing_currency, excel.base_rate,
+            excel.effective_date, excel.registered_name, excel.tax_pin,
+            excel.installed_ac_capacity_kw, excel.country, excel.contract_name,
+            excel.escalation_type, excel.discount_pct, excel.payment_security_required,
+        ] if v is not None)
+        if populated < total_fields * 0.5:
+            discrepancies.append(Discrepancy(
+                field="_data_completeness",
+                severity="error",
+                explanation=(
+                    f"Only {populated}/{total_fields} key fields extracted. "
+                    "Likely parsing the wrong sheet or template format mismatch."
+                ),
+            ))
+
         if ppa is None:
+            summary_parts = []
+            if discrepancies:
+                summary_parts.append(f"{len(discrepancies)} discrepancies found")
+            summary_parts.append("No PPA PDF provided — using Excel data only")
             return DiscrepancyReport(
-                summary="No PPA PDF provided — using Excel data only.",
+                discrepancies=discrepancies,
+                summary=". ".join(summary_parts) + ".",
             )
 
         # Contract term
@@ -291,6 +353,27 @@ class OnboardingService:
                         recommended_source="pdf",
                     ))
 
+        # Guarantee table completeness
+        if ppa.guarantee_table:
+            years = [g.operating_year for g in ppa.guarantee_table]
+            expected = list(range(1, max(years) + 1)) if years else []
+            missing = set(expected) - set(years)
+            if missing:
+                discrepancies.append(Discrepancy(
+                    field="guarantee_table",
+                    severity="warning",
+                    explanation=f"Guarantee table missing years: {sorted(missing)}",
+                ))
+
+        # COD vs effective_date coherence
+        if excel.cod_date and excel.effective_date:
+            if excel.effective_date > excel.cod_date:
+                discrepancies.append(Discrepancy(
+                    field="effective_date",
+                    severity="warning",
+                    explanation="Effective date is after COD — contract should start before operation.",
+                ))
+
         # Low confidence LLM extractions
         for field_name, score in ppa.confidence_scores.items():
             if score < 0.7:
@@ -347,7 +430,13 @@ class OnboardingService:
 
         # Build tariff lines
         tariff_lines = []
-        if excel.tariff_structure or excel.billing_currency:
+        has_tariff_data = any([
+            excel.tariff_structure,
+            excel.billing_currency,
+            excel.base_rate,
+            ppa and ppa.tariff and (ppa.tariff.solar_discount_pct or ppa.tariff.floor_rate),
+        ])
+        if has_tariff_data:
             tariff_line = {
                 "tariff_group_key": f"{overrides.external_contract_id}-MAIN",
                 "tariff_name": f"{excel.project_name or overrides.external_project_id} Main Tariff",
@@ -406,12 +495,12 @@ class OnboardingService:
             project_name=excel.project_name or overrides.external_project_id,
             country=excel.country,
             sage_id=excel.sage_id,
-            cod_date=excel.cod_date or date.today(),
+            cod_date=excel.cod_date,
             installed_dc_capacity_kwp=excel.installed_dc_capacity_kwp,
             installed_ac_capacity_kw=excel.installed_ac_capacity_kw,
             installation_location_url=excel.installation_location_url,
             # Counterparty
-            customer_name=excel.customer_name or "Unknown Customer",
+            customer_name=excel.customer_name,
             registered_name=excel.registered_name,
             registration_number=excel.registration_number,
             tax_pin=excel.tax_pin,
@@ -530,6 +619,12 @@ class OnboardingService:
                     sections[current_name] = "\n".join(current_lines)
                 current_name = f"{match.group(1)} {match.group(2).strip()}"
                 current_lines = []
+            elif re.match(r'^--\s*=+', line) and current_name:
+                # Hit a step separator; close the current section
+                if current_lines:
+                    sections[current_name] = "\n".join(current_lines)
+                current_name = None
+                current_lines = []
             elif current_name:
                 current_lines.append(line)
 
@@ -550,7 +645,12 @@ class OnboardingService:
                     pos = full_sql.find(em, start + len(step_marker))
                     if pos >= 0 and pos < end:
                         end = pos
-                sections[step_name] = full_sql[start:end]
+                block = full_sql[start:end]
+                # Strip comment lines at the top — only keep from "DO $$" onwards
+                do_pos = block.find("DO $$")
+                if do_pos >= 0:
+                    block = block[do_pos:]
+                sections[step_name] = block
 
         self._sql_sections = sections
         return sections
@@ -573,11 +673,11 @@ class OnboardingService:
                 sage_id VARCHAR(50),
                 project_name VARCHAR(255) NOT NULL,
                 country VARCHAR(100),
-                cod_date DATE NOT NULL,
+                cod_date DATE,
                 installed_dc_capacity_kwp DECIMAL,
                 installed_ac_capacity_kw DECIMAL,
                 installation_location_url TEXT,
-                customer_name VARCHAR(255) NOT NULL,
+                customer_name VARCHAR(255),
                 registered_name VARCHAR(255),
                 registration_number VARCHAR(100),
                 tax_pin VARCHAR(100),
@@ -651,10 +751,10 @@ class OnboardingService:
                 batch_id UUID,
                 external_project_id VARCHAR(50) NOT NULL,
                 operating_year INTEGER NOT NULL,
-                year_start_date DATE NOT NULL,
-                year_end_date DATE NOT NULL,
+                year_start_date DATE,
+                year_end_date DATE,
                 guaranteed_kwh DECIMAL NOT NULL,
-                guarantee_pct_of_p50 DECIMAL(5,4),
+                guarantee_pct_of_p50 DECIMAL,
                 p50_annual_kwh DECIMAL,
                 shortfall_cap_usd DECIMAL,
                 shortfall_cap_fx_rule VARCHAR(255),
@@ -818,22 +918,30 @@ class OnboardingService:
             )
 
         # Guarantees
+        cod = data.cod_date
+        if cod is None and data.guarantees:
+            logger.warning("COD date missing — guarantee year dates will be NULL")
         for g in data.guarantees:
             # Calculate year dates from COD
-            cod = data.cod_date
-            year_start = date(cod.year + g.operating_year - 1, cod.month, cod.day)
-            year_end = date(cod.year + g.operating_year, cod.month, cod.day) - timedelta(days=1)
+            year_start = date(cod.year + g.operating_year - 1, cod.month, cod.day) if cod else None
+            year_end = date(cod.year + g.operating_year, cod.month, cod.day) - timedelta(days=1) if cod else None
+
+            # Calculate derived fields
+            p50 = g.preliminary_yield_kwh
+            guaranteed = g.required_output_kwh
+            pct_of_p50 = round(guaranteed / p50, 6) if p50 and guaranteed else None
 
             cur.execute(
                 """INSERT INTO stg_guarantee_yearly (
                     batch_id, external_project_id, operating_year,
                     year_start_date, year_end_date,
-                    guaranteed_kwh, source_metadata
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                    guaranteed_kwh, guarantee_pct_of_p50, p50_annual_kwh,
+                    source_metadata
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (
                     str(batch_id), ext_id,
                     g.operating_year, year_start, year_end,
-                    g.required_output_kwh,
+                    g.required_output_kwh, pct_of_p50, p50,
                     json.dumps({
                         "preliminary_yield_kwh": g.preliminary_yield_kwh,
                         "confidence": g.confidence,

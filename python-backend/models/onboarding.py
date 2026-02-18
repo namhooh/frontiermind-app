@@ -228,13 +228,13 @@ class MergedOnboardingData(BaseModel):
     project_name: str
     country: Optional[str] = None
     sage_id: Optional[str] = None
-    cod_date: date
+    cod_date: Optional[date] = None
     installed_dc_capacity_kwp: Optional[float] = None
     installed_ac_capacity_kw: Optional[float] = None
     installation_location_url: Optional[str] = None
 
     # Counterparty
-    customer_name: str
+    customer_name: Optional[str] = None
     registered_name: Optional[str] = None
     registration_number: Optional[str] = None
     tax_pin: Optional[str] = None

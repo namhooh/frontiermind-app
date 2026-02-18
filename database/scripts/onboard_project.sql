@@ -46,12 +46,12 @@ CREATE TEMP TABLE stg_project_core (
   sage_id                     VARCHAR(50),
   project_name                VARCHAR(255) NOT NULL,
   country                     VARCHAR(100),
-  cod_date                    DATE NOT NULL,
+  cod_date                    DATE,
   installed_dc_capacity_kwp   DECIMAL,
   installed_ac_capacity_kw    DECIMAL,
   installation_location_url   TEXT,
   -- Counterparty
-  customer_name               VARCHAR(255) NOT NULL,
+  customer_name               VARCHAR(255),
   registered_name             VARCHAR(255),
   registration_number         VARCHAR(100),
   tax_pin                     VARCHAR(100),
@@ -122,10 +122,10 @@ CREATE TEMP TABLE stg_guarantee_yearly (
   batch_id              UUID,
   external_project_id   VARCHAR(50) NOT NULL,
   operating_year        INTEGER NOT NULL,
-  year_start_date       DATE NOT NULL,
-  year_end_date         DATE NOT NULL,
+  year_start_date       DATE,
+  year_end_date         DATE,
   guaranteed_kwh        DECIMAL NOT NULL,
-  guarantee_pct_of_p50  DECIMAL(5,4),
+  guarantee_pct_of_p50  DECIMAL,
   p50_annual_kwh        DECIMAL,
   shortfall_cap_usd     DECIMAL,
   shortfall_cap_fx_rule VARCHAR(255),
@@ -256,8 +256,7 @@ ON CONFLICT (counterparty_type_id, LOWER(name)) DO UPDATE SET
   registered_name = EXCLUDED.registered_name,
   registration_number = EXCLUDED.registration_number,
   tax_pin = EXCLUDED.tax_pin,
-  registered_address = EXCLUDED.registered_address,
-  updated_at = NOW();
+  registered_address = EXCLUDED.registered_address;
 
 -- 4.2 Project
 INSERT INTO project (
@@ -318,6 +317,10 @@ LEFT JOIN contract_type ct ON ct.code = s.contract_type_code
 ON CONFLICT (project_id, external_contract_id)
   WHERE external_contract_id IS NOT NULL
 DO UPDATE SET
+  counterparty_id = COALESCE(EXCLUDED.counterparty_id, contract.counterparty_id),
+  name = EXCLUDED.name,
+  effective_date = COALESCE(EXCLUDED.effective_date, contract.effective_date),
+  end_date = COALESCE(EXCLUDED.end_date, contract.end_date),
   contract_term_years = EXCLUDED.contract_term_years,
   interconnection_voltage_kv = EXCLUDED.interconnection_voltage_kv,
   payment_security_required = EXCLUDED.payment_security_required,
@@ -472,6 +475,8 @@ FROM stg_guarantee_yearly sg
 JOIN stg_project_core spc ON sg.external_project_id = spc.external_project_id
 JOIN project p ON p.organization_id = spc.organization_id AND p.external_project_id = sg.external_project_id
 ON CONFLICT (project_id, operating_year) DO UPDATE SET
+  year_start_date = EXCLUDED.year_start_date,
+  year_end_date = EXCLUDED.year_end_date,
   guaranteed_kwh = EXCLUDED.guaranteed_kwh,
   guarantee_pct_of_p50 = EXCLUDED.guarantee_pct_of_p50,
   p50_annual_kwh = EXCLUDED.p50_annual_kwh,
@@ -489,7 +494,9 @@ SELECT
 FROM stg_meters sm
 JOIN stg_project_core spc ON sm.external_project_id = spc.external_project_id
 JOIN project p ON p.organization_id = spc.organization_id AND p.external_project_id = sm.external_project_id
-ON CONFLICT (project_id, serial_number) DO UPDATE SET
+ON CONFLICT (project_id, serial_number)
+  WHERE serial_number IS NOT NULL
+DO UPDATE SET
   location_description = EXCLUDED.location_description,
   metering_type = EXCLUDED.metering_type;
 

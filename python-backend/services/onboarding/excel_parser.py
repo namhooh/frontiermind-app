@@ -10,7 +10,7 @@ import logging
 import re
 from datetime import date, datetime
 from io import BytesIO
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from openpyxl import load_workbook
 from openpyxl.worksheet.worksheet import Worksheet
@@ -47,12 +47,14 @@ PROJECT_INFO_LABELS = {
     "customer": "customer_name",
     "sage id": "sage_id",
     "cod date": "cod_date",
+    "cod": "cod_date",
     "commercial operation date": "cod_date",
     "installed dc capacity": "installed_dc_capacity_kwp",
     "dc capacity": "installed_dc_capacity_kwp",
     "installed ac capacity": "installed_ac_capacity_kw",
     "ac capacity": "installed_ac_capacity_kw",
     "google maps": "installation_location_url",
+    "installation location": "installation_location_url",
     "location url": "installation_location_url",
 }
 
@@ -74,7 +76,7 @@ CONTRACT_INFO_LABELS = {
     "contract term": "contract_term_years",
     "term years": "contract_term_years",
     "effective date": "effective_date",
-    "start date": "effective_date",
+    "contract start date": "effective_date",
     "end date": "end_date",
     "expiry date": "end_date",
     "interconnection voltage": "interconnection_voltage_kv",
@@ -91,22 +93,30 @@ TARIFF_INFO_LABELS = {
     "energy sale type": "energy_sale_type",
     "escalation type": "escalation_type",
     "escalation": "escalation_type",
+    "price adjustment type": "escalation_type",
     "billing currency": "billing_currency",
     "currency": "billing_currency",
     "market ref currency": "market_ref_currency",
     "reference currency": "market_ref_currency",
     "base rate": "base_rate",
     "tariff rate": "base_rate",
+    "solar tarrif per kwh": "base_rate",
+    "solar tariff per kwh": "base_rate",
     "unit": "unit",
     "discount": "discount_pct",
     "solar discount": "discount_pct",
     "floor rate": "floor_rate",
     "floor price": "floor_rate",
+    "floor tarrif": "floor_rate",
+    "floor tariff": "floor_rate",
     "ceiling rate": "ceiling_rate",
     "ceiling price": "ceiling_rate",
+    "ceiling tarrif": "ceiling_rate",
+    "ceiling tariff": "ceiling_rate",
     "cap rate": "ceiling_rate",
     "escalation value": "escalation_value",
     "escalation rate": "escalation_value",
+    "price adjustment value": "escalation_value",
     "grp method": "grp_method",
     "grid reference price": "grp_method",
     "payment terms": "payment_terms",
@@ -131,31 +141,44 @@ class ExcelParser:
         wb = load_workbook(BytesIO(file_bytes), data_only=True, read_only=True)
 
         data = ExcelOnboardingData()
+        sheets = self._find_data_sheets(wb)
 
-        # Try to find the main data sheet
-        ws = self._find_data_sheet(wb)
-        if ws is None:
-            logger.warning("No suitable data sheet found — returning empty data")
+        logger.info(
+            f"Sheets found: pricing={sheets['pricing'] is not None}, "
+            f"technical={sheets['technical'] is not None}, "
+            f"yield={sheets['yield'] is not None}"
+        )
+
+        # Sheet 1: Pricing & Payment Info (project, customer, contract, tariff, contacts)
+        if sheets["pricing"]:
+            idx = self._build_cell_index(sheets["pricing"])
+            self._extract_labeled_fields(idx, PROJECT_INFO_LABELS, data)
+            self._extract_labeled_fields(idx, CUSTOMER_INFO_LABELS, data)
+            self._extract_labeled_fields(idx, CONTRACT_INFO_LABELS, data)
+            self._extract_labeled_fields(idx, TARIFF_INFO_LABELS, data)
+            self._normalize_fields(data)
+            data.contacts = self._extract_contacts(sheets["pricing"], idx)
+        else:
+            logger.warning("No pricing sheet found — returning empty data")
             wb.close()
             return data
 
-        # Build cell index for label lookups
-        cell_index = self._build_cell_index(ws)
+        # Sheet 2: Technical Information (meters, assets, capacity, voltage)
+        if sheets["technical"]:
+            tech_idx = self._build_cell_index(sheets["technical"])
+            # Extract capacity fields from technical sheet if not already found
+            if not data.installed_dc_capacity_kwp:
+                self._extract_labeled_fields(tech_idx, PROJECT_INFO_LABELS, data)
+            # Extract contract fields (interconnection voltage) from technical sheet
+            if not data.interconnection_voltage_kv:
+                self._extract_labeled_fields(tech_idx, CONTRACT_INFO_LABELS, data)
+            data.meters = self._extract_meters(sheets["technical"], tech_idx)
+            data.assets = self._extract_assets(sheets["technical"], tech_idx)
 
-        # Extract sections
-        self._extract_labeled_fields(cell_index, PROJECT_INFO_LABELS, data)
-        self._extract_labeled_fields(cell_index, CUSTOMER_INFO_LABELS, data)
-        self._extract_labeled_fields(cell_index, CONTRACT_INFO_LABELS, data)
-        self._extract_labeled_fields(cell_index, TARIFF_INFO_LABELS, data)
-
-        # Post-process normalized fields
-        self._normalize_fields(data)
-
-        # Extract table sections
-        data.contacts = self._extract_contacts(ws, cell_index)
-        data.meters = self._extract_meters(ws, cell_index)
-        data.assets = self._extract_assets(ws, cell_index)
-        data.forecasts = self._extract_forecasts(ws, cell_index)
+        # Sheet 3: Yield Report (forecasts)
+        if sheets["yield"]:
+            yield_idx = self._build_cell_index(sheets["yield"])
+            data.forecasts = self._extract_forecasts(sheets["yield"], yield_idx)
 
         wb.close()
 
@@ -170,23 +193,36 @@ class ExcelParser:
     # SHEET DISCOVERY
     # =========================================================================
 
-    def _find_data_sheet(self, wb) -> Optional[Worksheet]:
-        """Find the main data sheet by name heuristics."""
-        priority_names = [
-            "onboarding", "project", "data", "template", "input", "main",
-        ]
+    def _find_data_sheets(self, wb) -> Dict[str, Optional[Worksheet]]:
+        """Map logical roles to worksheets."""
         sheets = wb.sheetnames
+        result: Dict[str, Optional[Worksheet]] = {"pricing": None, "technical": None, "yield": None}
+
         if not sheets:
-            return None
+            return result
 
-        # Try priority names
-        for pname in priority_names:
-            for sname in sheets:
-                if pname in sname.lower():
-                    return wb[sname]
+        for sname in sheets:
+            lower = sname.lower()
+            if "pricing" in lower or "payment" in lower:
+                result["pricing"] = wb[sname]
+            elif "technical" in lower and "extract" not in lower:
+                result["technical"] = wb[sname]
+            elif "yield" in lower or "pvsyst" in lower:
+                result["yield"] = wb[sname]
 
-        # Fall back to first sheet
-        return wb[sheets[0]]
+        # Fallback: if no pricing sheet found, try legacy single-sheet heuristics
+        if result["pricing"] is None:
+            for pname in ["onboarding", "project", "data", "template", "input", "main"]:
+                for sname in sheets:
+                    if pname in sname.lower():
+                        result["pricing"] = wb[sname]
+                        break
+                if result["pricing"]:
+                    break
+            if result["pricing"] is None:
+                result["pricing"] = wb[sheets[0]]
+
+        return result
 
     # =========================================================================
     # CELL INDEX
@@ -196,31 +232,62 @@ class ExcelParser:
         """
         Build a dict mapping lowercase label text → (row, col, value_cell_value).
 
-        For each cell with text, the "value" is the next non-empty cell to the right.
+        Detects structured templates (Description | Guidance | Data | Comments)
+        and uses column C for values instead of "next non-empty cell to the right".
         """
+        # First pass: detect if sheet uses a structured columnar layout
+        # by looking for a header row with "DESCRIPTION" in col A and "DETAILS" in col C
+        structured_layout = False
+        data_col = 2  # Default: column C (0-indexed)
+        for row in ws.iter_rows(max_row=15):
+            cells = [c.value for c in row]
+            if len(cells) > 2:
+                col_a = str(cells[0]).strip().upper() if cells[0] else ""
+                col_c = str(cells[2]).strip().upper() if len(cells) > 2 and cells[2] else ""
+                if "DESCRIPTION" in col_a and "DETAILS" in col_c:
+                    structured_layout = True
+                    break
+
+        if structured_layout:
+            logger.debug("Detected structured columnar layout (Description | Guidance | Data)")
+
         index = {}
         for row in ws.iter_rows():
-            for i, cell in enumerate(row):
-                if cell.value is None:
+            cells = [c.value for c in row]
+            if not any(cells):
+                continue
+
+            for i, cell_val in enumerate(cells):
+                if cell_val is None:
                     continue
-                text = str(cell.value).strip()
+                text = str(cell_val).strip()
                 if not text:
                     continue
 
                 key = text.lower()
-                # Find value: next non-empty cell to the right in same row
-                value = None
-                for j in range(i + 1, len(row)):
-                    if row[j].value is not None:
-                        value = row[j].value
-                        break
 
-                index[key] = {
-                    "row": cell.row,
-                    "col": cell.column,
-                    "label": text,
-                    "value": value,
-                }
+                if structured_layout and i == 0:
+                    # In structured layout, col A = label, col C = value
+                    value = cells[data_col] if len(cells) > data_col else None
+                    index[key] = {
+                        "row": row[0].row if hasattr(row[0], 'row') else 0,
+                        "col": 1,
+                        "label": text,
+                        "value": value,
+                    }
+                elif not structured_layout:
+                    # Legacy: value is next non-empty cell to the right
+                    value = None
+                    for j in range(i + 1, len(cells)):
+                        if cells[j] is not None:
+                            value = cells[j]
+                            break
+                    index[key] = {
+                        "row": row[0].row if hasattr(row[0], 'row') else 0,
+                        "col": i + 1,
+                        "label": text,
+                        "value": value,
+                    }
 
         return index
 
@@ -247,8 +314,12 @@ class ExcelParser:
             if raw_value is None:
                 continue
 
+            # Skip placeholder/guidance values
+            if isinstance(raw_value, str) and self._is_placeholder(raw_value):
+                continue
+
             converted = self._convert_value(field_name, raw_value)
-            if converted is not None:
+            if converted is not None and hasattr(data, field_name):
                 setattr(data, field_name, converted)
 
     def _find_label_match(self, cell_index: dict, label: str) -> Optional[dict]:
@@ -341,8 +412,10 @@ class ExcelParser:
             email = str(cells[3]).strip() if len(cells) > 3 and cells[3] else None
             phone = str(cells[4]).strip() if len(cells) > 4 and cells[4] else None
 
-            # Skip if no meaningful data
+            # Skip header rows and empty data
             if not full_name and not email:
+                continue
+            if full_name and full_name.lower() in ("full name", "name", "contact name"):
                 continue
 
             contacts.append(ContactData(
@@ -442,12 +515,25 @@ class ExcelParser:
     def _extract_forecasts(self, ws: Worksheet, cell_index: dict) -> List[ForecastMonthData]:
         """Extract monthly production forecasts."""
         forecasts = []
+
+        # Try standard section header first
         header_row = self._find_section_header_row(cell_index, "forecast")
         if header_row is None:
             header_row = self._find_section_header_row(cell_index, "production")
-        if header_row is None:
-            return forecasts
 
+        if header_row is not None:
+            forecasts = self._extract_forecasts_standard(ws, header_row)
+
+        # Try PVSyst-style yield report if standard extraction failed
+        if not forecasts:
+            forecasts = self._extract_forecasts_pvsyst(ws, cell_index)
+
+        logger.info(f"Extracted {len(forecasts)} forecast months")
+        return forecasts
+
+    def _extract_forecasts_standard(self, ws: Worksheet, header_row: int) -> List[ForecastMonthData]:
+        """Extract forecasts from a standard tabular format."""
+        forecasts = []
         for row in ws.iter_rows(min_row=header_row + 1):
             cells = [c.value for c in row]
             if not any(cells):
@@ -471,13 +557,113 @@ class ExcelParser:
                 forecast_pr=self._to_float(cells[5]) if len(cells) > 5 else None,
                 degradation_factor=self._to_float(cells[6]) if len(cells) > 6 else None,
             ))
+        return forecasts
 
-        logger.info(f"Extracted {len(forecasts)} forecast months")
+    # Month name abbreviations for PVSyst-style yield reports
+    _MONTH_NAMES = {
+        "jan": 1, "feb": 2, "mar": 3, "apr": 4,
+        "may": 5, "jun": 6, "jul": 7, "aug": 8,
+        "sep": 9, "oct": 10, "nov": 11, "dec": 12,
+    }
+
+    def _extract_forecasts_pvsyst(self, ws: Worksheet, cell_index: dict) -> List[ForecastMonthData]:
+        """Extract forecasts from PVSyst-style yield report with month names and multi-column layout."""
+        forecasts = []
+
+        # Find the header row with column labels (look for "E_Grid" or "GlobHor")
+        header_row_idx = None
+        energy_col = None
+        ghi_col = None
+        poa_col = None
+        pr_col = None
+
+        for i, row in enumerate(ws.iter_rows(max_row=15)):
+            cells = {j: str(c.value).strip().lower() if c.value else "" for j, c in enumerate(row)}
+            for j, val in cells.items():
+                if val in ("e_grid", "energy output"):
+                    header_row_idx = i + 1
+                    energy_col = j
+                elif val in ("globhor", "ghi irr", "ghi"):
+                    ghi_col = j
+                elif val in ("globinc", "poa irr", "poa"):
+                    poa_col = j
+                elif val == "pr" or val == "pr*":
+                    pr_col = j
+
+        if header_row_idx is None or energy_col is None:
+            return forecasts
+
+        # Use a reference year (doesn't matter much for monthly forecasts)
+        ref_year = 2025
+
+        for row in ws.iter_rows(min_row=header_row_idx + 1):
+            cells = [c.value for c in row]
+            if not cells or cells[0] is None:
+                continue
+
+            first_val = str(cells[0]).strip().lower()
+
+            # Stop at "year" or "total" summary row
+            if first_val in ("year", "total", "annual"):
+                break
+
+            # Match month names
+            month_num = self._MONTH_NAMES.get(first_val[:3])
+            if month_num is None:
+                continue
+
+            energy = self._to_float(cells[energy_col]) if energy_col < len(cells) else None
+            if energy is None:
+                # Try E_Grid column (col 7 in typical PVSyst layout)
+                for try_col in [7, 6, 16]:
+                    if try_col < len(cells):
+                        energy = self._to_float(cells[try_col])
+                        if energy and energy > 1000:  # Sanity check: monthly energy should be > 1000 kWh
+                            break
+
+            if energy is None:
+                continue
+
+            forecast_month = date(ref_year, month_num, 1)
+            ghi = self._to_float(cells[ghi_col]) if ghi_col and ghi_col < len(cells) else None
+            poa = self._to_float(cells[poa_col]) if poa_col and poa_col < len(cells) else None
+            pr = self._to_float(cells[pr_col]) if pr_col and pr_col < len(cells) else None
+
+            forecasts.append(ForecastMonthData(
+                forecast_month=forecast_month,
+                operating_year=1,
+                forecast_energy_kwh=energy,
+                forecast_ghi=ghi,
+                forecast_poa=poa,
+                forecast_pr=pr,
+            ))
+
         return forecasts
 
     # =========================================================================
     # HELPERS
     # =========================================================================
+
+    @staticmethod
+    def _is_placeholder(value: str) -> bool:
+        """Return True if the value looks like template guidance or placeholder text."""
+        lower = value.strip().lower()
+        placeholders = [
+            "select from dropdown",
+            "per project operations",
+            "am to input",
+            "to be completed",
+            "insert #",
+            "enter each product",
+            "please indicate",
+            "please include",
+            "if applicable",
+            "y/n",
+            "dd-month-yy",
+            "guidence",
+            "guidance",
+        ]
+        return any(p in lower for p in placeholders)
 
     def _find_section_header_row(self, cell_index: dict, keyword: str) -> Optional[int]:
         """Find the row number of a section header containing keyword."""

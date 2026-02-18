@@ -20,6 +20,7 @@ from models.onboarding import (
     OnboardingOverrides,
     OnboardingPreviewResponse,
 )
+from db.database import init_connection_pool
 from services.onboarding.onboarding_service import OnboardingError, OnboardingService
 
 logger = logging.getLogger(__name__)
@@ -33,6 +34,7 @@ _service: Optional[OnboardingService] = None
 def _get_service() -> OnboardingService:
     global _service
     if _service is None:
+        init_connection_pool()
         _service = OnboardingService()
     return _service
 
