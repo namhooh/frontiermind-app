@@ -75,6 +75,7 @@ database/
 │   ├── 031_generated_report_invoice_direction.sql     # Phase 7.1: Add invoice_direction to generated_report
 │   ├── 032_email_notification_engine.sql              # Phase 8.0: Email notifications, scheduling, submission tokens
 │   ├── 033_project_onboarding.sql                     # Phase 9.0: COD data capture, amendment versioning, reference_price, contract_amendment, upsert indexes, preview table
+│   ├── 034_billing_product_and_rate_period.sql         # Phase 9: billing_product, contract_billing_product, tariff_rate_period, CBE seed data, tariff classification cleanup
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -100,7 +101,10 @@ database/
 │   ├── apply_schema.sh                    # Apply all migrations
 │   ├── create-phase-snapshot.sh           # Create schema snapshot
 │   ├── load_test_data.sh                  # Load seed data
-│   └── onboard_project.sql               # Staged ETL for COD project onboarding
+│   └── project-onboarding/               # Project onboarding scripts
+│       ├── onboard_project.sql           # Staged ETL for COD project onboarding
+│       ├── validate_onboarding_project.sql # Validation query pack
+│       └── audits/                       # Per-project audit trails
 │
 ├── functions/                             # PostgreSQL functions (future)
 ├── views/                                 # Database views (future)
@@ -1045,9 +1049,9 @@ database/
 - Renamed: `contract.updated_by` → `contract.created_by`
 - Dropped: `project_document`, `project_onboarding_snapshot`, `received_invoice_line_item` ALTERs (charge_type/is_tax/tou_bucket)
 - Seeded: `asset_type` (8 codes), `invoice_line_item_type` (4 GRP charge types)
-- ETL script: `database/scripts/onboard_project.sql`
+- ETL script: `database/scripts/project-onboarding/onboard_project.sql`
 - Python: Amendment diff service, GRP calculator refactored for invoice_line_item_type_code
-- Reference: `IMPLEMENTATION_GUIDE_PROJECT_ONBOARDING.md`
+- Reference: `database/docs/IMPLEMENTATION_GUIDE_PROJECT_ONBOARDING.md`
 
 ---
 

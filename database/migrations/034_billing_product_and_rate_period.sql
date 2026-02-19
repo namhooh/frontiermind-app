@@ -1,13 +1,16 @@
--- Migration 034: Billing Product Capture & Tariff Rate Versioning
+-- Migration 034: Billing Product Capture, Tariff Rate Versioning & Tariff Classification Cleanup
 -- Date: 2026-02-19
--- Phase: 9.1 - Billing Product Reference Tables, Contract Billing Products, Tariff Rate Periods
+-- Phase: 9 - Billing Product Reference Tables, Contract Billing Products,
+--            Tariff Rate Periods, Tariff Classification Cleanup
 --
 -- Changes:
 --   A. CREATE billing_product — Org-scoped billing product reference table (Sage product codes)
 --   B. CREATE contract_billing_product — Junction: which billing products apply to a contract
 --   C. CREATE tariff_rate_period — Effective rate history per clause_tariff (annual escalation tracking)
 --   D. Seed billing_product with CBE product codes from dim_finance_product_code
---   E. RLS policies and indexes for all new tables
+--   E. Seed tariff_type with CBE "Contract Service/Product Type" codes
+--   F. Drop tariff_structure_type table and clause_tariff.tariff_structure_id column
+--      (unused — no Excel field, derivable from energy_sale_type)
 
 -- =============================================================================
 -- A. CREATE billing_product — Org-scoped billing product reference
@@ -327,3 +330,38 @@ INSERT INTO billing_product (code, name) VALUES
   ('SERV001', NULL),
   ('PCM00_MODDEV', 'Modelling and Development')
 ON CONFLICT (code) WHERE organization_id IS NULL DO NOTHING;
+
+-- =============================================================================
+-- E. Seed tariff_type with CBE "Contract Service/Product Type" codes
+-- =============================================================================
+-- The AM Onboarding Template Row 27 (Pricing and Payment Info sheet) has a
+-- "Contract Service/Product Type" field that classifies WHAT the contract is for:
+-- Energy Sales, Equipment Rental, Loan, BESS Lease, etc.
+--
+-- This maps to tariff_type — which already has 14+ billing-line-level codes
+-- (METERED_ENERGY, AVAILABLE_ENERGY, etc.). The new CBE service codes coexist.
+--
+-- energy_sale_type remains a separate table — it classifies the pricing mechanism
+-- within energy sales contracts (FIXED_SOLAR, FLOATING_GRID, etc.).
+
+INSERT INTO tariff_type (code, name, description) VALUES
+  ('ENERGY_SALES', 'Energy Sales', 'Energy sales contract — solar, grid, or generator tariff'),
+  ('EQUIPMENT_RENTAL_LEASE', 'Equipment Rental/Lease/Boot', 'Equipment rental, lease, or boot arrangement'),
+  ('LOAN', 'Loan', 'Loan financing arrangement'),
+  ('BESS_LEASE', 'Battery Lease (BESS)', 'Battery energy storage system lease'),
+  ('ENERGY_AS_SERVICE', 'Energy as a Service', 'Bundled energy-as-a-service contract'),
+  ('OTHER_SERVICE', 'Other', 'Other contract service/product type'),
+  ('NOT_APPLICABLE', 'N/A', 'Not applicable — no specific contract service type')
+ON CONFLICT DO NOTHING;
+
+-- =============================================================================
+-- F. Drop tariff_structure_type (unused — derivable from energy_sale_type)
+-- Must drop and recreate clause_tariff_current_v because it uses SELECT * and
+-- depends on tariff_structure_id.
+-- =============================================================================
+DROP VIEW IF EXISTS clause_tariff_current_v;
+ALTER TABLE clause_tariff DROP COLUMN IF EXISTS tariff_structure_id;
+DROP INDEX IF EXISTS idx_clause_tariff_structure;
+DROP TABLE IF EXISTS tariff_structure_type CASCADE;
+CREATE OR REPLACE VIEW clause_tariff_current_v AS
+  SELECT * FROM clause_tariff WHERE is_current = true;

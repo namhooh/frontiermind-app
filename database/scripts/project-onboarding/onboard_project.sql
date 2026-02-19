@@ -14,10 +14,9 @@
 --   Option C: Adapt staging table INSERTs for specific project data
 --
 -- Prerequisites:
---   - Migrations 033_project_onboarding.sql and 034_billing_product_and_rate_period.sql
+--   - Migrations 033 and 034 (billing product, rate periods, tariff_type service codes) applied
 --   - Organization must exist in organization table
---   - Lookup types (tariff_structure_type, energy_sale_type, escalation_type,
---     currency, asset_type) must be seeded
+--   - Lookup types (tariff_type, escalation_type, currency, asset_type) must be seeded
 --   - billing_product seed data must be loaded (migration 034)
 --
 -- IMPORTANT: Use \copy or INSERT, NOT COPY FROM (requires superuser on Supabase)
@@ -78,7 +77,7 @@ CREATE TEMP TABLE stg_tariff_lines (
   external_project_id     VARCHAR(50) NOT NULL,
   tariff_group_key        VARCHAR(255) NOT NULL,
   tariff_name             VARCHAR(255),
-  structure_code          VARCHAR(50) NOT NULL,
+  tariff_type_code        VARCHAR(50),
   energy_sale_type_code   VARCHAR(50),
   escalation_type_code    VARCHAR(50),
   billing_currency_code   VARCHAR(10) NOT NULL,
@@ -191,17 +190,30 @@ BEGIN
     RAISE EXCEPTION 'Unresolved organization_id in staging data';
   END IF;
 
-  -- Verify tariff structure codes exist
+  -- Verify tariff type codes exist
   IF EXISTS (
     SELECT 1 FROM stg_tariff_lines s
-    LEFT JOIN tariff_structure_type t ON t.code = s.structure_code AND t.organization_id IS NULL
-    WHERE t.id IS NULL
+    LEFT JOIN tariff_type t ON t.code = s.tariff_type_code
+    WHERE s.tariff_type_code IS NOT NULL AND t.id IS NULL
   ) THEN
-    RAISE EXCEPTION 'Unresolved tariff_structure_type codes: %',
-      (SELECT string_agg(DISTINCT s.structure_code, ', ')
+    RAISE EXCEPTION 'Unresolved tariff_type codes: %',
+      (SELECT string_agg(DISTINCT s.tariff_type_code, ', ')
        FROM stg_tariff_lines s
-       LEFT JOIN tariff_structure_type t ON t.code = s.structure_code AND t.organization_id IS NULL
-       WHERE t.id IS NULL);
+       LEFT JOIN tariff_type t ON t.code = s.tariff_type_code
+       WHERE s.tariff_type_code IS NOT NULL AND t.id IS NULL);
+  END IF;
+
+  -- Verify energy_sale_type codes exist
+  IF EXISTS (
+    SELECT 1 FROM stg_tariff_lines s
+    LEFT JOIN energy_sale_type e ON e.code = s.energy_sale_type_code
+    WHERE s.energy_sale_type_code IS NOT NULL AND e.id IS NULL
+  ) THEN
+    RAISE EXCEPTION 'Unresolved energy_sale_type codes: %',
+      (SELECT string_agg(DISTINCT s.energy_sale_type_code, ', ')
+       FROM stg_tariff_lines s
+       LEFT JOIN energy_sale_type e ON e.code = s.energy_sale_type_code
+       WHERE s.energy_sale_type_code IS NOT NULL AND e.id IS NULL);
   END IF;
 
   -- Verify currency codes exist
@@ -384,7 +396,7 @@ ON CONFLICT DO NOTHING;
 INSERT INTO clause_tariff (
   project_id, contract_id, organization_id,
   tariff_group_key, name,
-  tariff_structure_id, energy_sale_type_id, escalation_type_id,
+  tariff_type_id, energy_sale_type_id, escalation_type_id,
   currency_id, market_ref_currency_id,
   base_rate, unit, valid_from, valid_to,
   logic_parameters, is_active
@@ -395,7 +407,7 @@ SELECT
   spc.organization_id,
   stl.tariff_group_key,
   COALESCE(stl.tariff_name, stl.tariff_group_key),
-  tst.id,
+  tt.id,
   est.id,
   esc.id,
   cur.id,
@@ -416,8 +428,9 @@ FROM stg_tariff_lines stl
 JOIN stg_project_core spc ON stl.external_project_id = spc.external_project_id
 JOIN project p ON p.organization_id = spc.organization_id AND p.external_project_id = stl.external_project_id
 JOIN contract c ON c.project_id = p.id AND c.external_contract_id = spc.external_contract_id
-JOIN tariff_structure_type tst ON tst.code = stl.structure_code AND tst.organization_id IS NULL
-LEFT JOIN energy_sale_type est ON est.code = stl.energy_sale_type_code AND est.organization_id IS NULL
+LEFT JOIN tariff_type tt ON tt.code = stl.tariff_type_code
+LEFT JOIN energy_sale_type est ON est.code = stl.energy_sale_type_code
+  AND (est.organization_id IS NULL OR est.organization_id = spc.organization_id)
 LEFT JOIN escalation_type esc ON esc.code = stl.escalation_type_code AND esc.organization_id IS NULL
 JOIN currency cur ON cur.code = stl.billing_currency_code
 LEFT JOIN currency mrc ON mrc.code = stl.market_ref_currency_code
@@ -426,7 +439,7 @@ ON CONFLICT (contract_id, tariff_group_key, valid_from, COALESCE(valid_to, '9999
 DO UPDATE SET
   base_rate = EXCLUDED.base_rate,
   logic_parameters = EXCLUDED.logic_parameters,
-  tariff_structure_id = EXCLUDED.tariff_structure_id,
+  tariff_type_id = EXCLUDED.tariff_type_id,
   energy_sale_type_id = EXCLUDED.energy_sale_type_id,
   escalation_type_id = EXCLUDED.escalation_type_id,
   updated_at = NOW();

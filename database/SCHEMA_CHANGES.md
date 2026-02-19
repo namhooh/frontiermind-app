@@ -949,11 +949,11 @@ Policy Pattern (applied to all):
 
 **New Table: energy_sale_type**
 - Same structure as tariff_structure_type
-- Seeded: TAKE_OR_PAY, MIN_OFFTAKE, FULL_OFFTAKE, AS_PRODUCED, DEEMED (platform-level)
+- Seeded: FIXED_SOLAR, FLOATING_GRID, FLOATING_GENERATOR, FLOATING_GRID_GENERATOR, NOT_ENERGY_SALES (platform-level)
 
 **New Table: escalation_type**
 - Same structure as tariff_structure_type
-- Seeded: FIXED, CPI, CUSTOM, NONE, GRID_PASSTHROUGH (platform-level)
+- Seeded: FIXED_INCREASE, FIXED_DECREASE, PERCENTAGE, US_CPI, REBASED_MARKET_PRICE, NONE (platform-level)
 
 **Extended clause_tariff table:**
 - `tariff_structure_id` - BIGINT REFERENCES tariff_structure_type(id)
@@ -1002,10 +1002,11 @@ Policy Pattern (applied to all):
 - UNIQUE(project_id, operating_year)
 - **Note:** Evaluation data (actual_kwh, shortfall_kwh, evaluation_status) removed — year-end guarantee evaluation is modeled via `default_event` + `rule_output` pipeline (migration 000_baseline), which provides audit trail, LD amounts, breach/excuse flags, and clause linkage
 
-**energy_sale_type pruning (updated seed data in migration 027):**
-- Removed `FULL_OFFTAKE`, `AS_PRODUCED`, `DEEMED` — no CBE contract mappings, semantically overlapped with TAKE_OR_PAY or belonged at the invoice line item level
-- Added `TAKE_AND_PAY` and `LEASE` to migration 027's seed INSERT
-- Final canonical set: TAKE_OR_PAY, MIN_OFFTAKE, TAKE_AND_PAY, LEASE
+**energy_sale_type seed data correction (2026-02-19):**
+- Replaced stale seed data (TAKE_OR_PAY, MIN_OFFTAKE, TAKE_AND_PAY, LEASE) with correct codes from migration 027
+- Final canonical set aligned with Excel onboarding template: FIXED_SOLAR, FLOATING_GRID, FLOATING_GENERATOR, FLOATING_GRID_GENERATOR, NOT_ENERGY_SALES
+- escalation_type stale seeds (FIXED, CPI, CUSTOM, NONE, GRID_PASSTHROUGH) also replaced with: FIXED_INCREASE, FIXED_DECREASE, PERCENTAGE, US_CPI, REBASED_MARKET_PRICE, NONE
+- GH-MOH01 clause_tariff (id=2) classified: energy_sale_type=FIXED_SOLAR, escalation_type=REBASED_MARKET_PRICE
 
 **Design Notes:**
 - Lookup tables use `organization_id` scoping: NULL = platform canonical, non-NULL = client-specific
@@ -1352,5 +1353,58 @@ and token-based external submission collection.
 - Cross-tenant trigger on contract_billing_product prevents org A's contract from referencing org B's billing products
 - Unique partial index on is_current prevents multiple active rates per clause_tariff (escalation must flip previous row first)
 - onboard_project.sql Step 4.10 uses JOIN LATERAL with ORDER BY organization_id NULLS LAST to prefer org-scoped products over canonical when both exist for same code
+
+---
+
+### v9.2 - 2026-02-19 (Seed tariff_type with CBE Service Codes, Restore energy_sale_type)
+
+**Description:** Seeds `tariff_type` with 7 CBE "Contract Service/Product Type" codes (ENERGY_SALES, EQUIPMENT_RENTAL_LEASE, LOAN, BESS_LEASE, ENERGY_AS_SERVICE, OTHER_SERVICE, NOT_APPLICABLE). Drops `tariff_structure_type` (unused, derivable from energy_sale_type). Keeps `energy_sale_type` as a separate classification on `clause_tariff`.
+
+**Migrations:**
+- `database/migrations/034_billing_product_and_rate_period.sql` — Sections E & F (merged from former 035)
+
+**Changes:**
+
+**Inserted into tariff_type (7 new codes):**
+- ENERGY_SALES, EQUIPMENT_RENTAL_LEASE, LOAN, BESS_LEASE, ENERGY_AS_SERVICE, OTHER_SERVICE, NOT_APPLICABLE
+- These coexist with the 14 existing billing-line-level codes (METERED_ENERGY, AVAILABLE_ENERGY, etc.)
+
+**Dropped column from clause_tariff:**
+- `tariff_structure_id` (no corresponding Excel field, derivable from energy_sale_type)
+
+**Dropped table:**
+- `tariff_structure_type`
+
+**clause_tariff classification FKs (3 remaining):**
+- `tariff_type_id` → "Contract Service/Product Type" (ENERGY_SALES, LOAN, etc.)
+- `energy_sale_type_id` → "Energy Sales Tariff Type" (FIXED_SOLAR, FLOATING_GRID, etc.)
+- `escalation_type_id` → "Price Adjustment Type" (FIXED_INCREASE, PERCENTAGE, US_CPI, etc.)
+
+**Updated onboard_project.sql:**
+- `stg_tariff_lines`: added `energy_sale_type_code` column (alongside `tariff_type_code`)
+- Pre-flight validation: added energy_sale_type code check
+- clause_tariff INSERT: added `energy_sale_type_id` column + JOIN to `energy_sale_type` with org-scoping
+- ON CONFLICT DO UPDATE: added `energy_sale_type_id`
+
+**Updated python-backend:**
+- `normalizer.py`: added CONTRACT_SERVICE_TYPE_MAP + `normalize_contract_service_type()`
+- `excel_parser.py`: added "contract service/product type" labels, normalization in `_normalize_fields()`
+- `models/onboarding.py`: added `contract_service_type` field to ExcelOnboardingData
+- `onboarding_service.py`: fixed tariff_type_code mapping (was wrong: pointed to energy_sale_type), added energy_sale_type_code to staging table + INSERT
+- `entities.py`: added energy_sale_type JOIN + columns to tariffs_data CTE, energy_sale_types_lookup CTE, energy_sale_type_id to TariffPatch, "energy_sale_types" to response lookups
+- `amendments/amendment_diff.py`: added `energy_sale_type_id` to TARIFF_DIFF_FIELDS
+
+**Updated frontend:**
+- `app/projects/page.tsx`: added energySaleTypeOpts, added "Sale Type" column to tariffColumns
+- `app/projects/components/ProjectOverviewTab.tsx`: added energySaleTypeOpts, added "Energy Sale Type" row to tariff FieldGrid
+
+**Updated validate_onboarding_project.sql:**
+- Tariff snapshot query: added energy_sale_type JOIN + column
+
+**Design Notes:**
+- `tariff_type` = "Contract Service/Product Type" — classifies WHAT the contract is for
+- `energy_sale_type` = pricing mechanism within energy sales (FIXED_SOLAR, FLOATING_GRID, etc.)
+- `tariff_structure_type` dropped — no Excel field, structure derivable from energy_sale_type
+- GH-MOH01 after re-onboarding: tariff_type_id = ENERGY_SALES, energy_sale_type_id = FIXED_SOLAR
 
 ---
