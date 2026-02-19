@@ -14,10 +14,11 @@
 --   Option C: Adapt staging table INSERTs for specific project data
 --
 -- Prerequisites:
---   - Migration 033_project_onboarding.sql must be applied
+--   - Migrations 033_project_onboarding.sql and 034_billing_product_and_rate_period.sql
 --   - Organization must exist in organization table
 --   - Lookup types (tariff_structure_type, energy_sale_type, escalation_type,
 --     currency, asset_type) must be seeded
+--   - billing_product seed data must be loaded (migration 034)
 --
 -- IMPORTANT: Use \copy or INSERT, NOT COPY FROM (requires superuser on Supabase)
 -- =============================================================================
@@ -68,7 +69,8 @@ CREATE TEMP TABLE stg_project_core (
   interconnection_voltage_kv  DECIMAL,
   payment_security_required   BOOLEAN DEFAULT false,
   payment_security_details    TEXT,
-  agreed_fx_rate_source       VARCHAR(255)
+  agreed_fx_rate_source       TEXT,
+  extraction_metadata         JSONB DEFAULT '{}'
 );
 
 CREATE TEMP TABLE stg_tariff_lines (
@@ -153,6 +155,13 @@ CREATE TEMP TABLE stg_meters (
   is_billing_meter      BOOLEAN DEFAULT TRUE
 );
 
+CREATE TEMP TABLE stg_billing_products (
+  batch_id              UUID,
+  external_project_id   VARCHAR(50) NOT NULL,
+  product_code          VARCHAR(50) NOT NULL,
+  is_primary            BOOLEAN DEFAULT false
+);
+
 -- =============================================================================
 -- Step 2: Load Data
 -- =============================================================================
@@ -221,6 +230,27 @@ BEGIN
        WHERE at.id IS NULL);
   END IF;
 
+  -- Verify billing product codes exist
+  IF EXISTS (
+    SELECT 1 FROM stg_billing_products s
+    LEFT JOIN stg_project_core spc ON s.external_project_id = spc.external_project_id
+    WHERE NOT EXISTS (
+      SELECT 1 FROM billing_product bp
+      WHERE bp.code = s.product_code
+        AND (bp.organization_id = spc.organization_id OR bp.organization_id IS NULL)
+    )
+  ) THEN
+    RAISE EXCEPTION 'Unresolved billing product codes: %',
+      (SELECT string_agg(DISTINCT s.product_code, ', ')
+       FROM stg_billing_products s
+       LEFT JOIN stg_project_core spc ON s.external_project_id = spc.external_project_id
+       WHERE NOT EXISTS (
+         SELECT 1 FROM billing_product bp
+         WHERE bp.code = s.product_code
+           AND (bp.organization_id = spc.organization_id OR bp.organization_id IS NULL)
+       ));
+  END IF;
+
   -- Verify COD date is present
   IF EXISTS (SELECT 1 FROM stg_project_core WHERE cod_date IS NULL) THEN
     RAISE EXCEPTION 'COD date is required for all projects';
@@ -243,7 +273,7 @@ INSERT INTO counterparty (
 )
 SELECT
   (SELECT id FROM counterparty_type WHERE code = 'OFFTAKER' LIMIT 1),
-  s.customer_name,
+  COALESCE(s.customer_name, s.external_project_id || ' Offtaker'),
   s.customer_email,
   s.registered_address,
   s.customer_country,
@@ -293,7 +323,7 @@ INSERT INTO contract (
   external_contract_id, contract_term_years,
   interconnection_voltage_kv,
   payment_security_required, payment_security_details,
-  agreed_fx_rate_source
+  agreed_fx_rate_source, extraction_metadata
 )
 SELECT
   p.id,
@@ -309,7 +339,8 @@ SELECT
   s.interconnection_voltage_kv,
   s.payment_security_required,
   s.payment_security_details,
-  s.agreed_fx_rate_source
+  s.agreed_fx_rate_source,
+  s.extraction_metadata
 FROM stg_project_core s
 JOIN project p ON p.organization_id = s.organization_id AND p.external_project_id = s.external_project_id
 LEFT JOIN counterparty cp ON LOWER(cp.name) = LOWER(s.customer_name)
@@ -326,6 +357,7 @@ DO UPDATE SET
   payment_security_required = EXCLUDED.payment_security_required,
   payment_security_details = EXCLUDED.payment_security_details,
   agreed_fx_rate_source = EXCLUDED.agreed_fx_rate_source,
+  extraction_metadata = COALESCE(EXCLUDED.extraction_metadata, contract.extraction_metadata),
   updated_at = NOW();
 
 -- 4.4 Asset (equipment)
@@ -500,6 +532,55 @@ DO UPDATE SET
   location_description = EXCLUDED.location_description,
   metering_type = EXCLUDED.metering_type;
 
+-- 4.10 Contract Billing Products
+-- Resolve billing_product.id by code, preferring org-scoped over canonical (NULL org).
+-- LATERAL subquery ensures exactly one match per product code, with org-scoped winning
+-- over platform-level canonical when both exist.
+INSERT INTO contract_billing_product (contract_id, billing_product_id, is_primary)
+SELECT
+  c.id,
+  bp.id,
+  sbp.is_primary
+FROM stg_billing_products sbp
+JOIN stg_project_core spc ON sbp.external_project_id = spc.external_project_id
+JOIN project p ON p.organization_id = spc.organization_id AND p.external_project_id = sbp.external_project_id
+JOIN contract c ON c.project_id = p.id AND c.external_contract_id = spc.external_contract_id
+JOIN LATERAL (
+  SELECT id FROM billing_product
+  WHERE code = sbp.product_code
+    AND (organization_id = spc.organization_id OR organization_id IS NULL)
+  ORDER BY organization_id NULLS LAST
+  LIMIT 1
+) bp ON true
+ON CONFLICT (contract_id, billing_product_id) DO UPDATE SET
+  is_primary = EXCLUDED.is_primary;
+
+-- 4.11 Tariff Rate Period (Year 1 = base_rate)
+-- Creates the initial tariff_rate_period row for each clause_tariff.
+-- effective_rate = base_rate for Year 1. Future escalation inserts new rows.
+INSERT INTO tariff_rate_period (
+  clause_tariff_id, contract_year, period_start, period_end,
+  effective_rate, currency_id, calculation_basis, is_current
+)
+SELECT
+  ct.id,
+  1,
+  ct.valid_from,
+  ct.valid_to,
+  ct.base_rate,
+  ct.currency_id,
+  'Year 1: original contractual base rate',
+  true
+FROM clause_tariff ct
+JOIN contract c ON ct.contract_id = c.id
+JOIN stg_project_core spc ON c.project_id = (
+  SELECT p.id FROM project p
+  WHERE p.organization_id = spc.organization_id AND p.external_project_id = spc.external_project_id
+)
+WHERE ct.is_current = true
+  AND ct.base_rate IS NOT NULL
+ON CONFLICT (clause_tariff_id, contract_year) DO NOTHING;
+
 -- =============================================================================
 -- Step 5: Post-Load Assertions (fail → ROLLBACK)
 -- =============================================================================
@@ -565,6 +646,43 @@ BEGIN
     RAISE EXCEPTION 'No contract found for project_id=%', v_project_id;
   END IF;
 
+  -- Verify billing products match staging count
+  DECLARE v_stg_bp_count INTEGER; v_bp_count INTEGER; v_primary_count INTEGER;
+  BEGIN
+    SELECT COUNT(*) INTO v_stg_bp_count FROM stg_billing_products WHERE external_project_id = v_ext_id;
+    IF v_stg_bp_count > 0 THEN
+      SELECT COUNT(*), COUNT(*) FILTER (WHERE is_primary = true)
+        INTO v_bp_count, v_primary_count
+        FROM contract_billing_product
+        WHERE contract_id IN (SELECT id FROM contract WHERE project_id = v_project_id);
+      IF v_bp_count < v_stg_bp_count THEN
+        RAISE EXCEPTION 'Expected at least % contract_billing_product rows, found %', v_stg_bp_count, v_bp_count;
+      END IF;
+      IF v_primary_count != 1 THEN
+        RAISE EXCEPTION 'Expected exactly 1 primary billing product per contract, found %', v_primary_count;
+      END IF;
+    END IF;
+  END;
+
+  -- Verify tariff rate period Year 1 was created for each tariff with base_rate
+  DECLARE v_tariff_count INTEGER; v_trp_count INTEGER;
+  BEGIN
+    SELECT COUNT(*) INTO v_tariff_count
+      FROM clause_tariff ct
+      JOIN contract c ON ct.contract_id = c.id
+      WHERE c.project_id = v_project_id AND ct.is_current = true AND ct.base_rate IS NOT NULL;
+    IF v_tariff_count > 0 THEN
+      SELECT COUNT(*) INTO v_trp_count
+        FROM tariff_rate_period trp
+        JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
+        JOIN contract c ON ct.contract_id = c.id
+        WHERE c.project_id = v_project_id AND trp.is_current = true;
+      IF v_trp_count < v_tariff_count THEN
+        RAISE EXCEPTION 'Expected at least % current tariff_rate_period rows (one per tariff), found %', v_tariff_count, v_trp_count;
+      END IF;
+    END IF;
+  END;
+
   -- Data quality: guaranteed_kwh must be positive
   IF EXISTS (
     SELECT 1 FROM production_guarantee
@@ -609,7 +727,7 @@ BEGIN
   END IF;
 
   RAISE NOTICE 'Post-load assertions passed for project % (id=%)', v_ext_id, v_project_id;
-  RAISE NOTICE '  Forecasts: %, Guarantees: %', v_forecast_count, v_guarantee_count;
+  RAISE NOTICE '  Forecasts: %, Guarantees: %, Billing products: checked, Rate periods: checked', v_forecast_count, v_guarantee_count;
 END $$;
 
 COMMIT;

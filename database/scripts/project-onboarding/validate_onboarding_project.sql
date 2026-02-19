@@ -3,13 +3,13 @@
 -- Reusable onboarding validation query pack
 --
 -- Usage examples:
---   psql "$DATABASE_URL" -f database/scripts/validate_onboarding_project.sql
+--   psql "$DATABASE_URL" -f database/scripts/project-onboarding/validate_onboarding_project.sql
 --   psql "$DATABASE_URL" \
 --     -v external_project_id=GH-MOH01 \
 --     -v expected_forecast_rows=12 \
 --     -v expected_guarantee_rows=20 \
 --     -v expected_meter_rows=5 \
---     -f database/scripts/validate_onboarding_project.sql
+--     -f database/scripts/project-onboarding/validate_onboarding_project.sql
 -- =============================================================================
 
 \if :{?external_project_id}
@@ -132,6 +132,118 @@ FROM (
     (SELECT COUNT(*)::text FROM asset a WHERE a.project_id IN (SELECT project_id FROM ctx)),
     '>=1',
     'At least one asset row expected from technical onboarding'
+
+  UNION ALL
+
+  SELECT
+    'core',
+    'billing_product_count',
+    CASE
+      WHEN (
+        SELECT COUNT(*)
+        FROM contract_billing_product cbp
+        JOIN contract c ON c.id = cbp.contract_id
+        WHERE c.project_id IN (SELECT project_id FROM ctx)
+      ) >= 1 THEN 'PASS'
+      ELSE 'WARN'
+    END,
+    (
+      SELECT COUNT(*)::text
+      FROM contract_billing_product cbp
+      JOIN contract c ON c.id = cbp.contract_id
+      WHERE c.project_id IN (SELECT project_id FROM ctx)
+    ),
+    '>=1',
+    'At least one billing product per contract'
+
+  UNION ALL
+
+  SELECT
+    'core',
+    'billing_product_single_primary',
+    CASE
+      WHEN (
+        SELECT COUNT(*)
+        FROM contract_billing_product cbp
+        JOIN contract c ON c.id = cbp.contract_id
+        WHERE c.project_id IN (SELECT project_id FROM ctx) AND cbp.is_primary = true
+      ) = 1 THEN 'PASS'
+      WHEN (
+        SELECT COUNT(*)
+        FROM contract_billing_product cbp
+        JOIN contract c ON c.id = cbp.contract_id
+        WHERE c.project_id IN (SELECT project_id FROM ctx)
+      ) = 0 THEN 'WARN'
+      ELSE 'FAIL'
+    END,
+    (
+      SELECT COUNT(*)::text
+      FROM contract_billing_product cbp
+      JOIN contract c ON c.id = cbp.contract_id
+      WHERE c.project_id IN (SELECT project_id FROM ctx) AND cbp.is_primary = true
+    ),
+    '1',
+    'Exactly one primary billing product per contract'
+
+  UNION ALL
+
+  SELECT
+    'core',
+    'tariff_rate_period_count',
+    CASE
+      WHEN (
+        SELECT COUNT(*)
+        FROM tariff_rate_period trp
+        JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
+        WHERE ct.project_id IN (SELECT project_id FROM ctx)
+      ) >= 1 THEN 'PASS'
+      ELSE 'WARN'
+    END,
+    (
+      SELECT COUNT(*)::text
+      FROM tariff_rate_period trp
+      JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
+      WHERE ct.project_id IN (SELECT project_id FROM ctx)
+    ),
+    '>=1',
+    'At least one tariff rate period (Year 1) per tariff'
+
+  UNION ALL
+
+  SELECT
+    'core',
+    'tariff_rate_period_single_current',
+    CASE
+      WHEN (
+        SELECT COUNT(*)
+        FROM tariff_rate_period trp
+        JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
+        WHERE ct.project_id IN (SELECT project_id FROM ctx) AND trp.is_current = true
+      ) = (
+        SELECT COUNT(*)
+        FROM clause_tariff ct
+        WHERE ct.project_id IN (SELECT project_id FROM ctx) AND ct.is_current = true AND ct.base_rate IS NOT NULL
+      ) THEN 'PASS'
+      WHEN (
+        SELECT COUNT(*)
+        FROM tariff_rate_period trp
+        JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
+        WHERE ct.project_id IN (SELECT project_id FROM ctx)
+      ) = 0 THEN 'WARN'
+      ELSE 'FAIL'
+    END,
+    (
+      SELECT COUNT(*)::text
+      FROM tariff_rate_period trp
+      JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
+      WHERE ct.project_id IN (SELECT project_id FROM ctx) AND trp.is_current = true
+    ),
+    (
+      SELECT COUNT(*)::text
+      FROM clause_tariff ct
+      WHERE ct.project_id IN (SELECT project_id FROM ctx) AND ct.is_current = true AND ct.base_rate IS NOT NULL
+    ),
+    'Exactly one current rate period per tariff with base_rate'
 
   UNION ALL
 
@@ -511,3 +623,35 @@ FROM meter m
 JOIN project p ON p.id = m.project_id
 WHERE p.external_project_id = :'external_project_id'
 ORDER BY m.id;
+
+SELECT
+  cbp.id,
+  cbp.contract_id,
+  bp.code AS product_code,
+  bp.name AS product_name,
+  cbp.is_primary,
+  bp.organization_id AS bp_org_id
+FROM contract_billing_product cbp
+JOIN billing_product bp ON bp.id = cbp.billing_product_id
+JOIN contract c ON c.id = cbp.contract_id
+JOIN project p ON p.id = c.project_id
+WHERE p.external_project_id = :'external_project_id'
+ORDER BY cbp.is_primary DESC, bp.code;
+
+SELECT
+  trp.id,
+  trp.clause_tariff_id,
+  ct.tariff_group_key,
+  trp.contract_year,
+  trp.period_start,
+  trp.period_end,
+  trp.effective_rate,
+  cur.code AS currency,
+  trp.is_current,
+  trp.calculation_basis
+FROM tariff_rate_period trp
+JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
+JOIN project p ON p.id = ct.project_id
+LEFT JOIN currency cur ON cur.id = trp.currency_id
+WHERE p.external_project_id = :'external_project_id'
+ORDER BY ct.tariff_group_key, trp.contract_year;

@@ -1141,13 +1141,13 @@ and token-based external submission collection.
 
 **Description:** Redesigned migration 033 with amendment versioning, reference price table (renamed from grid_reference_price), and cleanup of dropped tables (project_document, project_onboarding_snapshot). Removes received_invoice_line_item ALTER (charge_type/is_tax/tou_bucket) in favor of invoice_line_item_type seeds. Adds contract amendment tracking with supersedes chains and is_current semantics on clause and clause_tariff.
 
-**Reference:** `IMPLEMENTATION_GUIDE_PROJECT_ONBOARDING.md`
+**Reference:** `database/docs/IMPLEMENTATION_GUIDE_PROJECT_ONBOARDING.md`
 
 **Migrations:**
 - `database/migrations/033_project_onboarding.sql` - Combined migration (ALTERs + CREATEs + seeds + RLS + amendment tracking)
 
 **ETL Script:**
-- `database/scripts/onboard_project.sql` - Staged ETL with batch validation and post-load assertions
+- `database/scripts/project-onboarding/onboard_project.sql` - Staged ETL with batch validation and post-load assertions
 
 **Key Changes:**
 
@@ -1286,5 +1286,71 @@ and token-based external submission collection.
 - metering_type (net/export_only) kept separate from meter_type (REVENUE/PRODUCTION/IRRADIANCE)
 - GRP charge classification moved from received_invoice_line_item columns to invoice_line_item_type FK
 - project_document and project_onboarding_snapshot dropped — not needed for current workflow
+
+---
+
+### v9.1 - 2026-02-19 (Billing Product Capture & Tariff Rate Versioning)
+
+**Description:** Adds billing product reference table for Sage/ERP product codes, contract-product junction for multi-product contracts, and tariff rate period table for tracking annual escalation without modifying the original contractual base_rate.
+
+**Migrations:**
+- `database/migrations/034_billing_product_and_rate_period.sql` - Three new tables + CBE seed data + RLS
+
+**Key Changes:**
+
+**New Table: billing_product**
+- `id` - BIGSERIAL PRIMARY KEY
+- `code` - VARCHAR(50) NOT NULL — Sage/ERP product code (e.g., GHREVS001)
+- `name` - VARCHAR(255) — Human-readable name (e.g., "Metered Energy (EMetered)")
+- `organization_id` - BIGINT REFERENCES organization(id) — NULL = platform-level canonical
+- `is_active` - BOOLEAN DEFAULT true
+- Partial unique index `uq_billing_product_canonical(code) WHERE organization_id IS NULL` — prevents duplicate canonical rows (NULL ≠ NULL in standard UNIQUE)
+- Partial unique index `uq_billing_product_org(code, organization_id) WHERE organization_id IS NOT NULL` — enforces uniqueness within each organization
+- Seeded with ~110 CBE product codes from `dim_finance_product_code.csv`
+
+**New Table: contract_billing_product**
+- `id` - BIGSERIAL PRIMARY KEY
+- `contract_id` - BIGINT NOT NULL REFERENCES contract(id)
+- `billing_product_id` - BIGINT NOT NULL REFERENCES billing_product(id)
+- `is_primary` - BOOLEAN DEFAULT false — Marks the main revenue line
+- `notes` - TEXT
+- UNIQUE(contract_id, billing_product_id)
+- Partial unique index `uq_contract_billing_product_primary(contract_id) WHERE is_primary = true` — enforces single primary product per contract
+- Cross-tenant validation trigger `trg_contract_billing_product_org_check` — ensures billing_product belongs to same org as contract (or is canonical)
+
+**New Table: tariff_rate_period**
+- `id` - BIGSERIAL PRIMARY KEY
+- `clause_tariff_id` - BIGINT NOT NULL REFERENCES clause_tariff(id)
+- `contract_year` - INTEGER NOT NULL — Contract operating year (1-based)
+- `period_start` - DATE NOT NULL
+- `period_end` - DATE
+- `effective_rate` - DECIMAL NOT NULL — Rate after escalation
+- `currency_id` - BIGINT REFERENCES currency(id)
+- `calculation_basis` - TEXT — Human-readable explanation (e.g., "Base 0.1087 + 2.5% CPI")
+- `is_current` - BOOLEAN NOT NULL DEFAULT false
+- `approved_by` - UUID REFERENCES auth.users(id)
+- `approved_at` - TIMESTAMPTZ
+- UNIQUE(clause_tariff_id, contract_year)
+- CHECK (contract_year >= 1)
+- CHECK (effective_rate >= 0)
+- CHECK (period_end IS NULL OR period_end >= period_start)
+- Unique partial index: `idx_tariff_rate_period_current(clause_tariff_id) WHERE is_current = true` — enforces single current rate per tariff
+
+**Onboarding Pipeline Changes:**
+- `excel_parser.py`: Added "product to be billed" / "product code" / "billing product" label mappings; comma/semicolon splitting in `_normalize_fields()`
+- `models/onboarding.py`: Added `product_to_be_billed`, `product_to_be_billed_list` to ExcelOnboardingData; `billing_products` to MergedOnboardingData
+- `onboarding_service.py`: Added `stg_billing_products` staging table, population, and billing_products count in preview response
+- `onboard_project.sql`: Added `stg_billing_products` staging table; Step 4.10 (contract_billing_product upsert with LATERAL preference for org-scoped over canonical); Step 4.11 (tariff_rate_period Year 1 initialization)
+
+**Design Notes:**
+- billing_product is contract-level, not clause_tariff-level — product codes describe WHAT is billed; tariff terms describe HOW
+- tariff_rate_period separates operational rate escalation from contract amendments (version/is_current/supersedes on clause_tariff)
+- clause_tariff.base_rate stays as the original contractual rate, never modified after onboarding
+- Year 1 tariff_rate_period is auto-created during onboarding (effective_rate = base_rate)
+- Escalation types: FIXED_INCREASE/PERCENTAGE are deterministic (pre-populate); US_CPI is semi-deterministic; REBASED_MARKET_PRICE is dynamic
+- Partial unique indexes on billing_product solve the NULL ≠ NULL problem for canonical rows (PostgreSQL UNIQUE treats NULLs as distinct)
+- Cross-tenant trigger on contract_billing_product prevents org A's contract from referencing org B's billing products
+- Unique partial index on is_current prevents multiple active rates per clause_tariff (escalation must flip previous row first)
+- onboard_project.sql Step 4.10 uses JOIN LATERAL with ORDER BY organization_id NULLS LAST to prefer org-scoped products over canonical when both exist for same code
 
 ---
