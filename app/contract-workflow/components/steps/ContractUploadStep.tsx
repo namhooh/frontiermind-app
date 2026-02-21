@@ -10,6 +10,7 @@
 
 import { useState, useCallback, useRef, useMemo, useEffect } from 'react'
 import { Upload, FileText, Loader2, AlertCircle, Check, Building2, FolderKanban } from 'lucide-react'
+import { getApiBaseUrl } from '@/lib/api/config'
 import { useWorkflow } from '@/lib/workflow'
 import {
   APIClient,
@@ -126,7 +127,7 @@ export function ContractUploadStep() {
         setLoadingOrgs(true)
         setOrgLoadError(null)
         const response = await fetch(
-          `${process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000'}/api/organizations`
+          `${getApiBaseUrl()}/api/organizations`
         )
         if (response.ok) {
           const data = await response.json()
@@ -154,7 +155,7 @@ export function ContractUploadStep() {
       try {
         setLoadingProjects(true)
         const response = await fetch(
-          `${process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000'}/api/projects?organization_id=${state.organizationId}`
+          `${getApiBaseUrl()}/api/projects?organization_id=${state.organizationId}`
         )
         if (response.ok) {
           const data = await response.json()

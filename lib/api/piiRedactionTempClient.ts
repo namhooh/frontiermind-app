@@ -4,8 +4,9 @@
 
 import type { PIIRedactionResult, ProcessingStage } from '@/lib/pii-redaction-temp'
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000'
+import { getApiBaseUrl } from './config'
+
+const API_BASE_URL = getApiBaseUrl()
 
 export interface PIIRedactionTempClientConfig {
   baseUrl?: string

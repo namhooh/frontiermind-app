@@ -5,8 +5,9 @@
  * Supports presigned URL uploads and status checking.
  */
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000'
+import { getApiBaseUrl } from './config'
+
+const API_BASE_URL = getApiBaseUrl()
 
 // ============================================================================
 // Types

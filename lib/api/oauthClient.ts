@@ -8,7 +8,9 @@
  * to prevent CSRF attacks. Never generate state client-side.
  */
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL;
+import { getApiBaseUrl } from './config'
+
+const BACKEND_URL = getApiBaseUrl();
 
 export interface OAuthStateResponse {
   state: string;
@@ -40,10 +42,6 @@ export type OAuthProvider = 'enphase' | 'sma';
 export async function generateOAuthState(
   organizationId: number
 ): Promise<OAuthStateResponse> {
-  if (!BACKEND_URL) {
-    throw new Error('NEXT_PUBLIC_PYTHON_BACKEND_URL is not configured');
-  }
-
   const response = await fetch(`${BACKEND_URL}/api/oauth/state`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

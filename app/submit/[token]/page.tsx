@@ -3,8 +3,9 @@
 import { useState, useEffect } from 'react'
 import { useParams } from 'next/navigation'
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000'
+import { getApiBaseUrl } from '@/lib/api/config'
+
+const API_BASE_URL = getApiBaseUrl()
 
 interface SubmissionField {
   name?: string

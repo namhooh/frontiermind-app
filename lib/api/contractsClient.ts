@@ -16,8 +16,9 @@
 // Configuration
 // ============================================================================
 
-const API_BASE_URL =
-  process.env.NEXT_PUBLIC_PYTHON_BACKEND_URL || 'http://localhost:8000'
+import { getApiBaseUrl } from './config'
+
+const API_BASE_URL = getApiBaseUrl()
 
 const DEFAULT_RETRY_COUNT = 3
 const DEFAULT_RETRY_DELAY_MS = 1000
