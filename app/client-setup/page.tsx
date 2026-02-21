@@ -27,11 +27,11 @@ export default function AdminPage() {
             </p>
           </div>
           <Link
-            href="/workflow"
+            href="/"
             className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
           >
             <ArrowLeft className="h-4 w-4" />
-            Back to Workflow
+            Back to Home
           </Link>
         </div>
 

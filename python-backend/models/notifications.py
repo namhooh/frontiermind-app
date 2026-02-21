@@ -161,6 +161,26 @@ class SubmitResponseRequest(BaseModel):
     submitted_by_email: Optional[str] = Field(None, max_length=255)
 
 
+class GRPCollectionRequest(BaseModel):
+    """Request to generate a GRP collection token."""
+    project_id: int = Field(..., description="Project for GRP collection")
+    counterparty_id: Optional[int] = Field(None, description="Utility counterparty")
+    operating_year: int = Field(..., ge=1, description="Contract operating year")
+    max_uses: int = Field(12, ge=1, le=24, description="Max uploads (default 12 = one per month)")
+    expiry_hours: int = Field(8760, description="Token expiry in hours (default 1 year)")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "project_id": 1,
+                "counterparty_id": 3,
+                "operating_year": 2,
+                "max_uses": 12,
+            }
+        }
+    )
+
+
 # =============================================================================
 # RESPONSE MODELS
 # =============================================================================
@@ -258,6 +278,8 @@ class SubmissionFormConfig(BaseModel):
     invoice_summary: Optional[Dict[str, Any]] = None
     counterparty_name: Optional[str] = None
     organization_name: Optional[str] = None
+    project_name: Optional[str] = None
+    submission_type: str = "form_response"
     expires_at: datetime
 
 

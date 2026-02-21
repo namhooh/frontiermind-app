@@ -170,11 +170,11 @@ Note: The Excel template had no "product to be billed" field populated. Products
 
 ### 1.10 Tariff Rate Period (1 row)
 
-| Clause Tariff | Year | Period Start | Period End | Effective Rate | Currency | Current | Basis |
+| Clause Tariff | Year | Period Start | Period End | Effective Tariff | Currency | Current | Basis |
 |---|---|---|---|---|---|---|---|
 | GH-MOH01-PPA-001-MAIN | 1 | 2025-09-01 | — | 0.1087 | USD | Yes | Year 1: original contractual base rate |
 
-Year 1 effective_rate equals the clause_tariff.base_rate. Future escalation (REBASED_MARKET_PRICE) will insert new rows and flip `is_current` on this row to false. The unique partial index `idx_tariff_rate_period_current` enforces exactly one current rate per clause_tariff.
+Year 1 effective_tariff equals the clause_tariff.base_rate. Future escalation (REBASED_MARKET_PRICE) will insert new rows and flip `is_current` on this row to false. The unique partial index `idx_tariff_annual_rate_current` enforces exactly one current rate per clause_tariff.
 
 ### 1.11 Customer Contacts
 
@@ -329,13 +329,13 @@ Fields that were correctly set by the manual script but are not handled by the a
 
 ### 4.1 Context
 
-Migration 034 (`034_billing_product_and_rate_period.sql`) added three new tables: `billing_product`, `contract_billing_product`, and `tariff_rate_period`. The migration was applied after GH-MOH01's initial onboarding, so the project had no data in these tables.
+Migration 034 (`034_billing_product_and_rate_period.sql`) added three new tables: `billing_product`, `contract_billing_product`, and `tariff_annual_rate`. The migration was applied after GH-MOH01's initial onboarding, so the project had no data in these tables.
 
 A post-implementation review identified integrity gaps in migration 034:
 - `UNIQUE(code, organization_id)` didn't prevent duplicate canonical rows (NULL ≠ NULL)
 - No cross-tenant guard on `contract_billing_product`
-- `tariff_rate_period.is_current` index was non-unique, allowing multiple current rows
-- No CHECK constraints on `tariff_rate_period`
+- `tariff_annual_rate.is_current` index was non-unique, allowing multiple current rows
+- No CHECK constraints on `tariff_annual_rate`
 - Multiple `is_primary` billing products per contract allowed
 - Step 4.10 JOIN could match both canonical AND org-scoped rows for same code
 
@@ -349,10 +349,10 @@ All six issues were fixed in migration 034 before the backfill (partial unique i
 
 Both resolve to canonical billing products (`organization_id IS NULL`) via the updated LATERAL JOIN in `onboard_project.sql` Step 4.10, which prefers org-scoped over canonical (`ORDER BY organization_id NULLS LAST`).
 
-**tariff_rate_period** (1 row):
+**tariff_annual_rate** (1 row):
 - clause_tariff_id = 2 (GH-MOH01-PPA-001-MAIN)
-- contract_year = 1, effective_rate = 0.1087 USD, is_current = true
-- Created via `onboard_project.sql` Step 4.11 logic (effective_rate = base_rate for Year 1)
+- contract_year = 1, effective_tariff = 0.1087 USD, is_current = true
+- Created via `onboard_project.sql` Step 4.11 logic (effective_tariff = base_rate for Year 1)
 
 ### 4.3 Integrity Constraints Verified
 
@@ -361,9 +361,9 @@ Both resolve to canonical billing products (`organization_id IS NULL`) via the u
 | `uq_billing_product_canonical` — no duplicate canonical codes | Seed data ON CONFLICT confirmed |
 | `uq_contract_billing_product_primary` — single primary per contract | 1 primary (GHREVS001) |
 | `trg_contract_billing_product_org_check` — cross-tenant validation | Both products canonical (NULL org) — allowed |
-| `idx_tariff_rate_period_current` (UNIQUE) — single current per tariff | 1 current row for clause_tariff_id=2 |
+| `idx_tariff_annual_rate_current` (UNIQUE) — single current per tariff | 1 current row for clause_tariff_id=2 |
 | `CHECK (contract_year >= 1)` | contract_year = 1 |
-| `CHECK (effective_rate >= 0)` | effective_rate = 0.1087 |
+| `CHECK (effective_tariff >= 0)` | effective_tariff = 0.1087 |
 | `CHECK (period_end IS NULL OR period_end >= period_start)` | period_end = NULL |
 
 ### 4.4 Template Updates
@@ -373,7 +373,7 @@ Both resolve to canonical billing products (`organization_id IS NULL`) via the u
 | File | Change |
 |---|---|
 | `onboard_project.sql` | Prerequisites reference migration 034; `stg_project_core.agreed_fx_rate_source` widened to TEXT; Step 3 validates billing product codes exist; Step 5 asserts billing product count, single primary, and tariff rate period count |
-| `validate_onboarding_project.sql` | 4 new core checks (billing_product_count, billing_product_single_primary, tariff_rate_period_count, tariff_rate_period_single_current); 2 new snapshot tables |
+| `validate_onboarding_project.sql` | 4 new core checks (billing_product_count, billing_product_single_primary, tariff_annual_rate_count, tariff_annual_rate_single_current); 2 new snapshot tables |
 
 ---
 
@@ -390,7 +390,7 @@ Both resolve to canonical billing products (`organization_id IS NULL`) via the u
 
 Migration 034 backfill items (all fixed):
 - `contract_billing_product`: 2 rows (GHREVS001 primary, GHREVS002 secondary)
-- `tariff_rate_period`: 1 row (Year 1, effective_rate = 0.1087 USD, is_current = true)
+- `tariff_annual_rate`: 1 row (Year 1, effective_tariff = 0.1087 USD, is_current = true)
 - Schema integrity: 6 constraints verified (partial unique indexes, cross-tenant trigger, CHECKs)
 
 ### Open Items

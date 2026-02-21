@@ -27,8 +27,8 @@ Client Data Warehouse (e.g. CBE Snowflake)
 |                                                       |
 |  Ontology Layer                                       |
 |    tariff_type, clause_category, clause_type,         |
-|    tariff_structure_type, energy_sale_type,            |
-|    escalation_type (org-scoped lookup tables)          |
+|    energy_sale_type, escalation_type                  |
+|    (org-scoped lookup tables)                         |
 |    (FrontierMind defines the domain vocabulary)       |
 |                                                       |
 |  Core Tables                                          |
@@ -95,13 +95,15 @@ CBE provides contract line data from `dim_finance_contract_line` (Snowflake/CSV)
 
 These fields define HOW the tariff is calculated, not just the base rate. They come from the AM Onboarding Template (one-time at COD) and the `Inp_Proj` tabs in the Operating Revenue Masterfile.
 
-**Classification FKs** — These reference org-scoped lookup tables (migration 027). Platform-level canonical types have `organization_id = NULL`; client-specific subtypes have a non-NULL org FK.
+**Classification FKs** — Three classification axes on `clause_tariff` (after migration 034 dropped `tariff_structure_type`):
+
+> **Multi-value service types:** The onboarding parser now supports Contract Service/Product Type 1 and Type 2 from the template. When a contract has multiple service types (e.g., "Energy Sales" + "Equipment Rental/Lease/BOOT"), the system creates one `clause_tariff` row per service type, each with its own rate (base_rate for energy, equipment_rental_rate for rental, bess_fee for BESS, etc.).
 
 | Source Field | FrontierMind Column | Storage | Notes |
 |---|---|---|---|
-| Onboarding "Energy Sales Tariff Type" | `tariff_structure_id` | FK → `tariff_structure_type` | Resolves to FIXED, GRID, or GENERATOR |
-| Onboarding "Contract Service/Product Type" | `energy_sale_type_id` | FK → `energy_sale_type` | Resolves to TAKE_OR_PAY, MIN_OFFTAKE, FULL_OFFTAKE, AS_PRODUCED, DEEMED |
-| Onboarding "Price Adjustment type" / `Inp_Proj` row 108 | `escalation_type_id` | FK → `escalation_type` | Resolves to FIXED, CPI, CUSTOM, NONE, GRID_PASSTHROUGH |
+| Onboarding "Contract Service/Product Type" | `tariff_type_id` | FK → `tariff_type` | Resolves to ENERGY_SALES, EQUIPMENT_RENTAL_LEASE, LOAN, BESS_LEASE, ENERGY_AS_SERVICE, OTHER_SERVICE, NOT_APPLICABLE |
+| Onboarding "Energy Sales Tariff Type" | `energy_sale_type_id` | FK → `energy_sale_type` | Resolves to FIXED_SOLAR, FLOATING_GRID, FLOATING_GENERATOR, FLOATING_GRID_GENERATOR, NOT_ENERGY_SALES |
+| Onboarding "Price Adjustment type" / `Inp_Proj` row 108 | `escalation_type_id` | FK → `escalation_type` | Resolves to FIXED_INCREASE, PERCENTAGE, US_CPI, REBASED_MARKET_PRICE, NONE |
 | (from MRP currency) | `market_ref_currency_id` | FK → `currency` | MRP currency (often differs from billing currency) |
 
 **Pricing formula parameters** — These are stored in `clause_tariff.logic_parameters` JSONB, not as standalone columns. The Pricing Calculator reads them at invoice generation time.
@@ -122,6 +124,9 @@ These fields define HOW the tariff is calculated, not just the base rate. They c
 | `Inp_Proj` row 170 "Ceiling escalation month" | `ceiling_escalation_month` | |
 | `Inp_Proj` row 2 "Annual degradation factor" | `degradation_rate` | e.g. 0.007 for 0.7% |
 | Plant Performance formula (Y col) | `min_offtake_pct` | e.g. 0.80 for 80% (Min Offtake contracts only) |
+| Onboarding "Billing frequency" (row 30) | `billing_frequency` | "Monthly", "Quarterly" — determines period granularity |
+| Onboarding "Price adjustment frequency" (row 43) | `escalation_frequency` | "Annually", "Biannually" — escalation cadence |
+| Onboarding "Energy Sales Tariff to be adjusted" (row 47) | `tariff_components_to_adjust` | Which components get escalated (e.g. "Solar Tarrif + Floor Tarrif") |
 
 #### Tariff Type Mapping
 
@@ -252,6 +257,17 @@ Each month's `opening_reading` must equal the previous month's `closing_reading`
 | `END_DATE` | `end_date` | |
 | `CURRENCY_CODE` | `currency_id` (FK) | Contract default currency |
 
+**Onboarding-sourced contract fields** (from AM Onboarding Template):
+
+| Onboarding Field | FrontierMind Column | Notes |
+|---|---|---|
+| "Payment Terms" (row 48) | `payment_terms` | VARCHAR(50), e.g. "Net 30" (migration 034) |
+| "Confirmation signed PPA uploaded" (row 50) | `ppa_confirmed_uploaded` | BOOLEAN (migration 033) |
+| "Any amendments post PPA" (row 51) | `has_amendments` | BOOLEAN (migration 033, auto-maintained by trigger) |
+| "Is Payment Security required?" (row 53) | `payment_security_required` | BOOLEAN (migration 033) |
+| "If yes, please include details" (row 54) | `payment_security_details` | TEXT (migration 033) |
+| "Agreed source of exchange rate" (row 49) | `agreed_fx_rate_source` | TEXT (migration 033) |
+
 ---
 
 ### 4. CBE Customers → `counterparty`
@@ -273,9 +289,18 @@ From the AM Onboarding Template "Key Customer Contacts" section. Each counterpar
 | Contact role | `role` | 'accounting', 'cfo', 'financial_manager', 'general_manager', 'operations_manager' |
 | Full Name | `full_name` | |
 | Email | `email` | |
-| Include in Invoice Email? | `include_in_invoice_email` | Boolean: determines who gets invoice notifications |
-| "Only contact for escalation" | `escalation_only` | Boolean: only contacted for overdue/disputes |
+| Invoice selection (column B) | `include_in_invoice_email` + `escalation_only` | Three-state flag — see mapping below |
 | (FK) | `counterparty_id` | Links to customer |
+
+**Three-state invoice flag mapping:** The template column B is a single selection (Yes / No / Only contact for escalation) that maps to two boolean columns:
+
+| Template Value | `include_in_invoice_email` | `escalation_only` | Notification Behavior |
+|---|---|---|---|
+| **Yes** | `true` | `false` | Gets all invoice emails |
+| **Only contact for escalation** | `true` | `true` | Only gets escalation emails (overdue/disputes) |
+| **No** | `false` | `false` | Gets nothing |
+
+Parser: `normalize_contact_invoice_flag()` in `normalizer.py` detects "escalation" substring for the middle state, falls back to `normalize_boolean()` for Yes/No. Notification query in `notification_repository.py` filters `include_in_invoice_email = true` then optionally excludes `escalation_only = true` for routine sends.
 
 ---
 
@@ -482,9 +507,8 @@ From the Operating Revenue Masterfile "Loans" tab. CBE currently has 3 active lo
 +-----------------------------------------------------------------------+
 | 1. clause_tariff                                                      |
 |    tariff_group_key = "CONZIM00-2025-00002-4000"                      |
-|    tariff_type_id -> METERED_ENERGY                                   |
-|    tariff_structure_id -> FIXED (FK to tariff_structure_type)         |
-|    energy_sale_type_id -> TAKE_OR_PAY (FK to energy_sale_type)       |
+|    tariff_type_id -> ENERGY_SALES (FK to tariff_type)                 |
+|    energy_sale_type_id -> FIXED_SOLAR (FK to energy_sale_type)       |
 |    escalation_type_id -> FIXED (FK to escalation_type)               |
 |    base_rate = 0.12 ZAR                                               |
 |    logic_parameters = {escalation_rate: 0.01, ...}                    |
@@ -709,9 +733,8 @@ Tracks which tables/views referenced in this mapping doc have concrete migration
 | Table/View | Migration | Status |
 |------------|-----------|--------|
 | `clause_tariff` (base) | 000_baseline + 022 | Implemented |
-| `clause_tariff` classification FKs (`tariff_structure_id`, `energy_sale_type_id`, `escalation_type_id`, `market_ref_currency_id`) | 027 | Implemented |
-| `tariff_structure_type` lookup | 027 | Implemented (seeded: FIXED, GRID, GENERATOR) |
-| `energy_sale_type` lookup | 027 | Implemented (seeded: TAKE_OR_PAY, MIN_OFFTAKE, TAKE_AND_PAY, LEASE) |
+| `clause_tariff` classification FKs (`tariff_type_id`, `energy_sale_type_id`, `escalation_type_id`, `market_ref_currency_id`) | 027 + 034 | Implemented (`tariff_structure_id` dropped in 034) |
+| `energy_sale_type` lookup | 027 | Implemented (seeded: FIXED_SOLAR, FLOATING_GRID, FLOATING_GENERATOR, FLOATING_GRID_GENERATOR, NOT_ENERGY_SALES) |
 | `escalation_type` lookup | 027 | Implemented (seeded: FIXED, CPI, CUSTOM, NONE, GRID_PASSTHROUGH) |
 | `meter_aggregate` | 000_baseline + 007 + 022 + 026 | Implemented |
 | `customer_contact` | 028 | Implemented |
@@ -723,5 +746,9 @@ Tracks which tables/views referenced in this mapping doc have concrete migration
 | `tariff_type` (seeded) | 022 | Implemented (14 types) |
 | `billing_period` (calendar) | 021 + 033 | Implemented (48 months: Jan 2024 – Dec 2027, UNIQUE on dates) |
 | `generated_report.invoice_direction` | 034 | Implemented (nullable enum, wired through report pipeline) |
+| `contract.payment_terms` | 034 | Implemented (VARCHAR(50), parsed from onboarding template) |
+| `contract.ppa_confirmed_uploaded`, `has_amendments` | 033 | Implemented (BOOLEAN, now wired through parser) |
+| Multi-value billing products (Product 1/2/3) | — | Implemented in parser (extracts all numbered "Product to be billed" rows) |
+| Multi-value service types (Type 1/2) | — | Implemented in parser + merge (creates one `clause_tariff` per service type) |
 | `price_index` | — | **Pending** — needed for CPI escalation |
 | `loan_schedule` / `loan_payment` | — | **Pending** — needed for loan repayment tracking |

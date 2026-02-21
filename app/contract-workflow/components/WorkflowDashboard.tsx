@@ -14,7 +14,7 @@ import { ClauseReviewStep } from './steps/ClauseReviewStep'
 import { MeterDataStep } from './steps/MeterDataStep'
 import { InvoiceGenerationStep } from './steps/InvoiceGenerationStep'
 import { ReportGenerationStep } from './steps/ReportGenerationStep'
-import { RefreshCw, FileText } from 'lucide-react'
+import { RefreshCw, FileText, ArrowLeft } from 'lucide-react'
 import { Button } from '@/app/components/ui/button'
 import Link from 'next/link'
 
@@ -37,7 +37,13 @@ function WorkflowContent() {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Link href="/reports">
+              <Link href="/">
+                <Button variant="ghost" size="sm">
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Home
+                </Button>
+              </Link>
+              <Link href="/contract-workflow/reports">
                 <Button variant="outline" size="sm">
                   <FileText className="w-4 h-4 mr-2" />
                   View Reports

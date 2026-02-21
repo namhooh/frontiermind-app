@@ -36,6 +36,7 @@ from api.oauth import router as oauth_router
 from api.notifications import router as notifications_router
 from api.submissions import router as submissions_router
 from api.onboarding import router as onboarding_router
+from api.grp import router as grp_router
 
 # Import email notification scheduler
 from services.email import scheduler as email_scheduler
@@ -89,7 +90,7 @@ app.add_middleware(
     ],
     allow_origin_regex=r"https://.*\.vercel\.app",  # Matches all Vercel deployments
     allow_credentials=True,
-    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allow_headers=["*"],
 )
 
@@ -106,6 +107,7 @@ app.include_router(oauth_router)
 app.include_router(notifications_router)
 app.include_router(submissions_router)
 app.include_router(onboarding_router)
+app.include_router(grp_router)
 
 
 @app.get("/", response_model=Dict[str, str])

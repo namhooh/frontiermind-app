@@ -29,7 +29,7 @@ TARIFF_DIFF_FIELDS = [
     "valid_from",
     "valid_to",
     "logic_parameters",
-    "tariff_structure_id",
+    "tariff_type_id",
     "energy_sale_type_id",
     "escalation_type_id",
     "currency_id",

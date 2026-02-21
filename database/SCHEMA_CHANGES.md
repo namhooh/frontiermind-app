@@ -1290,12 +1290,12 @@ and token-based external submission collection.
 
 ---
 
-### v9.1 - 2026-02-19 (Billing Product Capture & Tariff Rate Versioning)
+### v9.1 - 2026-02-19 (Billing Product Capture, Tariff Rate Versioning & Pricing Gap Fixes)
 
-**Description:** Adds billing product reference table for Sage/ERP product codes, contract-product junction for multi-product contracts, and tariff rate period table for tracking annual escalation without modifying the original contractual base_rate.
+**Description:** Adds billing product reference table for Sage/ERP product codes, contract-product junction for multi-product contracts, tariff rate period table for tracking annual escalation without modifying the original contractual base_rate, payment_terms column on contract, and pricing gap fixes (multi-value extraction, label mismatches, escalation detail fields).
 
 **Migrations:**
-- `database/migrations/034_billing_product_and_rate_period.sql` - Three new tables + CBE seed data + RLS
+- `database/migrations/034_billing_product_and_rate_period.sql` - Three new tables + CBE seed data + RLS + tariff classification cleanup + payment_terms
 
 **Key Changes:**
 
@@ -1319,13 +1319,15 @@ and token-based external submission collection.
 - Partial unique index `uq_contract_billing_product_primary(contract_id) WHERE is_primary = true` — enforces single primary product per contract
 - Cross-tenant validation trigger `trg_contract_billing_product_org_check` — ensures billing_product belongs to same org as contract (or is canonical)
 
-**New Table: tariff_rate_period**
+**New Table: tariff_annual_rate** (originally tariff_rate_period, renamed in migration 036)
 - `id` - BIGSERIAL PRIMARY KEY
 - `clause_tariff_id` - BIGINT NOT NULL REFERENCES clause_tariff(id)
 - `contract_year` - INTEGER NOT NULL — Contract operating year (1-based)
 - `period_start` - DATE NOT NULL
 - `period_end` - DATE
-- `effective_rate` - DECIMAL NOT NULL — Rate after escalation
+- `effective_tariff` - DECIMAL NOT NULL — Rate after escalation (renamed from effective_rate in migration 036)
+- `final_effective_tariff` - DECIMAL — Final billing rate (added in migration 036)
+- `final_effective_tariff_source` - VARCHAR(20) — 'annual', 'monthly', or 'manual' (added in migration 036)
 - `currency_id` - BIGINT REFERENCES currency(id)
 - `calculation_basis` - TEXT — Human-readable explanation (e.g., "Base 0.1087 + 2.5% CPI")
 - `is_current` - BOOLEAN NOT NULL DEFAULT false
@@ -1335,19 +1337,23 @@ and token-based external submission collection.
 - CHECK (contract_year >= 1)
 - CHECK (effective_rate >= 0)
 - CHECK (period_end IS NULL OR period_end >= period_start)
-- Unique partial index: `idx_tariff_rate_period_current(clause_tariff_id) WHERE is_current = true` — enforces single current rate per tariff
+- Unique partial index: `idx_tariff_annual_rate_current(clause_tariff_id) WHERE is_current = true` — enforces single current rate per tariff
+
+**New column on contract table (section G):**
+- `payment_terms` - VARCHAR(50) — Payment terms (e.g. "Net 30", "Net 60"). Governs invoice due dates.
 
 **Onboarding Pipeline Changes:**
-- `excel_parser.py`: Added "product to be billed" / "product code" / "billing product" label mappings; comma/semicolon splitting in `_normalize_fields()`
-- `models/onboarding.py`: Added `product_to_be_billed`, `product_to_be_billed_list` to ExcelOnboardingData; `billing_products` to MergedOnboardingData
-- `onboarding_service.py`: Added `stg_billing_products` staging table, population, and billing_products count in preview response
-- `onboard_project.sql`: Added `stg_billing_products` staging table; Step 4.10 (contract_billing_product upsert with LATERAL preference for org-scoped over canonical); Step 4.11 (tariff_rate_period Year 1 initialization)
+- `excel_parser.py`: Added "product to be billed" / "product code" / "billing product" label mappings; comma/semicolon splitting in `_normalize_fields()`; multi-value extraction for billing products and service types; fixed label mismatches; new escalation detail labels; product code extraction from "CODE - Description" format
+- `models/onboarding.py`: Added `product_to_be_billed`, `product_to_be_billed_list`, `contract_service_types`, `equipment_rental_rate`, `bess_fee`, `loan_repayment_value`, `billing_frequency`, `escalation_frequency`, `escalation_start_date`, `tariff_components_to_adjust`, `ppa_confirmed_uploaded`, `has_amendments` to ExcelOnboardingData; `billing_products`, `payment_terms`, `ppa_confirmed_uploaded`, `has_amendments` to MergedOnboardingData
+- `normalizer.py`: Added `normalize_contact_invoice_flag()` for three-state contact invoice parsing (Yes/No/Escalation only → include_in_invoice + escalation_only); added `extract_billing_product_code()` for "CODE - Description" format
+- `onboarding_service.py`: Added `stg_billing_products` staging table, population, and billing_products count in preview response; multi-tariff line generation for multi-service-type contracts; escalation detail fields packed into logic_parameters JSONB; payment_terms, ppa_confirmed_uploaded, has_amendments wired through staging; escalation_only added to stg_contacts INSERT
+- `onboard_project.sql`: Added `stg_billing_products` staging table; Step 4.10 (contract_billing_product upsert with LATERAL preference for org-scoped over canonical); Step 4.11 (tariff_annual_rate Year 1 initialization); payment_terms, ppa_confirmed_uploaded, has_amendments in contract upsert
 
 **Design Notes:**
 - billing_product is contract-level, not clause_tariff-level — product codes describe WHAT is billed; tariff terms describe HOW
-- tariff_rate_period separates operational rate escalation from contract amendments (version/is_current/supersedes on clause_tariff)
+- tariff_annual_rate separates operational rate escalation from contract amendments (version/is_current/supersedes on clause_tariff)
 - clause_tariff.base_rate stays as the original contractual rate, never modified after onboarding
-- Year 1 tariff_rate_period is auto-created during onboarding (effective_rate = base_rate)
+- Year 1 tariff_annual_rate is auto-created during onboarding (effective_rate = base_rate, final_effective_tariff = base_rate)
 - Escalation types: FIXED_INCREASE/PERCENTAGE are deterministic (pre-populate); US_CPI is semi-deterministic; REBASED_MARKET_PRICE is dynamic
 - Partial unique indexes on billing_product solve the NULL ≠ NULL problem for canonical rows (PostgreSQL UNIQUE treats NULLs as distinct)
 - Cross-tenant trigger on contract_billing_product prevents org A's contract from referencing org B's billing products
@@ -1361,7 +1367,7 @@ and token-based external submission collection.
 **Description:** Seeds `tariff_type` with 7 CBE "Contract Service/Product Type" codes (ENERGY_SALES, EQUIPMENT_RENTAL_LEASE, LOAN, BESS_LEASE, ENERGY_AS_SERVICE, OTHER_SERVICE, NOT_APPLICABLE). Drops `tariff_structure_type` (unused, derivable from energy_sale_type). Keeps `energy_sale_type` as a separate classification on `clause_tariff`.
 
 **Migrations:**
-- `database/migrations/034_billing_product_and_rate_period.sql` — Sections E & F (merged from former 035)
+- `database/migrations/034_billing_product_and_rate_period.sql` — Sections E & F
 
 **Changes:**
 
@@ -1406,5 +1412,157 @@ and token-based external submission collection.
 - `energy_sale_type` = pricing mechanism within energy sales (FIXED_SOLAR, FLOATING_GRID, etc.)
 - `tariff_structure_type` dropped — no Excel field, structure derivable from energy_sale_type
 - GH-MOH01 after re-onboarding: tariff_type_id = ENERGY_SALES, energy_sale_type_id = FIXED_SOLAR
+
+---
+
+### v9.3 - 2026-02-20 (Monthly Tariff & FX Support for REBASED_MARKET_PRICE)
+
+**Description:** Renames `tariff_rate_period` → `tariff_annual_rate`, adds `final_effective_tariff` field for authoritative billing rate, creates `tariff_monthly_rate` child table for REBASED_MARKET_PRICE tariffs that require monthly FX-adjusted rates.
+
+**Migrations:**
+- `database/migrations/036_monthly_tariff_and_fx.sql`
+
+**Changes:**
+
+**Renamed Table: tariff_rate_period → tariff_annual_rate**
+- Table name, indexes, RLS policies all renamed
+- `idx_tariff_rate_period_current` → `idx_tariff_annual_rate_current`
+- `idx_tariff_rate_period_date_range` → `idx_tariff_annual_rate_date_range`
+- Constraint: `tariff_rate_period_clause_tariff_id_contract_year_key` → `tariff_annual_rate_clause_tariff_id_contract_year_key`
+
+**Renamed Column: effective_rate → effective_tariff**
+- Aligns vocabulary with `final_effective_tariff` across the tariff schema
+
+**New Columns on tariff_annual_rate:**
+- `final_effective_tariff` - DECIMAL — Final effective tariff for invoicing
+- `final_effective_tariff_source` - VARCHAR(20) — 'annual' (deterministic), 'monthly' (FX-adjusted), 'manual'
+
+**New Table: tariff_monthly_rate**
+- `id` - BIGSERIAL PRIMARY KEY
+- `tariff_annual_rate_id` - BIGINT NOT NULL REFERENCES tariff_annual_rate(id) ON DELETE CASCADE
+- `exchange_rate_id` - BIGINT REFERENCES exchange_rate(id) — FK to FX system of record
+- `billing_month` - DATE NOT NULL — First of month
+- `floor_local` - DECIMAL — Floor in local currency (GHS)
+- `ceiling_local` - DECIMAL — Ceiling in local currency (GHS)
+- `discounted_grp_local` - DECIMAL — GRP × (1 - discount) in local currency
+- `effective_tariff_local` - DECIMAL NOT NULL — Final tariff in local currency
+- `rate_binding` - VARCHAR(20) NOT NULL — 'floor', 'ceiling', or 'discounted'
+- `calculation_basis` - TEXT — Audit trail
+- `is_current` - BOOLEAN NOT NULL DEFAULT false
+- UNIQUE(tariff_annual_rate_id, billing_month)
+- Unique partial index: `idx_tariff_monthly_rate_current(tariff_annual_rate_id) WHERE is_current = true`
+- RLS: org_policy (SELECT), admin_modify_policy (ALL), service_policy (ALL)
+
+**New Python Backend:**
+- `services/tariff/rebased_market_price_engine.py`: RebasedMarketPriceEngine with formula registry, component escalation, monthly FX calculation
+- `api/entities.py`: POST `/api/projects/{project_id}/calculate-rebased-rate`, POST `/api/exchange-rates/bulk`
+
+**Updated Files:**
+- `services/tariff/rate_period_generator.py`: All SQL references renamed; final_effective_tariff = effective_tariff for deterministic types
+- `api/entities.py`: Dashboard query + PATCH endpoint table references renamed
+- `onboard_project.sql`: INSERT + assertion table references renamed; final_effective_tariff columns added to Year 1 initialization
+- `validate_onboarding_project.sql`: All query table references renamed
+- `GH_MOH01_ONBOARDING_AUDIT.md`: Documentation references renamed
+
+**Design Notes:**
+- final_effective_tariff is the authoritative billing rate; effective_tariff remains the annual escalation calculation
+- For deterministic types: final_effective_tariff = effective_tariff, source = 'annual'
+- For REBASED_MARKET_PRICE: final_effective_tariff = latest monthly effective_tariff_local, source = 'monthly'
+- tariff_monthly_rate uses exchange_rate FK for FX audit trail (no data duplication)
+- Formula dispatch via logic_parameters.formula_type — extensible without code changes
+- Floor/ceiling escalation rules read from logic_parameters.escalation_rules — project-specific
+
+---
+
+### v9.4 - 2026-02-20 (GRP Ingestion — Monthly Observations & File Upload)
+
+**Description:** Extends `reference_price` for monthly granularity (individual utility invoice observations alongside annual aggregates). Extends `submission_token` with `project_id` and `submission_type` to support file-upload-based GRP collection workflow.
+
+**Migrations:**
+- `database/migrations/037_grp_ingestion.sql`
+
+**Key Changes:**
+
+**Extended submission_token table:**
+- `project_id` - BIGINT REFERENCES project(id) ON DELETE SET NULL — Project context for GRP and other project-scoped submissions
+- `submission_type` - VARCHAR(30) NOT NULL DEFAULT 'form_response' — Type: 'form_response' (default) or 'grp_upload'
+- CHECK constraint: `submission_type IN ('form_response', 'grp_upload')`
+- CHECK constraint: `submission_type != 'grp_upload' OR project_id IS NOT NULL` — GRP uploads require project context
+
+**Extended reference_price table:**
+- Changed unique constraint from `(project_id, operating_year)` to `(project_id, observation_type, period_start)` — allows both monthly and annual rows per operating year without collision
+- `observation_type` - VARCHAR(10) NOT NULL DEFAULT 'annual' — 'monthly' for individual invoice observations, 'annual' for aggregate
+- CHECK constraint: `observation_type IN ('monthly', 'annual')`
+- `source_document_path` - TEXT — S3 path to uploaded utility invoice document
+- `source_document_hash` - VARCHAR(64) — SHA-256 hash of source document for deduplication
+- `submission_response_id` - BIGINT REFERENCES submission_response(id) — Link to the token submission that created this observation
+
+**Updated Indexes:**
+- Replaced `idx_ref_price_project(project_id, operating_year)` with `idx_ref_price_project(project_id, observation_type, period_start)`
+- Added `idx_ref_price_project_year(project_id, operating_year)` for year-based queries
+- Added `idx_ref_price_document_hash` — partial unique index on `(project_id, source_document_hash) WHERE source_document_hash IS NOT NULL` for duplicate document prevention
+
+**Row Conventions:**
+- Monthly observations: `observation_type='monthly'`, `period_start='2025-10-01'`, `period_end='2025-10-31'`
+- Annual aggregate: `observation_type='annual'`, `period_start=year_start`, `period_end=year_end`
+- `source_metadata` JSONB stores extracted line items and OCR metadata (no new JSONB column needed)
+
+**Python Backend Changes:**
+- `services/tariff/rebased_market_price_engine.py`: Updated ON CONFLICT clause from `(project_id, operating_year)` to `(project_id, period_start)`, added `observation_type='annual'` to INSERT
+- `services/email/token_service.py`: Added `project_id` and `submission_type` parameters to `generate_token()`
+- `db/notification_repository.py`: Updated `create_submission_token()` to include `project_id` and `submission_type`; updated `get_submission_token_by_hash()` to JOIN project for `project_name`
+- `models/notifications.py`: Added `project_name` and `submission_type` to `SubmissionFormConfig`; added `GRPCollectionRequest` model
+- `api/submissions.py`: Added `POST /{token}/upload` endpoint for file-based GRP submissions with validation, S3 upload, and synchronous extraction
+- `api/notifications.py`: Added `POST /api/notifications/grp-collection` endpoint for GRP collection token generation
+- **New:** `services/grp/__init__.py` — Package init
+- **New:** `services/grp/extraction_service.py` — OCR (LlamaParse) + Claude structured extraction + GRP calculation + reference_price upsert
+- **New:** `services/prompts/grp_extraction_prompt.py` — Claude extraction prompt for utility invoice line items
+
+**Frontend Changes:**
+- `app/submit/[token]/page.tsx`: Added file upload field type (`type: 'file'`), month picker (`type: 'month'`), FormData submission for GRP uploads, extraction results display on success, "Upload Another" flow for reusable tokens
+
+**Design Notes:**
+- GRP upload tokens use `max_uses=12` (one per month) — client bookmarks the link and returns monthly
+- File upload is synchronous (~10-30s): OCR → Claude extraction → GRP calculation → storage
+- Extracted line items stored in `source_metadata` JSONB (no separate line_items table)
+- `grp_aggregation_method` convention in `clause_tariff.logic_parameters` JSONB: `"annual_average"` or `"monthly"` (no schema change needed)
+- Files uploaded to S3 at `grp-uploads/{org_id}/{project_id}/{year}/{month}/{filename}`
+- Backward compatible: existing `RebasedMarketPriceEngine` annual observations continue to work with the new `(project_id, period_start)` constraint
+
+---
+
+### v10.0 - 2026-02-21 (Default Rate & Late Payment via `clause` Table)
+
+**Description:** First use of the `clause` table for onboarded data. Seeds a PAYMENT_TERMS clause for GH-MOH01 with default interest rate, FX indemnity, and dispute resolution fields stored in `normalized_payload` JSONB. Adds `clauses` to the project dashboard API response and displays default rate in the Pricing & Tariffs tab. Expands PPA extraction prompt to capture structured default rate data and auto-inserts PAYMENT_TERMS clause during onboarding.
+
+**Migrations:** None (no schema changes — clause table already exists from migration 005/033)
+
+**Changes:**
+
+**PAYMENT_TERMS clause `normalized_payload` JSONB keys:**
+- `payment_due_days` - integer
+- `default_rate_benchmark` - "SOFR", "LIBOR", "PRIME", "CBR"
+- `default_rate_spread_pct` - decimal (e.g. 2.0 for 2%)
+- `default_rate_accrual_method` - "PRO_RATA_DAILY", "SIMPLE_ANNUAL"
+- `late_payment_fx_indemnity` - boolean
+- `dispute_resolution_days` - integer
+- `dispute_resolution_clause_ref` - string (e.g. "Clause 26")
+
+**Backend API Changes:**
+- `python-backend/api/entities.py`: Added `clauses` to `ProjectDashboardResponse` model and dashboard query (new `clauses_data` CTE joins `clause` with `clause_category`)
+- `python-backend/models/onboarding.py`: Added `DefaultRateExtraction` model and `default_rate` field to `PPAContractData`
+- `python-backend/services/prompts/onboarding_extraction_prompt.py`: Expanded `default_interest_rate` to structured `default_rate` object (benchmark, spread_pct, accrual_method, fx_indemnity)
+- `python-backend/services/onboarding/onboarding_service.py`: Added `_insert_payment_terms_clause()` — auto-inserts a PAYMENT_TERMS clause during onboarding commit when default rate data is available in extraction_metadata
+
+**Frontend Changes:**
+- `lib/api/adminClient.ts`: Added `clauses` to `ProjectDashboardResponse` TypeScript type
+- `app/projects/components/PricingTariffsTab.tsx`: Displays default rate fields (benchmark + spread, accrual method, FX indemnity, dispute resolution) in the Billing Information section when a PAYMENT_TERMS clause exists
+
+**Design Notes:**
+- `clause` table used as the canonical home for payment terms / default rate data (not contract columns)
+- `normalized_payload` JSONB follows the same pattern as other clause categories
+- Dashboard API returns `clauses` as a flat array; frontend filters by `clause_category_code`
+- Onboarding clause insertion is non-fatal — failures are logged as warnings
+- Legacy `default_interest_rate` in extraction_metadata preserved for backward compatibility
 
 ---

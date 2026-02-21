@@ -65,7 +65,7 @@ data-ingestion/
 │   │
 │   └── snowflake/                     # Client Snowflake integration
 │       ├── README.md                  # Integration guide
-│       ├── ONBOARDING_CHECKLIST.md    # Client onboarding steps
+│       ├── SNOWFLAKE_SETUP_CHECKLIST.md # Snowflake setup steps
 │       └── terraform/                 # IAM resources for cross-account access
 │
 ├── processing/                        # S3 event processing

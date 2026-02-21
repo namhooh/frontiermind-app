@@ -17,9 +17,9 @@ from pydantic import BaseModel, Field
 # =============================================================================
 
 class OnboardingOverrides(BaseModel):
-    """Required identifiers that may be absent from source files."""
-    external_project_id: str = Field(..., description="e.g. GH-MOH01")
-    external_contract_id: str = Field(..., description="e.g. GH-MOH01-PPA-001")
+    """Identifiers that may be absent from source files. Override > Excel auto-extract."""
+    external_project_id: Optional[str] = Field(None, description="e.g. GH-MOH01")
+    external_contract_id: Optional[str] = Field(None, description="e.g. GH-MOH01-PPA-001")
 
 
 # =============================================================================
@@ -29,6 +29,7 @@ class OnboardingOverrides(BaseModel):
 class ContactData(BaseModel):
     role: Optional[str] = None
     include_in_invoice: bool = False
+    escalation_only: bool = False
     full_name: Optional[str] = None
     email: Optional[str] = None
     phone: Optional[str] = None
@@ -66,6 +67,8 @@ class ForecastMonthData(BaseModel):
 class ExcelOnboardingData(BaseModel):
     """All data parsed from the Excel onboarding template."""
     # Project info
+    external_project_id: Optional[str] = None
+    external_contract_id: Optional[str] = None
     project_name: Optional[str] = None
     country: Optional[str] = None
     sage_id: Optional[str] = None
@@ -95,7 +98,7 @@ class ExcelOnboardingData(BaseModel):
     agreed_fx_rate_source: Optional[str] = None
 
     # Tariff info
-    tariff_structure: Optional[str] = None
+    contract_service_type: Optional[str] = None  # "Contract Service/Product Type" → tariff_type
     energy_sale_type: Optional[str] = None
     escalation_type: Optional[str] = None
     billing_currency: Optional[str] = None
@@ -108,6 +111,28 @@ class ExcelOnboardingData(BaseModel):
     escalation_value: Optional[float] = None
     grp_method: Optional[str] = None
     payment_terms: Optional[str] = None
+
+    # Billing product
+    product_to_be_billed: Optional[str] = None
+    product_to_be_billed_list: List[str] = Field(default_factory=list)
+
+    # Multi-value service types (rows 27-28: Contract Service/Product Type 1/2)
+    contract_service_types: List[str] = Field(default_factory=list)
+
+    # Additional rate fields for non-energy service types
+    equipment_rental_rate: Optional[float] = None
+    bess_fee: Optional[float] = None
+    loan_repayment_value: Optional[float] = None
+
+    # Escalation detail fields
+    billing_frequency: Optional[str] = None
+    escalation_frequency: Optional[str] = None
+    escalation_start_date: Optional[date] = None
+    tariff_components_to_adjust: Optional[str] = None
+
+    # Contract flags (wired to existing DB columns)
+    ppa_confirmed_uploaded: Optional[bool] = None
+    has_amendments: Optional[bool] = None
 
     # Nested collections
     contacts: List[ContactData] = Field(default_factory=list)
@@ -139,6 +164,7 @@ class TariffExtraction(BaseModel):
     floor_rate: Optional[float] = None
     ceiling_rate: Optional[float] = None
     escalation_rules: List[EscalationRule] = Field(default_factory=list)
+    pricing_formula_text: Optional[str] = None
     confidence: float = 0.0
 
 
@@ -149,6 +175,38 @@ class ShortfallExtraction(BaseModel):
     fx_rule: Optional[str] = None
     excused_events: List[str] = Field(default_factory=list)
     confidence: float = 0.0
+
+
+class GRPExtraction(BaseModel):
+    exclude_vat: Optional[bool] = None
+    exclude_demand_charges: Optional[bool] = None
+    exclude_savings_charges: Optional[bool] = None
+    time_window_start: Optional[str] = None
+    time_window_end: Optional[str] = None
+    calculation_due_days: Optional[int] = None
+    verification_deadline_days: Optional[int] = None
+    confidence: float = 0.0
+
+
+class DefaultRateExtraction(BaseModel):
+    benchmark: Optional[str] = None  # SOFR, LIBOR, PRIME, CBR
+    spread_pct: Optional[float] = None  # e.g. 2.0 for 2%
+    accrual_method: Optional[str] = None  # PRO_RATA_DAILY, SIMPLE_ANNUAL
+    fx_indemnity: Optional[bool] = None
+
+
+class AvailableEnergyVariable(BaseModel):
+    symbol: str
+    definition: str
+    unit: Optional[str] = None
+
+
+class AvailableEnergyExtraction(BaseModel):
+    method: Optional[str] = None
+    formula: Optional[str] = None
+    irradiance_threshold_wm2: Optional[float] = None
+    interval_minutes: Optional[int] = None
+    variables: List[AvailableEnergyVariable] = Field(default_factory=list)
 
 
 class PPAContractData(BaseModel):
@@ -168,13 +226,19 @@ class PPAContractData(BaseModel):
     # Shortfall
     shortfall: Optional[ShortfallExtraction] = None
 
+    # GRP
+    grp: Optional[GRPExtraction] = None
+
     # Payment
     payment_terms: Optional[str] = None
     default_interest_rate: Optional[float] = None
+    default_rate: Optional[DefaultRateExtraction] = None
     payment_security_type: Optional[str] = None
     payment_security_amount: Optional[float] = None
 
-    # Available energy / metering
+    # Available energy / metering (structured)
+    available_energy: Optional[AvailableEnergyExtraction] = None
+    # Legacy flat fields (backward compat)
     available_energy_method: Optional[str] = None
     irradiance_threshold: Optional[float] = None
     interval_minutes: Optional[int] = None
@@ -252,9 +316,25 @@ class MergedOnboardingData(BaseModel):
     payment_security_required: bool = False
     payment_security_details: Optional[str] = None
     agreed_fx_rate_source: Optional[str] = None
+    payment_terms: Optional[str] = None
+    ppa_confirmed_uploaded: Optional[bool] = None
+    has_amendments: Optional[bool] = None
 
     # Tariff lines
     tariff_lines: List[Dict[str, Any]] = Field(default_factory=list)
+
+    # Shortfall (from PPA)
+    shortfall_formula_type: Optional[str] = None
+    shortfall_cap_usd: Optional[float] = None
+    shortfall_cap_currency: Optional[str] = None
+    shortfall_cap_fx_rule: Optional[str] = None
+    shortfall_excused_events: List[str] = Field(default_factory=list)
+
+    # Contract extraction metadata (from PPA)
+    extraction_metadata: Dict[str, Any] = Field(default_factory=dict)
+
+    # Billing products (Sage product codes)
+    billing_products: List[str] = Field(default_factory=list)
 
     # Collections
     contacts: List[ContactData] = Field(default_factory=list)

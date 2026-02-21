@@ -25,6 +25,7 @@ from models.notifications import (
     SubmissionResponseListResponse,
     SubmissionResponseModel,
     SendEmailResponse,
+    GRPCollectionRequest,
 )
 from db.notification_repository import NotificationRepository
 from db.database import init_connection_pool
@@ -373,3 +374,110 @@ async def list_submissions(
         submissions=[SubmissionResponseModel(**s) for s in submissions],
         total=total,
     )
+
+
+# ============================================================================
+# GRP Collection
+# ============================================================================
+
+class GRPCollectionResponse(BaseModel):
+    success: bool = True
+    token_id: int
+    submission_url: str
+    message: str
+
+
+@router.post(
+    "/grp-collection",
+    response_model=GRPCollectionResponse,
+    summary="Generate GRP collection token",
+)
+async def create_grp_collection(
+    request: Request, body: GRPCollectionRequest
+) -> GRPCollectionResponse:
+    """
+    Generate a reusable GRP upload token for a project.
+    The token allows the counterparty to upload utility invoices monthly.
+    """
+    require_repo()
+    org_id = get_org_id(request)
+
+    # Validate project belongs to this organization
+    _validate_project_ownership(body.project_id, org_id)
+
+    # Validate counterparty belongs to this organization (if provided)
+    if body.counterparty_id:
+        _validate_counterparty_ownership(body.counterparty_id, org_id)
+
+    try:
+        from services.email.token_service import TokenService
+
+        token_svc = TokenService(notification_repo)
+
+        # Store operating_year in submission_fields so upload endpoint can use it
+        result = token_svc.generate_token(
+            org_id=org_id,
+            counterparty_id=body.counterparty_id,
+            fields=[{"operating_year": body.operating_year}],
+            expiry_hours=body.expiry_hours,
+            max_uses=body.max_uses,
+            project_id=body.project_id,
+            submission_type="grp_upload",
+        )
+
+        # Build the submission URL
+        frontend_url = request.headers.get(
+            "X-Frontend-URL",
+            "https://frontiermind.vercel.app",
+        )
+        submission_url = f"{frontend_url}/submit/{result['token']}"
+
+        return GRPCollectionResponse(
+            success=True,
+            token_id=result["token_id"],
+            submission_url=submission_url,
+            message=f"GRP collection token created (max {body.max_uses} uploads)",
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error creating GRP collection token: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "message": str(e)},
+        )
+
+
+def _validate_project_ownership(project_id: int, org_id: int) -> None:
+    """Verify project exists and belongs to the given organization."""
+    from db.database import get_db_connection
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM project WHERE id = %s AND organization_id = %s",
+                (project_id, org_id),
+            )
+            if not cur.fetchone():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"success": False, "message": "Project not found"},
+                )
+
+
+def _validate_counterparty_ownership(counterparty_id: int, org_id: int) -> None:
+    """Verify counterparty exists and belongs to the given organization."""
+    from db.database import get_db_connection
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT id FROM counterparty WHERE id = %s AND organization_id = %s",
+                (counterparty_id, org_id),
+            )
+            if not cur.fetchone():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"success": False, "message": "Counterparty not found"},
+                )

@@ -189,11 +189,11 @@ FROM (
 
   SELECT
     'core',
-    'tariff_rate_period_count',
+    'tariff_annual_rate_count',
     CASE
       WHEN (
         SELECT COUNT(*)
-        FROM tariff_rate_period trp
+        FROM tariff_annual_rate trp
         JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
         WHERE ct.project_id IN (SELECT project_id FROM ctx)
       ) >= 1 THEN 'PASS'
@@ -201,7 +201,7 @@ FROM (
     END,
     (
       SELECT COUNT(*)::text
-      FROM tariff_rate_period trp
+      FROM tariff_annual_rate trp
       JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
       WHERE ct.project_id IN (SELECT project_id FROM ctx)
     ),
@@ -212,11 +212,11 @@ FROM (
 
   SELECT
     'core',
-    'tariff_rate_period_single_current',
+    'tariff_annual_rate_single_current',
     CASE
       WHEN (
         SELECT COUNT(*)
-        FROM tariff_rate_period trp
+        FROM tariff_annual_rate trp
         JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
         WHERE ct.project_id IN (SELECT project_id FROM ctx) AND trp.is_current = true
       ) = (
@@ -226,7 +226,7 @@ FROM (
       ) THEN 'PASS'
       WHEN (
         SELECT COUNT(*)
-        FROM tariff_rate_period trp
+        FROM tariff_annual_rate trp
         JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
         WHERE ct.project_id IN (SELECT project_id FROM ctx)
       ) = 0 THEN 'WARN'
@@ -234,7 +234,7 @@ FROM (
     END,
     (
       SELECT COUNT(*)::text
-      FROM tariff_rate_period trp
+      FROM tariff_annual_rate trp
       JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
       WHERE ct.project_id IN (SELECT project_id FROM ctx) AND trp.is_current = true
     ),
@@ -583,7 +583,7 @@ SELECT
   ct.tariff_group_key,
   ct.base_rate,
   ct.unit,
-  tst.code AS tariff_structure,
+  tt.code AS tariff_type,
   est.code AS energy_sale_type,
   esc.code AS escalation_type,
   bc.code AS billing_currency,
@@ -591,7 +591,7 @@ SELECT
   ct.logic_parameters
 FROM clause_tariff ct
 JOIN project p ON p.id = ct.project_id
-LEFT JOIN tariff_structure_type tst ON tst.id = ct.tariff_structure_id
+LEFT JOIN tariff_type tt ON tt.id = ct.tariff_type_id
 LEFT JOIN energy_sale_type est ON est.id = ct.energy_sale_type_id
 LEFT JOIN escalation_type esc ON esc.id = ct.escalation_type_id
 LEFT JOIN currency bc ON bc.id = ct.currency_id
@@ -645,11 +645,11 @@ SELECT
   trp.contract_year,
   trp.period_start,
   trp.period_end,
-  trp.effective_rate,
+  trp.effective_tariff,
   cur.code AS currency,
   trp.is_current,
   trp.calculation_basis
-FROM tariff_rate_period trp
+FROM tariff_annual_rate trp
 JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
 JOIN project p ON p.id = ct.project_id
 LEFT JOIN currency cur ON cur.id = trp.currency_id

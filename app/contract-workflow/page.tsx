@@ -8,7 +8,7 @@
  */
 
 import { WorkflowProvider } from '@/lib/workflow'
-import { WorkflowDashboard } from './workflow/components'
+import { WorkflowDashboard } from './components'
 
 export default function Home() {
   return (

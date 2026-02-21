@@ -1,8 +1,9 @@
 'use client'
 
-import { Shield, RotateCcw } from 'lucide-react'
+import { Shield, RotateCcw, ArrowLeft } from 'lucide-react'
 import { usePIIRedaction } from '@/lib/pii-redaction-temp'
 import { Button } from '@/app/components/ui/button'
+import Link from 'next/link'
 import { PIIRedactionStepper } from './PIIRedactionStepper'
 import { UploadStep } from './steps/UploadStep'
 import { ProcessingStep } from './steps/ProcessingStep'
@@ -24,12 +25,20 @@ export function PIIRedactionDashboard() {
             </p>
           </div>
         </div>
-        {state.currentStep > 1 && (
-          <Button variant="outline" size="sm" onClick={reset}>
-            <RotateCcw className="w-4 h-4 mr-2" />
-            Start Over
-          </Button>
-        )}
+        <div className="flex items-center gap-2">
+          <Link href="/">
+            <Button variant="ghost" size="sm">
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Home
+            </Button>
+          </Link>
+          {state.currentStep > 1 && (
+            <Button variant="outline" size="sm" onClick={reset}>
+              <RotateCcw className="w-4 h-4 mr-2" />
+              Start Over
+            </Button>
+          )}
+        </div>
       </div>
 
       {/* Stepper */}

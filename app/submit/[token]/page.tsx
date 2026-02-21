@@ -24,7 +24,17 @@ interface FormConfig {
   invoice_summary?: InvoiceSummary
   counterparty_name?: string
   organization_name?: string
+  project_name?: string
+  submission_type?: string
   expires_at: string
+}
+
+interface ExtractionResult {
+  grp_per_kwh: number
+  total_variable_charges: number
+  total_kwh_invoiced: number
+  line_items_count: number
+  extraction_confidence: string
 }
 
 type PageState = 'loading' | 'form' | 'success' | 'error'
@@ -36,9 +46,13 @@ export default function SubmissionPage() {
   const [state, setState] = useState<PageState>('loading')
   const [config, setConfig] = useState<FormConfig | null>(null)
   const [formData, setFormData] = useState<Record<string, string>>({})
+  const [selectedFile, setSelectedFile] = useState<File | null>(null)
   const [email, setEmail] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [errorMessage, setErrorMessage] = useState('')
+  const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null)
+
+  const isGRPUpload = config?.submission_type === 'grp_upload'
 
   useEffect(() => {
     async function loadForm() {
@@ -57,7 +71,9 @@ export default function SubmissionPage() {
         const initial: Record<string, string> = {}
         for (const field of data.fields) {
           const name = typeof field === 'string' ? field : field.name || ''
-          if (name) initial[name] = ''
+          if (name && (typeof field === 'string' || field.type !== 'file')) {
+            initial[name] = ''
+          }
         }
         setFormData(initial)
         setState('form')
@@ -69,28 +85,76 @@ export default function SubmissionPage() {
     loadForm()
   }, [token])
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] || null
+    setSelectedFile(file)
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
+    setErrorMessage('')
 
     try {
-      const res = await fetch(`${API_BASE_URL}/api/submit/${token}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          response_data: formData,
-          submitted_by_email: email || undefined,
-        }),
-      })
+      if (isGRPUpload) {
+        // File upload: POST to /api/submit/{token}/upload as multipart
+        if (!selectedFile) {
+          setErrorMessage('Please select a file to upload.')
+          setSubmitting(false)
+          return
+        }
+        if (!formData.billing_month) {
+          setErrorMessage('Please select a billing month.')
+          setSubmitting(false)
+          return
+        }
 
-      if (!res.ok) {
-        const data = await res.json().catch(() => null)
-        setErrorMessage(data?.detail?.message || 'Submission failed. Please try again.')
-        setSubmitting(false)
-        return
+        const fd = new FormData()
+        fd.append('file', selectedFile)
+        fd.append('billing_month', formData.billing_month)
+        if (email) fd.append('submitted_by_email', email)
+
+        const res = await fetch(`${API_BASE_URL}/api/submit/${token}/upload`, {
+          method: 'POST',
+          body: fd,
+        })
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => null)
+          setErrorMessage(data?.detail?.message || 'Upload failed. Please try again.')
+          setSubmitting(false)
+          return
+        }
+
+        const result = await res.json()
+        setExtractionResult({
+          grp_per_kwh: result.grp_per_kwh,
+          total_variable_charges: result.total_variable_charges,
+          total_kwh_invoiced: result.total_kwh_invoiced,
+          line_items_count: result.line_items_count,
+          extraction_confidence: result.extraction_confidence,
+        })
+        setState('success')
+      } else {
+        // Standard form submission: POST as JSON
+        const res = await fetch(`${API_BASE_URL}/api/submit/${token}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            response_data: formData,
+            submitted_by_email: email || undefined,
+          }),
+        })
+
+        if (!res.ok) {
+          const data = await res.json().catch(() => null)
+          setErrorMessage(data?.detail?.message || 'Submission failed. Please try again.')
+          setSubmitting(false)
+          return
+        }
+
+        setState('success')
       }
-
-      setState('success')
     } catch {
       setErrorMessage('Network error. Please try again.')
       setSubmitting(false)
@@ -156,8 +220,65 @@ export default function SubmissionPage() {
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          <h1 className="text-lg font-semibold text-slate-900 mb-2">Submission Received</h1>
-          <p className="text-slate-500 text-sm">Thank you. Your response has been recorded successfully.</p>
+
+          {extractionResult ? (
+            <>
+              <h1 className="text-lg font-semibold text-slate-900 mb-2">Invoice Processed</h1>
+              <div className="mt-4 text-left bg-slate-50 rounded-lg p-4 space-y-2">
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">GRP</span>
+                  <span className="font-medium text-slate-900">
+                    {extractionResult.grp_per_kwh.toFixed(4)} /kWh
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Variable Charges</span>
+                  <span className="font-medium text-slate-900">
+                    {extractionResult.total_variable_charges.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">kWh Invoiced</span>
+                  <span className="font-medium text-slate-900">
+                    {extractionResult.total_kwh_invoiced.toLocaleString(undefined, { maximumFractionDigits: 0 })}
+                  </span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Line Items</span>
+                  <span className="font-medium text-slate-900">{extractionResult.line_items_count}</span>
+                </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-slate-500">Confidence</span>
+                  <span className={`font-medium ${
+                    extractionResult.extraction_confidence === 'high' ? 'text-green-600' :
+                    extractionResult.extraction_confidence === 'medium' ? 'text-amber-600' :
+                    'text-red-600'
+                  }`}>
+                    {extractionResult.extraction_confidence}
+                  </span>
+                </div>
+              </div>
+              <p className="text-slate-400 text-xs mt-4">
+                You can upload another invoice using the same link.
+              </p>
+              <button
+                onClick={() => {
+                  setState('form')
+                  setSelectedFile(null)
+                  setFormData(prev => ({ ...prev, billing_month: '' }))
+                  setExtractionResult(null)
+                }}
+                className="mt-4 text-blue-600 text-sm font-medium hover:underline"
+              >
+                Upload Another Invoice
+              </button>
+            </>
+          ) : (
+            <>
+              <h1 className="text-lg font-semibold text-slate-900 mb-2">Submission Received</h1>
+              <p className="text-slate-500 text-sm">Thank you. Your response has been recorded successfully.</p>
+            </>
+          )}
         </div>
       </div>
     )
@@ -172,7 +293,12 @@ export default function SubmissionPage() {
           <h1 className="text-lg font-semibold">
             {config?.organization_name || 'FrontierMind'}
           </h1>
-          <p className="text-slate-400 text-sm mt-1">Submission Form</p>
+          <p className="text-slate-400 text-sm mt-1">
+            {isGRPUpload
+              ? `Utility Invoice Upload${config?.project_name ? ` — ${config.project_name}` : ''}`
+              : 'Submission Form'
+            }
+          </p>
         </div>
 
         <div className="bg-white rounded-b-xl shadow-sm border border-slate-200 border-t-0">
@@ -216,6 +342,45 @@ export default function SubmissionPage() {
               const type = getFieldType(field)
 
               if (!name) return null
+
+              if (type === 'file') {
+                return (
+                  <div key={i}>
+                    <label htmlFor={name} className="block text-sm font-medium text-slate-700 mb-1">
+                      {label}
+                    </label>
+                    <input
+                      id={name}
+                      type="file"
+                      accept=".pdf,.png,.jpg,.jpeg"
+                      onChange={handleFileChange}
+                      className="w-full text-sm text-slate-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:text-sm file:font-medium file:bg-blue-50 file:text-blue-700 hover:file:bg-blue-100"
+                    />
+                    {selectedFile && (
+                      <p className="mt-1 text-xs text-slate-400">
+                        {selectedFile.name} ({(selectedFile.size / 1024).toFixed(0)} KB)
+                      </p>
+                    )}
+                  </div>
+                )
+              }
+
+              if (type === 'month') {
+                return (
+                  <div key={i}>
+                    <label htmlFor={name} className="block text-sm font-medium text-slate-700 mb-1">
+                      {label}
+                    </label>
+                    <input
+                      id={name}
+                      type="month"
+                      value={formData[name] || ''}
+                      onChange={e => setFormData(prev => ({ ...prev, [name]: e.target.value }))}
+                      className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                    />
+                  </div>
+                )
+              }
 
               return (
                 <div key={i}>
@@ -267,8 +432,17 @@ export default function SubmissionPage() {
               disabled={submitting}
               className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
-              {submitting ? 'Submitting...' : 'Submit'}
+              {submitting
+                ? (isGRPUpload ? 'Processing Invoice...' : 'Submitting...')
+                : (isGRPUpload ? 'Upload & Process' : 'Submit')
+              }
             </button>
+
+            {isGRPUpload && submitting && (
+              <p className="text-xs text-slate-400 text-center">
+                This may take 10-30 seconds while the invoice is being processed.
+              </p>
+            )}
           </form>
         </div>
 

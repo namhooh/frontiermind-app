@@ -75,7 +75,10 @@ database/
 │   ├── 031_generated_report_invoice_direction.sql     # Phase 7.1: Add invoice_direction to generated_report
 │   ├── 032_email_notification_engine.sql              # Phase 8.0: Email notifications, scheduling, submission tokens
 │   ├── 033_project_onboarding.sql                     # Phase 9.0: COD data capture, amendment versioning, reference_price, contract_amendment, upsert indexes, preview table
-│   ├── 034_billing_product_and_rate_period.sql         # Phase 9: billing_product, contract_billing_product, tariff_rate_period, CBE seed data, tariff classification cleanup
+│   ├── 034_billing_product_and_rate_period.sql         # Phase 9: billing_product, contract_billing_product, tariff_annual_rate (was tariff_rate_period), CBE seed data, tariff classification cleanup, payment_terms
+│   ├── 036_monthly_tariff_and_fx.sql                  # Phase 9.1: Rename tariff_rate_period→tariff_annual_rate, final_effective_tariff, tariff_monthly_rate
+│   ├── 037_grp_ingestion.sql                          # Phase 9.3: GRP ingestion — monthly observations, file upload, submission_token extensions
+│   │   # (No migration 038 — clause records created via onboarding pipeline, not schema changes)
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -1052,6 +1055,15 @@ database/
 - ETL script: `database/scripts/project-onboarding/onboard_project.sql`
 - Python: Amendment diff service, GRP calculator refactored for invoice_line_item_type_code
 - Reference: `database/docs/IMPLEMENTATION_GUIDE_PROJECT_ONBOARDING.md`
+
+**v10.0 (Default Rate & Late Payment via clause Table)** - Completed
+- No migration required — clause table already exists; records created via onboarding pipeline
+- First use of the `clause` table for onboarded project data
+- Seeded PAYMENT_TERMS clause for GH-MOH01 with default interest rate (SOFR + 2%), FX indemnity, dispute resolution
+- Dashboard API now returns `clauses` array alongside contracts, tariffs, etc.
+- PPA extraction prompt expanded to capture structured `default_rate` object
+- Onboarding service auto-inserts PAYMENT_TERMS clause when default rate data is available
+- Frontend displays default rate in Billing Information section of Pricing & Tariffs tab
 
 ---
 

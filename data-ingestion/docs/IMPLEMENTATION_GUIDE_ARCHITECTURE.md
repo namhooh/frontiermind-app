@@ -640,7 +640,7 @@ project/
 │   │   └── snowflake/               # Client Snowflake integration
 │   │       ├── CLIENT_INSTRUCTIONS.md # API push instructions (primary)
 │   │       ├── README.md            # Integration guide
-│   │       └── ONBOARDING_CHECKLIST.md
+│   │       └── SNOWFLAKE_SETUP_CHECKLIST.md
 │   │
 │   └── oauth/                       # OAuth callback handling
 │       └── supabase-callback/

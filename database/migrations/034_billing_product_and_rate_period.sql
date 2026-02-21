@@ -11,6 +11,7 @@
 --   E. Seed tariff_type with CBE "Contract Service/Product Type" codes
 --   F. Drop tariff_structure_type table and clause_tariff.tariff_structure_id column
 --      (unused — no Excel field, derivable from energy_sale_type)
+--   G. ADD payment_terms to contract table
 
 -- =============================================================================
 -- A. CREATE billing_product — Org-scoped billing product reference
@@ -365,3 +366,15 @@ DROP INDEX IF EXISTS idx_clause_tariff_structure;
 DROP TABLE IF EXISTS tariff_structure_type CASCADE;
 CREATE OR REPLACE VIEW clause_tariff_current_v AS
   SELECT * FROM clause_tariff WHERE is_current = true;
+
+-- =============================================================================
+-- G. ADD payment_terms to contract table
+-- =============================================================================
+-- Payment terms (e.g. "Net 30", "Net 60") are a contract-level commercial
+-- attribute that governs invoice due dates. Previously parsed from Excel
+-- but not persisted — only reached extraction_metadata via the PPA path.
+
+ALTER TABLE contract
+  ADD COLUMN IF NOT EXISTS payment_terms VARCHAR(50);
+
+COMMENT ON COLUMN contract.payment_terms IS 'Payment terms for the contract (e.g. Net 30, Net 60). Governs invoice due dates.';

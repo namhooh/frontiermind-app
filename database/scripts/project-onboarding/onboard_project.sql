@@ -69,6 +69,9 @@ CREATE TEMP TABLE stg_project_core (
   payment_security_required   BOOLEAN DEFAULT false,
   payment_security_details    TEXT,
   agreed_fx_rate_source       TEXT,
+  payment_terms               VARCHAR(50),
+  ppa_confirmed_uploaded      BOOLEAN,
+  has_amendments              BOOLEAN,
   extraction_metadata         JSONB DEFAULT '{}'
 );
 
@@ -335,7 +338,9 @@ INSERT INTO contract (
   external_contract_id, contract_term_years,
   interconnection_voltage_kv,
   payment_security_required, payment_security_details,
-  agreed_fx_rate_source, extraction_metadata
+  agreed_fx_rate_source,
+  payment_terms, ppa_confirmed_uploaded, has_amendments,
+  extraction_metadata
 )
 SELECT
   p.id,
@@ -352,6 +357,9 @@ SELECT
   s.payment_security_required,
   s.payment_security_details,
   s.agreed_fx_rate_source,
+  s.payment_terms,
+  s.ppa_confirmed_uploaded,
+  s.has_amendments,
   s.extraction_metadata
 FROM stg_project_core s
 JOIN project p ON p.organization_id = s.organization_id AND p.external_project_id = s.external_project_id
@@ -369,6 +377,9 @@ DO UPDATE SET
   payment_security_required = EXCLUDED.payment_security_required,
   payment_security_details = EXCLUDED.payment_security_details,
   agreed_fx_rate_source = EXCLUDED.agreed_fx_rate_source,
+  payment_terms = EXCLUDED.payment_terms,
+  ppa_confirmed_uploaded = COALESCE(EXCLUDED.ppa_confirmed_uploaded, contract.ppa_confirmed_uploaded),
+  has_amendments = COALESCE(EXCLUDED.has_amendments, contract.has_amendments),
   extraction_metadata = COALESCE(EXCLUDED.extraction_metadata, contract.extraction_metadata),
   updated_at = NOW();
 
@@ -431,7 +442,8 @@ JOIN contract c ON c.project_id = p.id AND c.external_contract_id = spc.external
 LEFT JOIN tariff_type tt ON tt.code = stl.tariff_type_code
 LEFT JOIN energy_sale_type est ON est.code = stl.energy_sale_type_code
   AND (est.organization_id IS NULL OR est.organization_id = spc.organization_id)
-LEFT JOIN escalation_type esc ON esc.code = stl.escalation_type_code AND esc.organization_id IS NULL
+LEFT JOIN escalation_type esc ON esc.code = stl.escalation_type_code
+  AND (esc.organization_id IS NULL OR esc.organization_id = spc.organization_id)
 JOIN currency cur ON cur.code = stl.billing_currency_code
 LEFT JOIN currency mrc ON mrc.code = stl.market_ref_currency_code
 ON CONFLICT (contract_id, tariff_group_key, valid_from, COALESCE(valid_to, '9999-12-31'::date))
@@ -568,12 +580,13 @@ JOIN LATERAL (
 ON CONFLICT (contract_id, billing_product_id) DO UPDATE SET
   is_primary = EXCLUDED.is_primary;
 
--- 4.11 Tariff Rate Period (Year 1 = base_rate)
--- Creates the initial tariff_rate_period row for each clause_tariff.
--- effective_rate = base_rate for Year 1. Future escalation inserts new rows.
-INSERT INTO tariff_rate_period (
+-- 4.11 Tariff Annual Rate (Year 1 = base_rate)
+-- Creates the initial tariff_annual_rate row for each clause_tariff.
+-- effective_tariff = base_rate for Year 1. Future escalation inserts new rows.
+INSERT INTO tariff_annual_rate (
   clause_tariff_id, contract_year, period_start, period_end,
-  effective_rate, currency_id, calculation_basis, is_current
+  effective_tariff, currency_id, calculation_basis, is_current,
+  final_effective_tariff, final_effective_tariff_source
 )
 SELECT
   ct.id,
@@ -583,7 +596,9 @@ SELECT
   ct.base_rate,
   ct.currency_id,
   'Year 1: original contractual base rate',
-  true
+  true,
+  ct.base_rate,
+  'annual'
 FROM clause_tariff ct
 JOIN contract c ON ct.contract_id = c.id
 JOIN stg_project_core spc ON c.project_id = (
@@ -686,12 +701,12 @@ BEGIN
       WHERE c.project_id = v_project_id AND ct.is_current = true AND ct.base_rate IS NOT NULL;
     IF v_tariff_count > 0 THEN
       SELECT COUNT(*) INTO v_trp_count
-        FROM tariff_rate_period trp
+        FROM tariff_annual_rate trp
         JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
         JOIN contract c ON ct.contract_id = c.id
         WHERE c.project_id = v_project_id AND trp.is_current = true;
       IF v_trp_count < v_tariff_count THEN
-        RAISE EXCEPTION 'Expected at least % current tariff_rate_period rows (one per tariff), found %', v_tariff_count, v_trp_count;
+        RAISE EXCEPTION 'Expected at least % current tariff_annual_rate rows (one per tariff), found %', v_tariff_count, v_trp_count;
       END IF;
     END IF;
   END;

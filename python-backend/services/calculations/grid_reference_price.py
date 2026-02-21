@@ -159,10 +159,9 @@ def calculate_grp(
     Returns:
         GRP per kWh, or None if insufficient data.
     """
-    method = logic_parameters.get('grp_method')
-    if not method:
-        logger.warning("No grp_method specified in logic_parameters")
-        return None
+    method = logic_parameters.get('grp_method') or 'utility_variable_charges_tou'
+    if method == 'utility_variable_charges_tou' and not logic_parameters.get('grp_method'):
+        logger.info("No grp_method specified — defaulting to utility_variable_charges_tou")
 
     calculator_class = GRP_CALCULATORS.get(method)
     if not calculator_class:

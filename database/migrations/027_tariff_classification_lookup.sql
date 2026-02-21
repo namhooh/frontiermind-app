@@ -4,8 +4,8 @@
 --
 -- Changes:
 --   1. New table: tariff_structure_type (FIXED, GRID, GENERATOR) — org-scoped
---   2. New table: energy_sale_type (TAKE_OR_PAY, MIN_OFFTAKE, etc.) — org-scoped
---   3. New table: escalation_type (FIXED, CPI, CUSTOM, etc.) — org-scoped
+--   2. New table: energy_sale_type (FIXED_SOLAR, FLOATING_GRID, etc.) — org-scoped
+--   3. New table: escalation_type (FIXED_INCREASE, PERCENTAGE, US_CPI, etc.) — org-scoped
 --   4. Extend clause_tariff: tariff_structure_id, energy_sale_type_id, escalation_type_id, market_ref_currency_id
 --   5. Seed platform-level canonical types (organization_id = NULL)
 
@@ -34,7 +34,7 @@ COMMENT ON TABLE tariff_structure_type IS 'Pricing structure basis for tariff li
 COMMENT ON COLUMN tariff_structure_type.organization_id IS 'NULL = platform-level canonical type. Non-NULL = client-specific subtype.';
 
 -- =============================================================================
--- 2. Energy Sale Type (TAKE_OR_PAY / MIN_OFFTAKE / FULL_OFFTAKE / etc.)
+-- 2. Energy Sale Type (FIXED_SOLAR / FLOATING_GRID / FLOATING_GENERATOR / etc.)
 -- =============================================================================
 -- Describes the energy sale/offtake arrangement for a tariff line.
 
@@ -55,7 +55,7 @@ CREATE INDEX IF NOT EXISTS idx_energy_sale_type_org
 COMMENT ON TABLE energy_sale_type IS 'Energy sale/offtake arrangement types. NULL organization_id = platform canonical type.';
 
 -- =============================================================================
--- 3. Escalation Type (FIXED / CPI / CUSTOM / NONE)
+-- 3. Escalation Type (FIXED_INCREASE / PERCENTAGE / US_CPI / REBASED_MARKET_PRICE / NONE)
 -- =============================================================================
 -- Describes how the tariff rate escalates over time.
 
@@ -87,23 +87,24 @@ INSERT INTO tariff_structure_type (code, name, description, organization_id) VAL
 ON CONFLICT (code, organization_id) DO NOTHING;
 
 -- Energy Sale Types
--- Four canonical types aligned with CBE portfolio contracts.
--- FULL_OFFTAKE, AS_PRODUCED, DEEMED were removed — they had no contract mappings
--- and overlapped with TAKE_OR_PAY or belonged at the invoice line item level.
+-- Aligned with Excel onboarding template dropdown menu.
 INSERT INTO energy_sale_type (code, name, description, organization_id) VALUES
-  ('TAKE_OR_PAY', 'Take-or-Pay', 'Customer pays for minimum contracted volume regardless of actual consumption', NULL),
-  ('MIN_OFFTAKE', 'Minimum Offtake', 'Customer must consume minimum percentage of production; shortfall deferred or billed', NULL),
-  ('TAKE_AND_PAY', 'Take-and-Pay', 'Customer pays only for energy actually consumed (metered only, no availability component)', NULL),
-  ('LEASE', 'Lease', 'Fixed equipment rental — billing is not energy-based', NULL)
+  ('FIXED_SOLAR', 'Fixed Solar Tariff', 'Fixed contractual solar energy rate', NULL),
+  ('FLOATING_GRID', 'Floating Grid Tariff (discounted)', 'Rate derived from utility grid tariff with discount', NULL),
+  ('FLOATING_GENERATOR', 'Floating Generator Tariff (discounted)', 'Rate derived from diesel/gas generator cost with discount', NULL),
+  ('FLOATING_GRID_GENERATOR', 'Floating Grid + Generator Tariff (discounted)', 'Rate derived from combined grid and generator baseline with discount', NULL),
+  ('NOT_ENERGY_SALES', 'N/A - not Energy Sales Contract', 'Contract is not an energy sales arrangement (e.g. lease, O&M)', NULL)
 ON CONFLICT (code, organization_id) DO NOTHING;
 
 -- Escalation Types
+-- Aligned with Excel onboarding template dropdown menu.
 INSERT INTO escalation_type (code, name, description, organization_id) VALUES
-  ('FIXED', 'Fixed Escalation', 'Rate escalates by a fixed percentage annually', NULL),
-  ('CPI', 'CPI-Linked', 'Rate escalates linked to Consumer Price Index', NULL),
-  ('CUSTOM', 'Custom Formula', 'Rate escalation follows a client-specific formula', NULL),
-  ('NONE', 'No Escalation', 'Rate remains constant throughout contract term', NULL),
-  ('GRID_PASSTHROUGH', 'Grid Passthrough', 'Rate follows grid tariff changes with fixed discount maintained', NULL)
+  ('FIXED_INCREASE', 'Fixed Amount Increase', 'Rate increases by a fixed amount annually', NULL),
+  ('FIXED_DECREASE', 'Fixed Amount Decrease', 'Rate decreases by a fixed amount annually', NULL),
+  ('PERCENTAGE', 'Percentage', 'Rate escalates by a percentage annually', NULL),
+  ('US_CPI', 'US CPI', 'Rate escalates linked to US Consumer Price Index', NULL),
+  ('REBASED_MARKET_PRICE', 'Rebased Market Price', 'Rate rebased periodically to market reference price', NULL),
+  ('NONE', 'No adjustment - Fixed Price', 'Rate remains constant throughout contract term', NULL)
 ON CONFLICT (code, organization_id) DO NOTHING;
 
 -- =============================================================================
@@ -126,8 +127,8 @@ CREATE INDEX IF NOT EXISTS idx_clause_tariff_escalation
   ON clause_tariff(escalation_type_id);
 
 COMMENT ON COLUMN clause_tariff.tariff_structure_id IS 'Pricing structure basis: FIXED, GRID-referenced, or GENERATOR-referenced.';
-COMMENT ON COLUMN clause_tariff.energy_sale_type_id IS 'Energy sale arrangement: TAKE_OR_PAY, MIN_OFFTAKE, FULL_OFFTAKE, etc.';
-COMMENT ON COLUMN clause_tariff.escalation_type_id IS 'How the tariff rate escalates over time: FIXED %, CPI-linked, CUSTOM formula, etc.';
+COMMENT ON COLUMN clause_tariff.energy_sale_type_id IS 'Energy sale arrangement: FIXED_SOLAR, FLOATING_GRID, FLOATING_GENERATOR, etc.';
+COMMENT ON COLUMN clause_tariff.escalation_type_id IS 'How the tariff rate escalates over time: FIXED_INCREASE, PERCENTAGE, US_CPI, REBASED_MARKET_PRICE, NONE.';
 COMMENT ON COLUMN clause_tariff.market_ref_currency_id IS 'Currency of the Market Reference Price (MRP). May differ from billing currency (clause_tariff.currency_id).';
 
 -- =============================================================================

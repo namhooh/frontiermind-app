@@ -23,13 +23,15 @@ from models.onboarding import (
     MeterData,
 )
 from services.onboarding.normalizer import (
+    extract_billing_product_code,
     normalize_boolean,
+    normalize_contact_invoice_flag,
+    normalize_contract_service_type,
     normalize_currency,
     normalize_energy_sale_type,
     normalize_escalation_type,
     normalize_metering_type,
     normalize_percentage,
-    normalize_tariff_structure,
 )
 
 logger = logging.getLogger(__name__)
@@ -41,6 +43,8 @@ logger = logging.getLogger(__name__)
 
 # Project information section — label text (case-insensitive) → field name
 PROJECT_INFO_LABELS = {
+    "project id": "external_project_id",
+    "contract id": "external_contract_id",
     "country code": "external_project_id",
     "project name": "project_name",
     "country": "country",
@@ -83,14 +87,22 @@ CONTRACT_INFO_LABELS = {
     "voltage": "interconnection_voltage_kv",
     "payment security": "payment_security_required",
     "security details": "payment_security_details",
+    "please include details": "payment_security_details",
     "fx rate source": "agreed_fx_rate_source",
     "agreed exchange rate": "agreed_fx_rate_source",
+    "agreed source of exchange rate": "agreed_fx_rate_source",
+    "confirmation that signed ppa": "ppa_confirmed_uploaded",
+    "confirmation signed ppa uploaded": "ppa_confirmed_uploaded",
+    "any amendments post ppa": "has_amendments",
+    "any ammendments post ppa": "has_amendments",
 }
 
 TARIFF_INFO_LABELS = {
-    "tariff structure": "tariff_structure",
-    "tariff type": "tariff_structure",
+    "contract service/product type": "contract_service_type",
+    "contract service type": "contract_service_type",
+    "service/product type": "contract_service_type",
     "energy sale type": "energy_sale_type",
+    "energy sales tariff type": "energy_sale_type",
     "escalation type": "escalation_type",
     "escalation": "escalation_type",
     "price adjustment type": "escalation_type",
@@ -120,6 +132,27 @@ TARIFF_INFO_LABELS = {
     "grp method": "grp_method",
     "grid reference price": "grp_method",
     "payment terms": "payment_terms",
+    "product to be billed": "product_to_be_billed",
+    "product code": "product_to_be_billed",
+    "billing product": "product_to_be_billed",
+    # Additional rate fields for non-energy service types
+    "equipment rental/lease/boot per unit": "equipment_rental_rate",
+    "equipment rental per unit": "equipment_rental_rate",
+    "battery lease (bess) fee": "bess_fee",
+    "battery lease fee": "bess_fee",
+    "bess fee": "bess_fee",
+    "loan repayment value": "loan_repayment_value",
+    "loan repayment": "loan_repayment_value",
+    # Escalation detail fields
+    "billing frequency": "billing_frequency",
+    "price adjustment frequency": "escalation_frequency",
+    "escalation frequency": "escalation_frequency",
+    "price adjustment start date": "escalation_start_date",
+    "escalation start date": "escalation_start_date",
+    "energy sales tariff to be adjusted": "tariff_components_to_adjust",
+    "energy sales tarrif to be adjusted": "tariff_components_to_adjust",
+    "tariff to be adjusted": "tariff_components_to_adjust",
+    "tarrif to be adjusted": "tariff_components_to_adjust",
 }
 
 
@@ -157,6 +190,7 @@ class ExcelParser:
             self._extract_labeled_fields(idx, CONTRACT_INFO_LABELS, data)
             self._extract_labeled_fields(idx, TARIFF_INFO_LABELS, data)
             self._normalize_fields(data)
+            self._extract_multi_value_fields(idx, data)
             data.contacts = self._extract_contacts(sheets["pricing"], idx)
         else:
             logger.warning("No pricing sheet found — returning empty data")
@@ -303,9 +337,15 @@ class ExcelParser:
     ) -> None:
         """
         For each label in label_map, find it in cell_index and set
-        the corresponding field on data.
+        the corresponding field on data.  First match wins — later
+        labels mapping to the same field won't overwrite.
         """
         for label_text, field_name in label_map.items():
+            # Skip if field already has a value (first match wins)
+            current = getattr(data, field_name, None)
+            if current is not None:
+                continue
+
             match = self._find_label_match(cell_index, label_text)
             if match is None:
                 continue
@@ -343,7 +383,7 @@ class ExcelParser:
             return None
 
         # Date fields
-        if field_name in ("cod_date", "effective_date", "end_date"):
+        if field_name in ("cod_date", "effective_date", "end_date", "escalation_start_date"):
             return self._to_date(raw_value)
 
         # Numeric fields
@@ -351,6 +391,7 @@ class ExcelParser:
             "installed_dc_capacity_kwp", "installed_ac_capacity_kw",
             "interconnection_voltage_kv", "base_rate", "floor_rate",
             "ceiling_rate", "escalation_value",
+            "equipment_rental_rate", "bess_fee", "loan_repayment_value",
         ):
             return self._to_float(raw_value)
 
@@ -363,7 +404,7 @@ class ExcelParser:
             return normalize_percentage(raw_value)
 
         # Boolean fields
-        if field_name in ("payment_security_required",):
+        if field_name in ("payment_security_required", "ppa_confirmed_uploaded", "has_amendments"):
             return normalize_boolean(raw_value)
 
         # Default: string
@@ -375,11 +416,54 @@ class ExcelParser:
 
     def _normalize_fields(self, data: ExcelOnboardingData) -> None:
         """Apply code normalization to free-text fields."""
-        data.tariff_structure = normalize_tariff_structure(data.tariff_structure) or data.tariff_structure
+        data.contract_service_type = normalize_contract_service_type(data.contract_service_type) or data.contract_service_type
         data.energy_sale_type = normalize_energy_sale_type(data.energy_sale_type) or data.energy_sale_type
         data.escalation_type = normalize_escalation_type(data.escalation_type) or data.escalation_type
         data.billing_currency = normalize_currency(data.billing_currency) or data.billing_currency
         data.market_ref_currency = normalize_currency(data.market_ref_currency) or data.market_ref_currency
+
+        # Split comma/semicolon-separated billing product codes and extract code prefix
+        if data.product_to_be_billed and isinstance(data.product_to_be_billed, str):
+            codes = [c.strip() for c in re.split(r'[,;]', data.product_to_be_billed) if c.strip()]
+            codes = [extract_billing_product_code(c) or c for c in codes]
+            data.product_to_be_billed_list = codes
+        elif data.product_to_be_billed:
+            code = extract_billing_product_code(str(data.product_to_be_billed).strip())
+            data.product_to_be_billed_list = [code or str(data.product_to_be_billed).strip()]
+
+    def _extract_multi_value_fields(self, cell_index: dict, data: ExcelOnboardingData) -> None:
+        """Extract fields that have multiple numbered rows (e.g., Product 1/2/3, Service Type 1/2)."""
+        # Multi-value billing products: collect all "product to be billed" rows
+        product_entries = []
+        for key, entry in cell_index.items():
+            if "product to be billed" in key:
+                raw = entry.get("value")
+                if raw and not self._is_placeholder(str(raw)):
+                    product_entries.append((entry.get("row", 0), str(raw).strip()))
+
+        if product_entries:
+            product_entries.sort(key=lambda x: x[0])
+            codes = [extract_billing_product_code(val) or val for _, val in product_entries]
+            if len(codes) > len(data.product_to_be_billed_list):
+                data.product_to_be_billed_list = codes
+
+        # Multi-value service types: collect all "contract service/product type" rows
+        service_entries = []
+        for key, entry in cell_index.items():
+            if "contract service/product type" in key or "service/product type" in key:
+                raw = entry.get("value")
+                if raw and not self._is_placeholder(str(raw)):
+                    service_entries.append((entry.get("row", 0), str(raw).strip()))
+
+        if service_entries:
+            service_entries.sort(key=lambda x: x[0])
+            types = []
+            for _, val in service_entries:
+                normalized = normalize_contract_service_type(val)
+                types.append(normalized or val)
+            data.contract_service_types = types
+            if not data.contract_service_type:
+                data.contract_service_type = types[0]
 
     # =========================================================================
     # TABLE SECTIONS
@@ -405,22 +489,27 @@ class ExcelParser:
             if first_val and any(kw in first_val for kw in ("document", "asset", "equipment", "meter", "forecast")):
                 break
 
-            # Layout: A=Role, B=Invoice Flag, C=Full Name, D=Email, E=Phone
+            # Layout: A=Role, B=Invoice Flag (Yes/No/Escalation), C=Full Name, D=Email, E=Phone
             role = str(cells[0]).strip() if cells[0] else None
-            invoice_flag = normalize_boolean(cells[1]) if len(cells) > 1 else False
+            include_flag, escalation_flag = normalize_contact_invoice_flag(cells[1] if len(cells) > 1 else None)
             full_name = str(cells[2]).strip() if len(cells) > 2 and cells[2] else None
             email = str(cells[3]).strip() if len(cells) > 3 and cells[3] else None
             phone = str(cells[4]).strip() if len(cells) > 4 and cells[4] else None
 
-            # Skip header rows and empty data
-            if not full_name and not email:
+            # Skip header rows and completely empty rows
+            if not role and not full_name and not email:
+                continue
+            if role and role.lower() in ("customer contact", "contact role", "role"):
+                continue
+            if role and role.startswith("["):
                 continue
             if full_name and full_name.lower() in ("full name", "name", "contact name"):
                 continue
 
             contacts.append(ContactData(
                 role=role,
-                include_in_invoice=invoice_flag or False,
+                include_in_invoice=include_flag,
+                escalation_only=escalation_flag,
                 full_name=full_name,
                 email=email,
                 phone=phone,

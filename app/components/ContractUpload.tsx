@@ -381,7 +381,7 @@ export default function ContractUpload() {
           <div className="mt-6 flex space-x-4">
             {result.contract_id > 0 && (
               <button
-                onClick={() => router.push(`/contracts/${result.contract_id}`)}
+                onClick={() => router.push(`/contract-workflow/${result.contract_id}`)}
                 className="px-6 py-3 bg-blue-500 text-white rounded-lg hover:bg-blue-600 transition-all duration-300"
               >
                 View Contract Details →

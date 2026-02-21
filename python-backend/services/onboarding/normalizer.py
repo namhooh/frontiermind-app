@@ -11,32 +11,58 @@ from typing import Optional
 # CODE MAPS — Excel free-text → database code
 # =============================================================================
 
-TARIFF_STRUCTURE_MAP = {
-    "fixed solar tariff": "FIXED",
-    "fixed solar": "FIXED",
-    "fixed": "FIXED",
-    "rebased market price": "GRID",
-    "grid": "GRID",
-    "grid tariff": "GRID",
-    "hybrid": "HYBRID",
-    "time of use": "TOU",
-    "tou": "TOU",
-}
-
 ESCALATION_TYPE_MAP = {
-    "fixed": "FIXED",
-    "cpi": "CPI",
-    "cpi + fixed": "CPI_PLUS_FIXED",
-    "cpi+fixed": "CPI_PLUS_FIXED",
+    "fixed amount increase": "FIXED_INCREASE",
+    "fixed increase": "FIXED_INCREASE",
+    "fixed amount decrease": "FIXED_DECREASE",
+    "fixed decrease": "FIXED_DECREASE",
+    "%": "PERCENTAGE",
+    "percentage": "PERCENTAGE",
+    "percent": "PERCENTAGE",
+    "us cpi": "US_CPI",
+    "cpi": "US_CPI",
+    "rebased market price": "REBASED_MARKET_PRICE",
+    "grid passthrough": "REBASED_MARKET_PRICE",
+    "no adjustment - fixed price": "NONE",
+    "no adjustment": "NONE",
+    "fixed price": "NONE",
     "none": "NONE",
 }
 
 ENERGY_SALE_TYPE_MAP = {
-    "energy sales": "ENERGY_SALE",
-    "energy sale": "ENERGY_SALE",
-    "net metering": "NET_METERING",
-    "gross metering": "GROSS_METERING",
-    "wheeling": "WHEELING",
+    "fixed solar tariff": "FIXED_SOLAR",
+    "fixed solar": "FIXED_SOLAR",
+    "floating grid tariff (discounted)": "FLOATING_GRID",
+    "floating grid tariff": "FLOATING_GRID",
+    "floating grid": "FLOATING_GRID",
+    "floating generator tariff (discounted)": "FLOATING_GENERATOR",
+    "floating generator tariff": "FLOATING_GENERATOR",
+    "floating generator": "FLOATING_GENERATOR",
+    "floating grid + generator tariff (discounted)": "FLOATING_GRID_GENERATOR",
+    "floating grid + generator tariff": "FLOATING_GRID_GENERATOR",
+    "floating grid + generator": "FLOATING_GRID_GENERATOR",
+    "n/a - not energy sales contract": "NOT_ENERGY_SALES",
+    "n/a": "NOT_ENERGY_SALES",
+    "not energy sales": "NOT_ENERGY_SALES",
+}
+
+CONTRACT_SERVICE_TYPE_MAP = {
+    "energy sales": "ENERGY_SALES",
+    "equipment rental/lease/boot": "EQUIPMENT_RENTAL_LEASE",
+    "equipment rental": "EQUIPMENT_RENTAL_LEASE",
+    "rental": "EQUIPMENT_RENTAL_LEASE",
+    "lease": "EQUIPMENT_RENTAL_LEASE",
+    "boot": "EQUIPMENT_RENTAL_LEASE",
+    "loan": "LOAN",
+    "battery lease (bess)": "BESS_LEASE",
+    "battery lease": "BESS_LEASE",
+    "bess lease": "BESS_LEASE",
+    "bess": "BESS_LEASE",
+    "energy as a service": "ENERGY_AS_SERVICE",
+    "eaas": "ENERGY_AS_SERVICE",
+    "other": "OTHER_SERVICE",
+    "n/a": "NOT_APPLICABLE",
+    "na": "NOT_APPLICABLE",
 }
 
 PAYMENT_TERMS_MAP = {
@@ -68,16 +94,16 @@ def _lookup(value: Optional[str], code_map: dict) -> Optional[str]:
     return code_map.get(key)
 
 
-def normalize_tariff_structure(value: Optional[str]) -> Optional[str]:
-    return _lookup(value, TARIFF_STRUCTURE_MAP)
-
-
 def normalize_escalation_type(value: Optional[str]) -> Optional[str]:
     return _lookup(value, ESCALATION_TYPE_MAP)
 
 
 def normalize_energy_sale_type(value: Optional[str]) -> Optional[str]:
     return _lookup(value, ENERGY_SALE_TYPE_MAP)
+
+
+def normalize_contract_service_type(value: Optional[str]) -> Optional[str]:
+    return _lookup(value, CONTRACT_SERVICE_TYPE_MAP)
 
 
 def normalize_payment_terms(value: Optional[str]) -> Optional[str]:
@@ -100,7 +126,10 @@ def normalize_percentage(value) -> Optional[float]:
 
 
 def normalize_boolean(value) -> Optional[bool]:
-    """'Y'/'Yes'/True -> True, 'N'/'No'/False -> False."""
+    """'Y'/'Yes'/True -> True, 'N'/'No'/False -> False.
+
+    Also handles prefixed forms like 'Yes - details here' or 'No - not applicable'.
+    """
     if value is None:
         return None
     if isinstance(value, bool):
@@ -110,7 +139,43 @@ def normalize_boolean(value) -> Optional[bool]:
         return True
     if s in ('n', 'no', 'false', '0'):
         return False
+    # Handle "Yes - ..." or "No - ..." prefixed values
+    if s.startswith(('yes ', 'yes-', 'yes,')):
+        return True
+    if s.startswith(('no ', 'no-', 'no,')):
+        return False
     return None
+
+
+def normalize_contact_invoice_flag(value) -> tuple:
+    """Parse three-state contact invoice selection.
+    Returns (include_in_invoice, escalation_only).
+    'Yes' -> (True, False), 'Escalation only' -> (True, True), 'No' -> (False, False).
+    """
+    if value is None:
+        return (False, False)
+    s = str(value).strip().lower()
+    if "escalation" in s:
+        return (True, True)
+    b = normalize_boolean(value)
+    if b:
+        return (True, False)
+    return (False, False)
+
+
+def extract_billing_product_code(value) -> Optional[str]:
+    """Extract billing product code from 'CODE - Description' format.
+
+    Examples:
+        'ENER002 - Metered Energy' → 'ENER002'
+        'ENER003' → 'ENER003'
+    """
+    if not value:
+        return None
+    s = str(value).strip()
+    if " - " in s:
+        return s.split(" - ", 1)[0].strip()
+    return s
 
 
 def normalize_currency(value: Optional[str]) -> Optional[str]:

@@ -19,6 +19,7 @@ from llama_parse import LlamaParse
 
 from models.onboarding import (
     EscalationRule,
+    GRPExtraction,
     GuaranteeYearRow,
     PPAContractData,
     ShortfallExtraction,
@@ -272,8 +273,24 @@ class PPAOnboardingExtractor:
             floor_rate=regex_pricing.get("floor_rate") or llm_tariff.get("floor_rate"),
             ceiling_rate=regex_pricing.get("ceiling_rate") or llm_tariff.get("ceiling_rate"),
             escalation_rules=escalation_rules,
+            pricing_formula_text=llm_tariff.get("pricing_formula_text"),
             confidence=0.9 if regex_pricing else llm_data.get("confidence_scores", {}).get("solar_discount_pct", 0.5),
         )
+
+        # Build GRP from LLM tariff
+        llm_grp = llm_tariff.get("grp", {}) or {}
+        grp = None
+        if any(v is not None for v in llm_grp.values()):
+            grp = GRPExtraction(
+                exclude_vat=llm_grp.get("exclude_vat"),
+                exclude_demand_charges=llm_grp.get("exclude_demand_charges"),
+                exclude_savings_charges=llm_grp.get("exclude_savings_charges"),
+                time_window_start=llm_grp.get("time_window_start"),
+                time_window_end=llm_grp.get("time_window_end"),
+                calculation_due_days=llm_grp.get("calculation_due_days"),
+                verification_deadline_days=llm_grp.get("verification_deadline_days"),
+                confidence=llm_data.get("confidence_scores", {}).get("grp_parameters", 0.5),
+            )
 
         # Build shortfall from LLM
         llm_shortfall = llm_data.get("shortfall", {}) or {}
@@ -304,6 +321,7 @@ class PPAOnboardingExtractor:
             tariff=tariff,
             guarantee_table=guarantee_table,
             shortfall=shortfall,
+            grp=grp,
             payment_terms=llm_data.get("payment_terms"),
             default_interest_rate=llm_data.get("default_interest_rate"),
             payment_security_type=llm_data.get("payment_security_type"),

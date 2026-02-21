@@ -31,9 +31,15 @@ class TokenService:
         expiry_hours: int = DEFAULT_EXPIRY_HOURS,
         max_uses: int = 1,
         email_log_id: Optional[int] = None,
+        project_id: Optional[int] = None,
+        submission_type: str = "form_response",
     ) -> Dict[str, Any]:
         """
         Generate a new submission token.
+
+        Args:
+            project_id: Project context for GRP and other project-scoped submissions.
+            submission_type: 'form_response' (default) or 'grp_upload'.
 
         Returns:
             Dict with 'token' (raw URL-safe string) and 'token_id' (DB id)
@@ -53,6 +59,8 @@ class TokenService:
             "invoice_header_id": invoice_header_id,
             "counterparty_id": counterparty_id,
             "email_log_id": email_log_id,
+            "project_id": project_id,
+            "submission_type": submission_type,
         })
 
         logger.info(

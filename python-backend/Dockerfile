@@ -42,6 +42,9 @@ ENV PATH=/root/.local/bin:$PATH
 # Copy backend application code
 COPY python-backend/ .
 
+# Copy project onboarding SQL script
+COPY database/scripts/project-onboarding/onboard_project.sql database/scripts/project-onboarding/onboard_project.sql
+
 # Copy data ingestion modules (processing pipeline + fetchers)
 COPY data-ingestion/processing/schema_validator.py data_ingestion/processing/schema_validator.py
 COPY data-ingestion/processing/transformer.py data_ingestion/processing/transformer.py

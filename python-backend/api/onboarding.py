@@ -41,8 +41,8 @@ def _get_service() -> OnboardingService:
 
 @router.post("/preview", response_model=OnboardingPreviewResponse)
 async def preview_onboarding(
-    external_project_id: str = Form(...),
-    external_contract_id: str = Form(...),
+    external_project_id: Optional[str] = Form(None),
+    external_contract_id: Optional[str] = Form(None),
     excel_file: UploadFile = File(...),
     ppa_pdf_file: Optional[UploadFile] = File(None),
     auth: dict = Depends(require_api_key),

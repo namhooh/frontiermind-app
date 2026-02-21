@@ -31,16 +31,22 @@ from models.onboarding import (
 )
 from services.onboarding.excel_parser import ExcelParser
 from services.onboarding.normalizer import (
+    normalize_contract_service_type,
     normalize_currency,
     normalize_energy_sale_type,
     normalize_escalation_type,
-    normalize_tariff_structure,
 )
 
 logger = logging.getLogger(__name__)
 
-# Path to the SQL script (relative to this file)
-SQL_SCRIPT_PATH = Path(__file__).parent.parent.parent / "database" / "scripts" / "onboard_project.sql"
+# Path to the SQL script (Docker: /app/database/scripts/..., local dev: <project-root>/database/scripts/...)
+_BACKEND_DIR = Path(__file__).resolve().parent.parent.parent
+_SQL_REL = Path("database", "scripts", "project-onboarding", "onboard_project.sql")
+SQL_SCRIPT_PATH = (
+    _BACKEND_DIR / _SQL_REL
+    if (_BACKEND_DIR / _SQL_REL).exists()
+    else _BACKEND_DIR.parent / _SQL_REL
+)
 
 
 class OnboardingError(Exception):
@@ -82,7 +88,7 @@ class OnboardingService:
         """
         logger.info(
             f"Starting onboarding preview: org={organization_id}, "
-            f"project={overrides.external_project_id}"
+            f"project={overrides.external_project_id or '(from Excel)'}"
         )
 
         # 1. Parse Excel
@@ -119,6 +125,7 @@ class OnboardingService:
             "forecasts": len(merged.forecasts),
             "guarantees": len(merged.guarantees),
             "tariff_lines": len(merged.tariff_lines),
+            "billing_products": len(merged.billing_products),
         }
 
         return OnboardingPreviewResponse(
@@ -188,6 +195,10 @@ class OnboardingService:
                     if row:
                         contract_id = row["id"] if isinstance(row, dict) else row[0]
 
+                    # Insert PAYMENT_TERMS clause if default rate data is available
+                    if project_id and contract_id:
+                        self._insert_payment_terms_clause(cur, project_id, contract_id, merged)
+
                     # Count inserted rows
                     if project_id:
                         counts = self._count_rows(cur, project_id)
@@ -199,6 +210,16 @@ class OnboardingService:
                 conn.rollback()
                 logger.error(f"Onboarding commit failed: {e}", exc_info=True)
                 raise OnboardingError(f"Commit failed: {e}") from e
+
+        # 3b. Generate rate periods for deterministic escalation types (non-fatal)
+        if project_id:
+            try:
+                from services.tariff.rate_period_generator import RatePeriodGenerator
+                gen_result = RatePeriodGenerator().generate(project_id)
+                if gen_result["periods_generated"]:
+                    logger.info(f"Generated {gen_result['periods_generated']} rate periods")
+            except Exception as e:
+                logger.warning(f"Rate period generation failed (non-fatal): {e}")
 
         # 4. Clean up preview
         self._delete_preview(preview_id)
@@ -414,6 +435,14 @@ class OnboardingService:
 
         Priority: Override > PPA (contractual terms) > Excel (operational data).
         """
+        # Resolve identifiers: override > Excel > error
+        ext_project_id = overrides.external_project_id or excel.external_project_id
+        ext_contract_id = overrides.external_contract_id or excel.external_contract_id
+        if not ext_project_id:
+            raise OnboardingError("external_project_id required — not found in Excel or overrides")
+        if not ext_contract_id:
+            raise OnboardingError("external_contract_id required — not found in Excel or overrides")
+
         # Start with Excel as base
         # Use PPA for contractual terms where available
         contract_term = excel.contract_term_years
@@ -431,16 +460,77 @@ class OnboardingService:
         # Build tariff lines
         tariff_lines = []
         has_tariff_data = any([
-            excel.tariff_structure,
+            excel.energy_sale_type,
             excel.billing_currency,
             excel.base_rate,
             ppa and ppa.tariff and (ppa.tariff.solar_discount_pct or ppa.tariff.floor_rate),
         ])
         if has_tariff_data:
+            # Build logic_parameters_extra from PPA + Excel escalation details
+            ppa_logic_extra: Dict[str, Any] = {}
+            if ppa:
+                if ppa.tariff and ppa.tariff.escalation_rules:
+                    ppa_logic_extra["escalation_rules"] = [
+                        r.model_dump() for r in ppa.tariff.escalation_rules
+                    ]
+                if ppa.tariff and ppa.tariff.pricing_formula_text:
+                    ppa_logic_extra["pricing_formula_text"] = ppa.tariff.pricing_formula_text
+                # Available energy: prefer structured format, fall back to legacy flat fields
+                if ppa.available_energy is not None:
+                    ae = ppa.available_energy
+                    if ae.method:
+                        ppa_logic_extra["available_energy_method"] = ae.method
+                    if ae.formula:
+                        ppa_logic_extra["available_energy_formula"] = ae.formula
+                    if ae.irradiance_threshold_wm2 is not None:
+                        ppa_logic_extra["irradiance_threshold_wm2"] = ae.irradiance_threshold_wm2
+                    if ae.interval_minutes is not None:
+                        ppa_logic_extra["interval_minutes"] = ae.interval_minutes
+                    if ae.variables:
+                        ppa_logic_extra["available_energy_variables"] = [v.model_dump() for v in ae.variables]
+                else:
+                    if ppa.available_energy_method is not None:
+                        ppa_logic_extra["available_energy_method"] = ppa.available_energy_method
+                    if ppa.irradiance_threshold is not None:
+                        ppa_logic_extra["irradiance_threshold_wm2"] = ppa.irradiance_threshold
+                    if ppa.interval_minutes is not None:
+                        ppa_logic_extra["interval_minutes"] = ppa.interval_minutes
+                if ppa.shortfall:
+                    if ppa.shortfall.formula_type is not None:
+                        ppa_logic_extra["shortfall_formula_type"] = ppa.shortfall.formula_type
+                    if ppa.shortfall.excused_events:
+                        ppa_logic_extra["excused_events"] = ppa.shortfall.excused_events
+                if ppa.grp:
+                    if ppa.grp.exclude_vat is not None:
+                        ppa_logic_extra["grp_exclude_vat"] = ppa.grp.exclude_vat
+                    if ppa.grp.exclude_demand_charges is not None:
+                        ppa_logic_extra["grp_exclude_demand_charges"] = ppa.grp.exclude_demand_charges
+                    if ppa.grp.exclude_savings_charges is not None:
+                        ppa_logic_extra["grp_exclude_savings_charges"] = ppa.grp.exclude_savings_charges
+                    if ppa.grp.time_window_start is not None:
+                        ppa_logic_extra["grp_time_window_start"] = ppa.grp.time_window_start
+                    if ppa.grp.time_window_end is not None:
+                        ppa_logic_extra["grp_time_window_end"] = ppa.grp.time_window_end
+                    if ppa.grp.calculation_due_days is not None:
+                        ppa_logic_extra["grp_calculation_due_days"] = ppa.grp.calculation_due_days
+                    if ppa.grp.verification_deadline_days is not None:
+                        ppa_logic_extra["grp_verification_deadline_days"] = ppa.grp.verification_deadline_days
+
+            # Escalation detail fields from Excel (Rec 4)
+            if excel.billing_frequency:
+                ppa_logic_extra["billing_frequency"] = excel.billing_frequency
+            if excel.escalation_frequency:
+                ppa_logic_extra["escalation_frequency"] = excel.escalation_frequency
+            if excel.escalation_start_date:
+                ppa_logic_extra["escalation_start_date"] = str(excel.escalation_start_date)
+            if excel.tariff_components_to_adjust:
+                ppa_logic_extra["tariff_components_to_adjust"] = excel.tariff_components_to_adjust
+
+            # Main tariff line (energy sales or single service type)
             tariff_line = {
-                "tariff_group_key": f"{overrides.external_contract_id}-MAIN",
-                "tariff_name": f"{excel.project_name or overrides.external_project_id} Main Tariff",
-                "structure_code": excel.tariff_structure or "FIXED",
+                "tariff_group_key": f"{ext_contract_id}-MAIN",
+                "tariff_name": f"{excel.project_name or ext_project_id} Main Tariff",
+                "tariff_type_code": excel.contract_service_type,
                 "energy_sale_type_code": excel.energy_sale_type,
                 "escalation_type_code": excel.escalation_type,
                 "billing_currency_code": excel.billing_currency or "USD",
@@ -454,18 +544,44 @@ class OnboardingService:
                 "ceiling_rate": ceiling_rate,
                 "escalation_value": excel.escalation_value,
                 "grp_method": excel.grp_method,
-                "logic_parameters_extra": {},
+                "logic_parameters_extra": dict(ppa_logic_extra),
             }
-
-            # Add PPA escalation rules to logic_parameters_extra
-            if ppa and ppa.tariff and ppa.tariff.escalation_rules:
-                tariff_line["logic_parameters_extra"] = {
-                    "escalation_rules": [
-                        r.model_dump() for r in ppa.tariff.escalation_rules
-                    ],
-                }
-
             tariff_lines.append(tariff_line)
+
+            # Additional tariff lines for multi-service-type contracts (Rec 1)
+            # Maps service type code → rate field on ExcelOnboardingData
+            service_rate_map = {
+                "EQUIPMENT_RENTAL_LEASE": excel.equipment_rental_rate,
+                "BESS_LEASE": excel.bess_fee,
+                "LOAN": excel.loan_repayment_value,
+            }
+            if len(excel.contract_service_types) > 1:
+                for svc_type in excel.contract_service_types:
+                    # Skip the main/energy type — already handled above
+                    if svc_type in (None, "ENERGY_SALES", excel.contract_service_type):
+                        continue
+                    rate = service_rate_map.get(svc_type)
+                    if rate is None:
+                        continue  # No rate for this service type
+                    tariff_lines.append({
+                        "tariff_group_key": f"{ext_contract_id}-{svc_type}",
+                        "tariff_name": f"{excel.project_name or ext_project_id} {svc_type.replace('_', ' ').title()}",
+                        "tariff_type_code": svc_type,
+                        "energy_sale_type_code": "NOT_ENERGY_SALES",
+                        "escalation_type_code": excel.escalation_type,
+                        "billing_currency_code": excel.billing_currency or "USD",
+                        "market_ref_currency_code": excel.market_ref_currency,
+                        "base_rate": rate,
+                        "unit": "unit",
+                        "valid_from": str(excel.effective_date or excel.cod_date or date.today()),
+                        "valid_to": str(excel.end_date) if excel.end_date else None,
+                        "discount_pct": None,
+                        "floor_rate": None,
+                        "ceiling_rate": None,
+                        "escalation_value": excel.escalation_value,
+                        "grp_method": None,
+                        "logic_parameters_extra": {},
+                    })
 
         # Guarantees from PPA
         guarantees = []
@@ -487,12 +603,48 @@ class OnboardingService:
         if ppa and ppa.agreed_exchange_rate_definition:
             fx_source = ppa.agreed_exchange_rate_definition
 
+        # Payment terms: PPA > Excel
+        payment_terms = excel.payment_terms
+        if ppa and ppa.payment_terms:
+            payment_terms = ppa.payment_terms
+
+        # Shortfall fields from PPA
+        shortfall_formula_type = None
+        shortfall_cap_usd = None
+        shortfall_cap_currency = None
+        shortfall_cap_fx_rule = None
+        shortfall_excused_events: List[str] = []
+        if ppa and ppa.shortfall:
+            shortfall_formula_type = ppa.shortfall.formula_type
+            shortfall_cap_usd = ppa.shortfall.annual_cap_amount
+            shortfall_cap_currency = ppa.shortfall.annual_cap_currency
+            shortfall_cap_fx_rule = ppa.shortfall.fx_rule
+            shortfall_excused_events = ppa.shortfall.excused_events
+
+        # Extraction metadata from PPA (contract-level metadata)
+        extraction_metadata: Dict[str, Any] = {}
+        if ppa:
+            if ppa.initial_term_years is not None:
+                extraction_metadata["initial_term_years"] = ppa.initial_term_years
+            if ppa.extension_provisions is not None:
+                extraction_metadata["extension_provisions"] = ppa.extension_provisions
+            if ppa.payment_terms is not None:
+                extraction_metadata["payment_terms"] = ppa.payment_terms
+            if ppa.default_interest_rate is not None:
+                extraction_metadata["default_interest_rate"] = ppa.default_interest_rate
+            if ppa.default_rate is not None:
+                extraction_metadata["default_rate"] = ppa.default_rate.model_dump(exclude_none=True)
+            if ppa.early_termination_schedule is not None:
+                extraction_metadata["early_termination_schedule"] = ppa.early_termination_schedule
+            if ppa.confidence_scores:
+                extraction_metadata["confidence_scores"] = ppa.confidence_scores
+
         return MergedOnboardingData(
             organization_id=organization_id,
-            external_project_id=overrides.external_project_id,
-            external_contract_id=overrides.external_contract_id,
+            external_project_id=ext_project_id,
+            external_contract_id=ext_contract_id,
             # Project
-            project_name=excel.project_name or overrides.external_project_id,
+            project_name=excel.project_name or ext_project_id,
             country=excel.country,
             sage_id=excel.sage_id,
             cod_date=excel.cod_date,
@@ -517,6 +669,11 @@ class OnboardingService:
             payment_security_required=payment_security_required,
             payment_security_details=payment_security_details,
             agreed_fx_rate_source=fx_source,
+            payment_terms=payment_terms,
+            ppa_confirmed_uploaded=excel.ppa_confirmed_uploaded,
+            has_amendments=excel.has_amendments,
+            # Billing products
+            billing_products=excel.product_to_be_billed_list,
             # Collections
             tariff_lines=tariff_lines,
             contacts=excel.contacts,
@@ -524,6 +681,14 @@ class OnboardingService:
             assets=excel.assets,
             forecasts=excel.forecasts,
             guarantees=guarantees,
+            # Shortfall
+            shortfall_formula_type=shortfall_formula_type,
+            shortfall_cap_usd=shortfall_cap_usd,
+            shortfall_cap_currency=shortfall_cap_currency,
+            shortfall_cap_fx_rule=shortfall_cap_fx_rule,
+            shortfall_excused_events=shortfall_excused_events,
+            # Extraction metadata
+            extraction_metadata=extraction_metadata,
         )
 
     # =========================================================================
@@ -693,7 +858,11 @@ class OnboardingService:
                 interconnection_voltage_kv DECIMAL,
                 payment_security_required BOOLEAN DEFAULT false,
                 payment_security_details TEXT,
-                agreed_fx_rate_source VARCHAR(255)
+                agreed_fx_rate_source TEXT,
+                payment_terms VARCHAR(50),
+                ppa_confirmed_uploaded BOOLEAN,
+                has_amendments BOOLEAN,
+                extraction_metadata JSONB DEFAULT '{}'
             ) ON COMMIT DROP
         """)
         cur.execute("""
@@ -702,7 +871,7 @@ class OnboardingService:
                 external_project_id VARCHAR(50) NOT NULL,
                 tariff_group_key VARCHAR(255) NOT NULL,
                 tariff_name VARCHAR(255),
-                structure_code VARCHAR(50) NOT NULL,
+                tariff_type_code VARCHAR(50),
                 energy_sale_type_code VARCHAR(50),
                 escalation_type_code VARCHAR(50),
                 billing_currency_code VARCHAR(10) NOT NULL,
@@ -784,6 +953,14 @@ class OnboardingService:
                 is_billing_meter BOOLEAN DEFAULT TRUE
             ) ON COMMIT DROP
         """)
+        cur.execute("""
+            CREATE TEMP TABLE IF NOT EXISTS stg_billing_products (
+                batch_id UUID,
+                external_project_id VARCHAR(50) NOT NULL,
+                product_code VARCHAR(50) NOT NULL,
+                is_primary BOOLEAN DEFAULT false
+            ) ON COMMIT DROP
+        """)
 
     def _populate_staging(self, cur, data: MergedOnboardingData) -> None:
         """Populate staging tables from merged data."""
@@ -811,11 +988,13 @@ class OnboardingService:
                 contract_term_years, effective_date, end_date,
                 interconnection_voltage_kv,
                 payment_security_required, payment_security_details,
-                agreed_fx_rate_source
+                agreed_fx_rate_source,
+                payment_terms, ppa_confirmed_uploaded, has_amendments,
+                extraction_metadata
             ) VALUES (
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
                 %s, %s, %s, %s, %s, %s, %s, %s, %s, %s,
-                %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )""",
             (
                 str(batch_id), data.organization_id, ext_id, data.sage_id,
@@ -830,6 +1009,8 @@ class OnboardingService:
                 data.interconnection_voltage_kv,
                 data.payment_security_required, data.payment_security_details,
                 data.agreed_fx_rate_source,
+                data.payment_terms, data.ppa_confirmed_uploaded, data.has_amendments,
+                json.dumps(data.extraction_metadata, default=str),
             ),
         )
 
@@ -838,7 +1019,7 @@ class OnboardingService:
             cur.execute(
                 """INSERT INTO stg_tariff_lines (
                     batch_id, external_project_id, tariff_group_key, tariff_name,
-                    structure_code, energy_sale_type_code, escalation_type_code,
+                    tariff_type_code, energy_sale_type_code, escalation_type_code,
                     billing_currency_code, market_ref_currency_code,
                     base_rate, unit, valid_from, valid_to,
                     discount_pct, floor_rate, ceiling_rate, escalation_value,
@@ -847,7 +1028,8 @@ class OnboardingService:
                 (
                     str(batch_id), ext_id,
                     tl["tariff_group_key"], tl.get("tariff_name"),
-                    tl["structure_code"], tl.get("energy_sale_type_code"),
+                    tl.get("tariff_type_code"),
+                    tl.get("energy_sale_type_code"),
                     tl.get("escalation_type_code"),
                     tl["billing_currency_code"], tl.get("market_ref_currency_code"),
                     tl.get("base_rate"), tl.get("unit"),
@@ -864,11 +1046,12 @@ class OnboardingService:
             cur.execute(
                 """INSERT INTO stg_contacts (
                     batch_id, external_project_id, role, full_name, email, phone,
-                    include_in_invoice
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                    include_in_invoice, escalation_only
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
                 (
                     str(batch_id), ext_id,
-                    c.role, c.full_name, c.email, c.phone, c.include_in_invoice,
+                    c.role, c.full_name, c.email, c.phone,
+                    c.include_in_invoice, c.escalation_only,
                 ),
             )
 
@@ -917,6 +1100,18 @@ class OnboardingService:
                 ),
             )
 
+        # Billing products
+        for i, bp_code in enumerate(data.billing_products):
+            cur.execute(
+                """INSERT INTO stg_billing_products (
+                    batch_id, external_project_id, product_code, is_primary
+                ) VALUES (%s, %s, %s, %s)""",
+                (
+                    str(batch_id), ext_id,
+                    bp_code, i == 0,  # First product is primary
+                ),
+            )
+
         # Guarantees
         cod = data.cod_date
         if cod is None and data.guarantees:
@@ -936,18 +1131,68 @@ class OnboardingService:
                     batch_id, external_project_id, operating_year,
                     year_start_date, year_end_date,
                     guaranteed_kwh, guarantee_pct_of_p50, p50_annual_kwh,
+                    shortfall_cap_usd, shortfall_cap_fx_rule,
                     source_metadata
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (
                     str(batch_id), ext_id,
                     g.operating_year, year_start, year_end,
                     g.required_output_kwh, pct_of_p50, p50,
+                    data.shortfall_cap_usd,
+                    data.shortfall_cap_fx_rule,
                     json.dumps({
                         "preliminary_yield_kwh": g.preliminary_yield_kwh,
                         "confidence": g.confidence,
                     }),
                 ),
             )
+
+    def _insert_payment_terms_clause(
+        self, cur, project_id: int, contract_id: int, merged: MergedOnboardingData
+    ) -> None:
+        """Insert a PAYMENT_TERMS clause from extracted default rate data (non-fatal)."""
+        try:
+            # Build normalized_payload from extraction_metadata or PPA default_rate
+            payload: Dict[str, Any] = {}
+            meta = merged.extraction_metadata or {}
+
+            # Try structured default_rate first (new extraction format)
+            default_rate = meta.get("default_rate")
+            if isinstance(default_rate, dict):
+                if default_rate.get("benchmark"):
+                    payload["default_rate_benchmark"] = default_rate["benchmark"]
+                if default_rate.get("spread_pct") is not None:
+                    payload["default_rate_spread_pct"] = default_rate["spread_pct"]
+                if default_rate.get("accrual_method"):
+                    payload["default_rate_accrual_method"] = default_rate["accrual_method"]
+                if default_rate.get("fx_indemnity") is not None:
+                    payload["late_payment_fx_indemnity"] = default_rate["fx_indemnity"]
+
+            # Fallback: legacy default_interest_rate (single decimal)
+            if not payload and meta.get("default_interest_rate") is not None:
+                payload["default_rate_spread_pct"] = meta["default_interest_rate"]
+
+            # Add payment_due_days from merged payment_terms if available
+            if merged.payment_terms:
+                import re
+                m = re.search(r"(\d+)", merged.payment_terms)
+                if m:
+                    payload["payment_due_days"] = int(m.group(1))
+
+            if not payload:
+                return  # Nothing to insert
+
+            cur.execute(
+                """
+                INSERT INTO clause (project_id, contract_id, clause_category_id, name, normalized_payload, is_current)
+                VALUES (%s, %s, 6, 'Payment Terms & Default Rate', %s::jsonb, true)
+                ON CONFLICT DO NOTHING
+                """,
+                (project_id, contract_id, json.dumps(payload)),
+            )
+            logger.info(f"Inserted PAYMENT_TERMS clause for project {project_id}")
+        except Exception as e:
+            logger.warning(f"Failed to insert PAYMENT_TERMS clause (non-fatal): {e}")
 
     def _execute_upserts(self, cur, conn) -> None:
         """Execute the upsert SQL sections from onboard_project.sql."""

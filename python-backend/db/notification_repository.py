@@ -566,8 +566,9 @@ class NotificationRepository:
                     INSERT INTO submission_token (
                         organization_id, token_hash, submission_fields,
                         max_uses, expires_at, invoice_header_id,
-                        counterparty_id, email_log_id
-                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
+                        counterparty_id, email_log_id,
+                        project_id, submission_type
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
                     """,
                     (
@@ -579,6 +580,8 @@ class NotificationRepository:
                         data.get("invoice_header_id"),
                         data.get("counterparty_id"),
                         data.get("email_log_id"),
+                        data.get("project_id"),
+                        data.get("submission_type", "form_response"),
                     ),
                 )
                 conn.commit()
@@ -594,11 +597,13 @@ class NotificationRepository:
                     SELECT st.*,
                            ih.invoice_number, ih.total_amount, ih.due_date,
                            cp.name as counterparty_name,
-                           o.name as organization_name
+                           o.name as organization_name,
+                           p.name as project_name
                     FROM submission_token st
                     LEFT JOIN invoice_header ih ON ih.id = st.invoice_header_id
                     LEFT JOIN counterparty cp ON cp.id = st.counterparty_id
                     LEFT JOIN organization o ON o.id = st.organization_id
+                    LEFT JOIN project p ON p.id = st.project_id
                     WHERE st.token_hash = %s
                     """,
                     (token_hash,),

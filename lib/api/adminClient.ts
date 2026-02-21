@@ -2,7 +2,7 @@
  * Admin API Client
  *
  * API client for client onboarding and API key management.
- * Used by the /admin page to create organizations and generate API keys.
+ * Used by the /client-setup page to create organizations and generate API keys.
  */
 
 // ============================================================================
@@ -68,6 +68,119 @@ export interface GenerateAPIKeyResponse {
 export interface UpdateCredentialRequest {
   is_active?: boolean
   label?: string
+}
+
+// ============================================================================
+// Project Dashboard Types
+// ============================================================================
+
+export interface ProjectListItem {
+  id: number
+  name: string
+  organization_id: number
+}
+
+export interface ProjectGroupedItem {
+  id: number
+  name: string
+  organization_id: number
+  organization_name: string
+}
+
+export interface ProjectDashboardResponse {
+  success: boolean
+  project: Record<string, unknown>
+  contracts: Record<string, unknown>[]
+  tariffs: Record<string, unknown>[]
+  assets: Record<string, unknown>[]
+  meters: Record<string, unknown>[]
+  forecasts: Record<string, unknown>[]
+  guarantees: Record<string, unknown>[]
+  contacts: Record<string, unknown>[]
+  documents: Record<string, unknown>[]
+  billing_products: Record<string, unknown>[]
+  rate_periods: Record<string, unknown>[]
+  monthly_rates: Record<string, unknown>[]
+  clauses: Record<string, unknown>[]
+  lookups: Record<string, { id: number; code?: string; name: string }[]>
+}
+
+// ============================================================================
+// Inline Editing Types
+// ============================================================================
+
+export type PatchEntity = 'projects' | 'contracts' | 'tariffs' | 'assets' | 'meters' | 'forecasts' | 'guarantees' | 'contacts' | 'billing-products' | 'rate-periods'
+
+export interface PatchEntityRequest {
+  entity: PatchEntity
+  entityId: number
+  projectId?: number   // required for all except 'projects' and 'contacts'
+  fields: Record<string, unknown>
+}
+
+// ============================================================================
+// GRP (Grid Reference Price) Types
+// ============================================================================
+
+export interface GRPObservation {
+  id: number
+  project_id: number
+  operating_year: number
+  period_start: string
+  period_end: string
+  observation_type: 'monthly' | 'annual'
+  calculated_grp_per_kwh: number | null
+  total_variable_charges: number | null
+  total_kwh_invoiced: number | null
+  verification_status: 'pending' | 'jointly_verified' | 'disputed' | 'estimated'
+  verified_at: string | null
+  source_metadata: Record<string, unknown> | null
+  created_at: string
+  updated_at: string | null
+}
+
+export interface GRPObservationsResponse {
+  success: boolean
+  observations: GRPObservation[]
+  total: number
+}
+
+export interface AggregateGRPResponse {
+  success: boolean
+  observation_id: number
+  annual_grp_per_kwh: number
+  operating_year: number
+  months_included: number
+  months_excluded: number
+  total_variable_charges: number
+  total_kwh_invoiced: number
+  message: string
+}
+
+export interface VerifyObservationResponse {
+  success: boolean
+  observation_id: number
+  verification_status: string
+  verified_at: string | null
+  message: string
+}
+
+export interface GRPCollectionResponse {
+  success: boolean
+  token_id: number
+  submission_url: string
+  message: string
+}
+
+export interface AdminUploadResponse {
+  success: boolean
+  observation_id: number
+  grp_per_kwh: number
+  total_variable_charges: number
+  total_kwh_invoiced: number
+  line_items_count: number
+  extraction_confidence: string
+  message: string
 }
 
 // ============================================================================
@@ -204,6 +317,31 @@ export class AdminClient {
     return this.handleResponse<CredentialResponse>(response)
   }
 
+  // =========================================================================
+  // Projects Dashboard
+  // =========================================================================
+
+  async listProjects(organizationId?: number): Promise<ProjectListItem[]> {
+    this.log('Listing projects', { organizationId })
+    const params = organizationId != null ? `?organization_id=${organizationId}` : ''
+    const response = await fetch(`${this.baseUrl}/api/projects${params}`)
+    const data = await this.handleResponse<{ projects: ProjectListItem[] }>(response)
+    return data.projects
+  }
+
+  async listProjectsGrouped(): Promise<ProjectGroupedItem[]> {
+    this.log('Listing projects grouped by organization')
+    const response = await fetch(`${this.baseUrl}/api/projects/grouped`)
+    const data = await this.handleResponse<{ projects: ProjectGroupedItem[] }>(response)
+    return data.projects
+  }
+
+  async getProjectDashboard(projectId: number): Promise<ProjectDashboardResponse> {
+    this.log('Fetching project dashboard', { projectId })
+    const response = await fetch(`${this.baseUrl}/api/projects/${projectId}/dashboard`)
+    return this.handleResponse<ProjectDashboardResponse>(response)
+  }
+
   async deleteCredential(credentialId: number, organizationId: number): Promise<void> {
     this.log('Deleting credential', { credentialId, organizationId })
     const response = await fetch(
@@ -217,6 +355,177 @@ export class AdminClient {
         response.status
       )
     }
+  }
+
+  // =========================================================================
+  // Inline Editing
+  // =========================================================================
+
+  async patchEntity(request: PatchEntityRequest): Promise<{ success: boolean; id: number }> {
+    this.log('Patching entity', request)
+    const { entity, entityId, projectId, fields } = request
+    const scopeParam = projectId != null ? `?project_id=${projectId}` : ''
+    const response = await fetch(
+      `${this.baseUrl}/api/${entity}/${entityId}${scopeParam}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(fields),
+      }
+    )
+    return this.handleResponse<{ success: boolean; id: number }>(response)
+  }
+
+  async addBillingProduct(request: {
+    contract_id: number
+    billing_product_id: number
+    is_primary?: boolean
+    notes?: string
+  }): Promise<{ success: boolean; id: number }> {
+    this.log('Adding billing product', request)
+    const response = await fetch(
+      `${this.baseUrl}/api/billing-products`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      }
+    )
+    return this.handleResponse<{ success: boolean; id: number }>(response)
+  }
+
+  async removeBillingProduct(junctionId: number): Promise<{ success: boolean; id: number }> {
+    this.log('Removing billing product', { junctionId })
+    const response = await fetch(
+      `${this.baseUrl}/api/billing-products/${junctionId}`,
+      { method: 'DELETE' }
+    )
+    return this.handleResponse<{ success: boolean; id: number }>(response)
+  }
+
+  // =========================================================================
+  // Contacts
+  // =========================================================================
+
+  async addContact(request: {
+    counterparty_id: number
+    organization_id: number
+    full_name?: string
+    email?: string
+    phone?: string
+    role?: string
+    include_in_invoice_email?: boolean
+    escalation_only?: boolean
+  }): Promise<{ success: boolean; id: number }> {
+    this.log('Adding contact', request)
+    const response = await fetch(
+      `${this.baseUrl}/api/contacts`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      }
+    )
+    return this.handleResponse<{ success: boolean; id: number }>(response)
+  }
+
+  async removeContact(contactId: number): Promise<{ success: boolean; id: number }> {
+    this.log('Removing contact', { contactId })
+    const response = await fetch(
+      `${this.baseUrl}/api/contacts/${contactId}`,
+      { method: 'DELETE' }
+    )
+    return this.handleResponse<{ success: boolean; id: number }>(response)
+  }
+
+  // =========================================================================
+  // GRP (Grid Reference Price)
+  // =========================================================================
+
+  async listGRPObservations(
+    projectId: number,
+    orgId: number,
+    params?: { observation_type?: string; operating_year?: number; verification_status?: string }
+  ): Promise<GRPObservationsResponse> {
+    this.log('Listing GRP observations', { projectId, orgId, params })
+    const searchParams = new URLSearchParams()
+    if (params?.observation_type) searchParams.set('observation_type', params.observation_type)
+    if (params?.operating_year != null) searchParams.set('operating_year', String(params.operating_year))
+    if (params?.verification_status) searchParams.set('verification_status', params.verification_status)
+    const qs = searchParams.toString()
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/grp-observations${qs ? `?${qs}` : ''}`,
+      { headers: { 'X-Organization-ID': String(orgId) } }
+    )
+    return this.handleResponse<GRPObservationsResponse>(response)
+  }
+
+  async aggregateGRP(
+    projectId: number,
+    orgId: number,
+    body: { operating_year: number; include_pending: boolean }
+  ): Promise<AggregateGRPResponse> {
+    this.log('Aggregating GRP', { projectId, orgId, body })
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/grp-aggregate`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Organization-ID': String(orgId) },
+        body: JSON.stringify(body),
+      }
+    )
+    return this.handleResponse<AggregateGRPResponse>(response)
+  }
+
+  async verifyObservation(
+    projectId: number,
+    orgId: number,
+    observationId: number,
+    body: { verification_status: string; notes?: string }
+  ): Promise<VerifyObservationResponse> {
+    this.log('Verifying GRP observation', { projectId, orgId, observationId, body })
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/grp-observations/${observationId}`,
+      {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-Organization-ID': String(orgId) },
+        body: JSON.stringify(body),
+      }
+    )
+    return this.handleResponse<VerifyObservationResponse>(response)
+  }
+
+  async generateGRPToken(
+    orgId: number,
+    body: { project_id: number; operating_year: number; max_uses?: number }
+  ): Promise<GRPCollectionResponse> {
+    this.log('Generating GRP collection token', { orgId, body })
+    const response = await fetch(
+      `${this.baseUrl}/api/notifications/grp-collection`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Organization-ID': String(orgId) },
+        body: JSON.stringify(body),
+      }
+    )
+    return this.handleResponse<GRPCollectionResponse>(response)
+  }
+
+  async uploadGRPInvoice(
+    projectId: number,
+    orgId: number,
+    formData: FormData
+  ): Promise<AdminUploadResponse> {
+    this.log('Uploading GRP invoice', { projectId, orgId })
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/grp-upload`,
+      {
+        method: 'POST',
+        headers: { 'X-Organization-ID': String(orgId) },
+        body: formData,
+      }
+    )
+    return this.handleResponse<AdminUploadResponse>(response)
   }
 }
 
