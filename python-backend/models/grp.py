@@ -124,3 +124,59 @@ class AdminUploadResponse(BaseModel):
     message: str
     billing_month_stored: Optional[str] = None
     period_mismatch: Optional[Dict[str, str]] = None
+
+
+# =============================================================================
+# MANUAL GRP ENTRY MODELS
+# =============================================================================
+
+class ManualGRPRateEntry(BaseModel):
+    """A single monthly tariff rate entry."""
+    billing_month: str = Field(..., pattern=r"^\d{4}-\d{2}$", description="Billing month in YYYY-MM format")
+    grp_per_kwh: float = Field(..., gt=0, description="Grid reference price per kWh")
+    tariff_components: Optional[Dict[str, float]] = Field(
+        None, description="Breakdown by component, e.g. {'energy_charge': 0.50, 'govt_levy': 0.05}"
+    )
+    notes: Optional[str] = Field(None, max_length=500, description="Optional notes for this entry")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "billing_month": "2024-09",
+                "grp_per_kwh": 0.6042,
+                "tariff_components": {
+                    "energy_charge": 0.5200,
+                    "govt_levy": 0.0542,
+                    "street_lighting": 0.0300,
+                },
+                "notes": "Pre-COD baseline rate",
+            }
+        }
+    )
+
+
+class ManualGRPBatchRequest(BaseModel):
+    """Batch request to manually insert GRP tariff rates."""
+    entries: List[ManualGRPRateEntry] = Field(..., min_length=1, max_length=60)
+    is_baseline: bool = Field(False, description="Allow pre-COD months with operating_year=0")
+    currency_code: Optional[str] = Field(None, description="ISO currency code (e.g. GHS). Falls back to project tariff currency.")
+
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "entries": [
+                    {"billing_month": "2024-09", "grp_per_kwh": 0.6042},
+                    {"billing_month": "2024-10", "grp_per_kwh": 0.6042},
+                ],
+                "is_baseline": True,
+                "currency_code": "GHS",
+            }
+        }
+    )
+
+
+class ManualGRPBatchResponse(BaseModel):
+    success: bool = True
+    inserted_count: int
+    observation_ids: List[int]
+    message: str

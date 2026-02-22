@@ -192,6 +192,30 @@ export interface SubmissionTokenListResponse {
   total: number
 }
 
+// ============================================================================
+// Manual GRP Entry Types
+// ============================================================================
+
+export interface ManualGRPRateEntry {
+  billing_month: string // YYYY-MM
+  grp_per_kwh: number
+  tariff_components?: Record<string, number>
+  notes?: string
+}
+
+export interface ManualGRPBatchRequest {
+  entries: ManualGRPRateEntry[]
+  is_baseline: boolean
+  currency_code?: string
+}
+
+export interface ManualGRPBatchResponse {
+  success: boolean
+  inserted_count: number
+  observation_ids: number[]
+  message: string
+}
+
 export interface AdminUploadResponse {
   success: boolean
   observation_id: number
@@ -541,7 +565,11 @@ export class AdminClient {
       `${this.baseUrl}/api/notifications/grp-collection`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Organization-ID': String(orgId) },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Organization-ID': String(orgId),
+          'X-Frontend-URL': typeof window !== 'undefined' ? window.location.origin : '',
+        },
         body: JSON.stringify(body),
       }
     )
@@ -563,6 +591,23 @@ export class AdminClient {
       }
     )
     return this.handleResponse<AdminUploadResponse>(response)
+  }
+
+  async submitManualGRPRates(
+    projectId: number,
+    orgId: number,
+    body: ManualGRPBatchRequest
+  ): Promise<ManualGRPBatchResponse> {
+    this.log('Submitting manual GRP rates', { projectId, orgId, count: body.entries.length })
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/grp-manual`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Organization-ID': String(orgId) },
+        body: JSON.stringify(body),
+      }
+    )
+    return this.handleResponse<ManualGRPBatchResponse>(response)
   }
 
   async revokeToken(

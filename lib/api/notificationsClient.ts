@@ -358,6 +358,9 @@ export class NotificationsClient {
     message: string
   }> {
     const headers = await this.getHeaders()
+    if (typeof window !== 'undefined') {
+      headers['X-Frontend-URL'] = window.location.origin
+    }
     const url = `${this.baseUrl}/api/notifications/send`
     const result = await this.fetchWithRetry<SendEmailAPIResponse>(url, {
       method: 'POST',

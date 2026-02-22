@@ -102,7 +102,8 @@ async def send_email(request: Request, body: SendEmailRequest) -> SendEmailRespo
 
     try:
         from services.email.notification_service import NotificationService
-        service = NotificationService(notification_repo)
+        frontend_url = request.headers.get("X-Frontend-URL") or None
+        service = NotificationService(notification_repo, frontend_url=frontend_url)
 
         result = service.send_immediate(
             org_id=org_id,
@@ -304,7 +305,8 @@ async def trigger_schedule(request: Request, schedule_id: int) -> SendEmailRespo
 
     try:
         from services.email.notification_service import NotificationService
-        service = NotificationService(notification_repo)
+        frontend_url = request.headers.get("X-Frontend-URL") or None
+        service = NotificationService(notification_repo, frontend_url=frontend_url)
 
         # Get template for this schedule
         template = notification_repo.get_template(schedule["email_template_id"], org_id)

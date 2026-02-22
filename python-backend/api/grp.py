@@ -25,6 +25,8 @@ from models.grp import (
     AdminUploadResponse,
     GRPObservation,
     GRPObservationListResponse,
+    ManualGRPBatchRequest,
+    ManualGRPBatchResponse,
     ObservationType,
     VerificationStatus,
     VerifyObservationRequest,
@@ -290,7 +292,7 @@ async def refresh_grp(request: Request, project_id: int):
 async def list_grp_observations(
     request: Request,
     project_id: int,
-    operating_year: Optional[int] = Query(None, ge=1, description="Filter by operating year"),
+    operating_year: Optional[int] = Query(None, ge=0, description="Filter by operating year (0 = baseline/pre-COD)"),
     verification_status: Optional[str] = Query(None, description="Filter by verification status"),
     observation_type: Optional[str] = Query("monthly", description="monthly or annual"),
 ) -> GRPObservationListResponse:
@@ -794,4 +796,163 @@ async def admin_grp_upload(
         message="Invoice processed successfully via admin upload",
         billing_month_stored=result.get("billing_month_stored"),
         period_mismatch=result.get("period_mismatch"),
+    )
+
+
+# =============================================================================
+# POST /api/projects/{project_id}/grp-manual
+# =============================================================================
+
+@router.post(
+    "/projects/{project_id}/grp-manual",
+    response_model=ManualGRPBatchResponse,
+    summary="Manually insert GRP tariff rates (JSON, no file upload)",
+)
+async def manual_grp_entry(
+    request: Request,
+    project_id: int,
+    body: ManualGRPBatchRequest,
+) -> ManualGRPBatchResponse:
+    """
+    Insert manually-sourced GRP tariff rates for a project.
+
+    Accepts per-kWh rates (not invoice totals), so total_variable_charges
+    and total_kwh_invoiced are left NULL. Supports pre-COD baseline data
+    when is_baseline=True (sets operating_year=0).
+    """
+    from calendar import monthrange
+
+    org_id = _get_org_id(request)
+    _validate_project_ownership(project_id, org_id)
+
+    # Resolve currency_id
+    currency_id = None
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                if body.currency_code:
+                    cur.execute(
+                        "SELECT id FROM currency WHERE UPPER(code) = UPPER(%s)",
+                        (body.currency_code,),
+                    )
+                    row = cur.fetchone()
+                    if not row:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"success": False, "message": f"Unknown currency code: {body.currency_code}"},
+                        )
+                    currency_id = row["id"]
+                else:
+                    cur.execute(
+                        """
+                        SELECT ct.currency_id
+                        FROM clause_tariff ct
+                        WHERE ct.project_id = %s AND ct.is_current = true
+                        LIMIT 1
+                        """,
+                        (project_id,),
+                    )
+                    row = cur.fetchone()
+                    currency_id = row["currency_id"] if row else None
+
+                # Fetch COD date for operating_year calculation
+                cur.execute("SELECT cod_date FROM project WHERE id = %s", (project_id,))
+                proj_row = cur.fetchone()
+                cod_date = proj_row["cod_date"] if proj_row else None
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error resolving currency/COD: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"success": False, "message": str(e)})
+
+    # Insert all entries in a single transaction
+    observation_ids = []
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                for entry in body.entries:
+                    # Parse billing_month → period boundaries
+                    try:
+                        billing_date = date.fromisoformat(entry.billing_month + "-01")
+                    except ValueError:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={"success": False, "message": f"Invalid billing_month: {entry.billing_month}"},
+                        )
+
+                    period_start = billing_date
+                    _, last_day = monthrange(billing_date.year, billing_date.month)
+                    period_end = billing_date.replace(day=last_day)
+
+                    # Determine operating_year
+                    if body.is_baseline and cod_date and billing_date < cod_date.replace(day=1):
+                        operating_year = 0
+                    elif cod_date:
+                        year_diff = billing_date.year - cod_date.year
+                        if billing_date.month < cod_date.month:
+                            year_diff -= 1
+                        operating_year = max(1, year_diff + 1)
+                    else:
+                        operating_year = 0 if body.is_baseline else 1
+
+                    # Build source_metadata
+                    source_metadata = {
+                        "entry_method": "manual",
+                        "entered_at": datetime.utcnow().isoformat(),
+                    }
+                    if entry.tariff_components:
+                        source_metadata["tariff_components"] = entry.tariff_components
+                    if entry.notes:
+                        source_metadata["notes"] = entry.notes
+
+                    # Upsert into reference_price
+                    cur.execute(
+                        """
+                        INSERT INTO reference_price (
+                            project_id, organization_id, operating_year,
+                            period_start, period_end,
+                            calculated_grp_per_kwh, currency_id,
+                            total_variable_charges, total_kwh_invoiced,
+                            observation_type, source_metadata, verification_status
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s,
+                            NULL, NULL,
+                            'monthly', %s, 'estimated'
+                        )
+                        ON CONFLICT (project_id, observation_type, period_start)
+                        DO UPDATE SET
+                            calculated_grp_per_kwh = EXCLUDED.calculated_grp_per_kwh,
+                            currency_id = EXCLUDED.currency_id,
+                            operating_year = EXCLUDED.operating_year,
+                            period_end = EXCLUDED.period_end,
+                            source_metadata = EXCLUDED.source_metadata,
+                            verification_status = 'estimated',
+                            updated_at = NOW()
+                        RETURNING id
+                        """,
+                        (
+                            project_id,
+                            org_id,
+                            operating_year,
+                            period_start,
+                            period_end,
+                            entry.grp_per_kwh,
+                            currency_id,
+                            Json(source_metadata),
+                        ),
+                    )
+                    observation_ids.append(cur.fetchone()["id"])
+
+                conn.commit()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error inserting manual GRP entries: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"success": False, "message": str(e)})
+
+    return ManualGRPBatchResponse(
+        inserted_count=len(observation_ids),
+        observation_ids=observation_ids,
+        message=f"Inserted {len(observation_ids)} manual GRP rate(s) for project {project_id}",
     )

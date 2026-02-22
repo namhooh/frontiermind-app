@@ -25,12 +25,12 @@ class NotificationService:
               -> send via SES -> log in email_log -> audit log
     """
 
-    def __init__(self, notification_repo, ses_client: Optional[SESClient] = None):
+    def __init__(self, notification_repo, ses_client: Optional[SESClient] = None, frontend_url: Optional[str] = None):
         self.repo = notification_repo
         self.ses = ses_client or SESClient()
         self.renderer = EmailTemplateRenderer()
         self.token_service = TokenService(notification_repo)
-        self.app_base_url = os.getenv("APP_BASE_URL", "http://localhost:3000")
+        self.app_base_url = frontend_url or os.getenv("APP_BASE_URL", "https://frontiermind-app.vercel.app")
 
     # =========================================================================
     # IMMEDIATE SEND
