@@ -18,6 +18,8 @@ import anthropic
 from llama_parse import LlamaParse
 
 from models.onboarding import (
+    AvailableEnergyExtraction,
+    DefaultRateExtraction,
     EscalationRule,
     GRPExtraction,
     GuaranteeYearRow,
@@ -97,9 +99,13 @@ class PPAOnboardingExtractor:
 
     def _ocr_pdf(self, pdf_bytes: bytes, filename: str) -> str:
         """Extract text from PDF via LlamaParse."""
+        from uuid import uuid4
+
         tmp_dir = Path("/tmp/onboarding_parser")
         tmp_dir.mkdir(exist_ok=True)
-        tmp_path = tmp_dir / filename
+        # Sanitize filename to prevent path traversal — use UUID + original extension
+        safe_name = f"{uuid4().hex}{Path(filename).suffix}"
+        tmp_path = tmp_dir / safe_name
 
         try:
             tmp_path.write_bytes(pdf_bytes)
@@ -313,6 +319,24 @@ class PPAOnboardingExtractor:
         if regex_pricing.get("ceiling_rate"):
             confidence_scores["ceiling_rate"] = 1.0
 
+        # Parse structured default_rate if LLM returned it
+        default_rate = None
+        llm_default_rate = llm_data.get("default_rate")
+        if isinstance(llm_default_rate, dict) and llm_default_rate:
+            try:
+                default_rate = DefaultRateExtraction(**llm_default_rate)
+            except Exception:
+                logger.warning("Failed to parse structured default_rate, using flat field")
+
+        # Parse structured available_energy if LLM returned it
+        available_energy = None
+        llm_available_energy = llm_data.get("available_energy")
+        if isinstance(llm_available_energy, dict) and llm_available_energy:
+            try:
+                available_energy = AvailableEnergyExtraction(**llm_available_energy)
+            except Exception:
+                logger.warning("Failed to parse structured available_energy, using flat field")
+
         return PPAContractData(
             contract_term_years=llm_data.get("contract_term_years"),
             initial_term_years=llm_data.get("initial_term_years"),
@@ -324,8 +348,10 @@ class PPAOnboardingExtractor:
             grp=grp,
             payment_terms=llm_data.get("payment_terms"),
             default_interest_rate=llm_data.get("default_interest_rate"),
+            default_rate=default_rate,
             payment_security_type=llm_data.get("payment_security_type"),
             payment_security_amount=llm_data.get("payment_security_amount"),
+            available_energy=available_energy,
             available_energy_method=llm_data.get("available_energy_method"),
             irradiance_threshold=llm_data.get("irradiance_threshold"),
             interval_minutes=llm_data.get("interval_minutes"),

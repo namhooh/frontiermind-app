@@ -5,11 +5,13 @@ REST API for email notification management: templates, schedules, email logs.
 """
 
 import logging
-from typing import Optional
+import os
+from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException, status, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from pydantic import BaseModel
 
+from middleware.api_key_auth import require_api_key
 from models.notifications import (
     SendEmailRequest,
     CreateEmailTemplateRequest,
@@ -35,7 +37,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/api/notifications",
     tags=["notifications"],
+    dependencies=[Depends(require_api_key)],
     responses={
+        401: {"description": "Missing or invalid API key"},
         404: {"description": "Resource not found"},
         500: {"description": "Internal server error"},
     },
@@ -428,9 +432,12 @@ async def create_grp_collection(
         # Build the submission URL
         frontend_url = request.headers.get(
             "X-Frontend-URL",
-            "https://frontiermind.vercel.app",
+            os.getenv("APP_BASE_URL", "https://frontiermind-app.vercel.app"),
         )
         submission_url = f"{frontend_url}/submit/{result['token']}"
+
+        # Persist URL alongside token (raw token is never stored, only hash)
+        token_svc.store_submission_url(result["token_id"], submission_url)
 
         return GRPCollectionResponse(
             success=True,
@@ -447,6 +454,93 @@ async def create_grp_collection(
             status_code=500,
             detail={"success": False, "message": str(e)},
         )
+
+
+# ============================================================================
+# Submission Token Listing
+# ============================================================================
+
+class SubmissionTokenItem(BaseModel):
+    id: int
+    organization_id: int
+    project_id: Optional[int] = None
+    project_name: Optional[str] = None
+    submission_type: Optional[str] = None
+    submission_token_status: str
+    max_uses: int
+    use_count: int
+    expires_at: Optional[str] = None
+    submission_url: Optional[str] = None
+    created_at: Optional[str] = None
+
+
+class SubmissionTokenListResponse(BaseModel):
+    success: bool = True
+    tokens: List[SubmissionTokenItem]
+    total: int
+
+
+@router.get(
+    "/tokens",
+    response_model=SubmissionTokenListResponse,
+    summary="List submission tokens",
+)
+async def list_tokens(
+    request: Request,
+    project_id: Optional[int] = Query(None),
+    submission_type: Optional[str] = Query(None),
+    include_expired: bool = Query(False),
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+) -> SubmissionTokenListResponse:
+    """List submission tokens for the organization, optionally filtered by project or type."""
+    require_repo()
+    org_id = get_org_id(request)
+
+    try:
+        tokens, total = notification_repo.list_submission_tokens(
+            org_id=org_id,
+            project_id=project_id,
+            submission_type=submission_type,
+            include_expired=include_expired,
+            limit=limit,
+            offset=offset,
+        )
+        return SubmissionTokenListResponse(
+            tokens=[
+                SubmissionTokenItem(
+                    **{
+                        k: (str(v) if k in ("expires_at", "created_at") and v is not None else v)
+                        for k, v in t.items()
+                    }
+                )
+                for t in tokens
+            ],
+            total=total,
+        )
+    except Exception as e:
+        logger.error(f"Error listing tokens: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"success": False, "message": str(e)})
+
+
+@router.post(
+    "/tokens/{token_id}/revoke",
+    response_model=SuccessResponse,
+    summary="Revoke a submission token",
+)
+async def revoke_token(request: Request, token_id: int) -> SuccessResponse:
+    """Revoke an active submission token so its link stops working."""
+    require_repo()
+    org_id = get_org_id(request)
+
+    try:
+        notification_repo.revoke_submission_token(token_id, org_id)
+        return SuccessResponse(message="Token revoked")
+    except ValueError as e:
+        msg = str(e)
+        if "not found" in msg:
+            raise HTTPException(status_code=404, detail={"success": False, "message": msg})
+        raise HTTPException(status_code=400, detail={"success": False, "message": msg})
 
 
 def _validate_project_ownership(project_id: int, org_id: int) -> None:

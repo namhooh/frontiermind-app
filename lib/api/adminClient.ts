@@ -101,6 +101,7 @@ export interface ProjectDashboardResponse {
   rate_periods: Record<string, unknown>[]
   monthly_rates: Record<string, unknown>[]
   clauses: Record<string, unknown>[]
+  amendments: Record<string, unknown>[]
   lookups: Record<string, { id: number; code?: string; name: string }[]>
 }
 
@@ -171,6 +172,26 @@ export interface GRPCollectionResponse {
   message: string
 }
 
+export interface SubmissionTokenItem {
+  id: number
+  organization_id: number
+  project_id: number | null
+  project_name: string | null
+  submission_type: string | null
+  submission_token_status: string
+  max_uses: number
+  use_count: number
+  expires_at: string | null
+  submission_url: string | null
+  created_at: string | null
+}
+
+export interface SubmissionTokenListResponse {
+  success: boolean
+  tokens: SubmissionTokenItem[]
+  total: number
+}
+
 export interface AdminUploadResponse {
   success: boolean
   observation_id: number
@@ -180,6 +201,8 @@ export interface AdminUploadResponse {
   line_items_count: number
   extraction_confidence: string
   message: string
+  billing_month_stored?: string
+  period_mismatch?: { user_provided: string; extracted: string; resolution: string }
 }
 
 // ============================================================================
@@ -441,6 +464,21 @@ export class AdminClient {
   // GRP (Grid Reference Price)
   // =========================================================================
 
+  async refreshGRP(
+    projectId: number,
+    orgId: number
+  ): Promise<{ success: boolean; refreshed_operating_years: number[] }> {
+    this.log('Refreshing stale GRP annuals', { projectId, orgId })
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/grp-refresh`,
+      {
+        method: 'POST',
+        headers: { 'X-Organization-ID': String(orgId) },
+      }
+    )
+    return this.handleResponse<{ success: boolean; refreshed_operating_years: number[] }>(response)
+  }
+
   async listGRPObservations(
     projectId: number,
     orgId: number,
@@ -525,6 +563,38 @@ export class AdminClient {
       }
     )
     return this.handleResponse<AdminUploadResponse>(response)
+  }
+
+  async revokeToken(
+    orgId: number,
+    tokenId: number
+  ): Promise<{ success: boolean; message: string }> {
+    this.log('Revoking submission token', { orgId, tokenId })
+    const response = await fetch(
+      `${this.baseUrl}/api/notifications/tokens/${tokenId}/revoke`,
+      {
+        method: 'POST',
+        headers: { 'X-Organization-ID': String(orgId) },
+      }
+    )
+    return this.handleResponse<{ success: boolean; message: string }>(response)
+  }
+
+  async listTokens(
+    orgId: number,
+    params?: { project_id?: number; submission_type?: string; include_expired?: boolean }
+  ): Promise<SubmissionTokenListResponse> {
+    this.log('Listing submission tokens', { orgId, params })
+    const searchParams = new URLSearchParams()
+    if (params?.project_id != null) searchParams.set('project_id', String(params.project_id))
+    if (params?.submission_type) searchParams.set('submission_type', params.submission_type)
+    if (params?.include_expired) searchParams.set('include_expired', 'true')
+    const qs = searchParams.toString()
+    const response = await fetch(
+      `${this.baseUrl}/api/notifications/tokens${qs ? `?${qs}` : ''}`,
+      { headers: { 'X-Organization-ID': String(orgId) } }
+    )
+    return this.handleResponse<SubmissionTokenListResponse>(response)
   }
 }
 

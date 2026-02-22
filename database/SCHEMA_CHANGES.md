@@ -1566,3 +1566,56 @@ and token-based external submission collection.
 - Legacy `default_interest_rate` in extraction_metadata preserved for backward compatibility
 
 ---
+
+### v10.1 - 2026-02-22 (Pipeline Integrity Fixes)
+
+**Description:** Addresses 16 verified pipeline gaps across onboarding, GRP ingestion, and admin APIs. Fixes SQL section execution order, enables pre-flight validation, adds API key auth to admin endpoints, and resolves data type mismatches between parser output and DB constraints.
+
+**Migration:** `database/migrations/039_pipeline_integrity_fixes.sql`
+
+**Schema Changes:**
+- **`reference_price`**: Added partial unique index `uq_reference_price_annual_project_year` on `(project_id, operating_year) WHERE observation_type = 'annual'` — prevents duplicate annual aggregation rows
+- **`asset_type`**: Seeded 4 missing codes: `tracker`, `meter`, `mounting_structure`, `combiner_box`
+- **`meter`**: Expanded `chk_meter_metering_type` CHECK constraint to include `'gross'` and `'bidirectional'`
+- **`clause_tariff`**: Idempotent GRP seed for GH-MOH01 using stable `tariff_group_key` lookup (replaces fragile `WHERE id = 2` from migration 037)
+
+**Backend Changes:**
+- `python-backend/services/onboarding/onboarding_service.py`: Numeric section sort key (fixes `4.10` executing before `4.2`), pre-flight validation runs before upserts, `formula_type` auto-set for REBASED_MARKET_PRICE tariffs, staging DDL authority comment
+- `python-backend/api/entities.py`: Added `require_api_key` dependency to router (was unauthenticated)
+- `python-backend/api/grp.py`: Added `require_api_key` dependency, annual aggregation upsert uses new partial unique index
+- `python-backend/services/onboarding/excel_parser.py`: `_map_asset_type()` produces canonical lowercase DB codes (was uppercase)
+- `python-backend/services/onboarding/ppa_parser.py`: Path traversal fix (UUID-based temp filenames), populates structured `default_rate` and `available_energy` fields
+- `python-backend/services/grp/extraction_service.py`: Recomputes `operating_year` after billing period reconciliation
+
+**Documentation Changes:**
+- `CBE_data_extracts/CBE_TO_FRONTIERMIND_MAPPING.md`: Fixed stale `tariff_structure` reference, updated meter gap status, added 8 new pipeline gap entries (10–17)
+
+---
+
+### v10.2 - 2026-02-22 (Amendment Version History)
+
+**Description:** Populates the amendment versioning infrastructure (from migration 033) for GH-MOH01's First Amendment. Inserts pre-amendment original tariff row, links the existing tariff to the amendment with correct supersedes chain, and surfaces amendment data in the dashboard API and frontend.
+
+**Migration:** `database/migrations/038_moh01_amendment_version_history.sql` (replaces `038_fix_moh01_min_solar_price_escalation.sql`)
+
+**Data Changes:**
+- **`clause_tariff`**: Inserted original (pre-amendment) tariff row with `discount_pct=0.21`, `escalation_rules` including `FIXED 2.5%` on `min_solar_price`, `is_current=false`, `version=1`
+- **`clause_tariff` (id=2)**: Updated to `version=2`, `contract_amendment_id=1`, `supersedes_tariff_id=<original id>`, `change_action='MODIFIED'`
+- Escalation fix (FIXED->NONE on min_solar_price) made idempotent within the same migration
+- Version chain verified with assertions (both rows exist, values correct, supersedes linked)
+
+**Backend Changes:**
+- `python-backend/api/entities.py`: Added `amendments_data` CTE to dashboard query (joins `contract_amendment` via `contract` scoped to project); added `amendments` field to `ProjectDashboardResponse` Pydantic model and response construction
+
+**Frontend Changes:**
+- `lib/api/adminClient.ts`: Added `amendments` to `ProjectDashboardResponse` TypeScript interface
+- `app/projects/components/ProjectOverviewTab.tsx`: Added "Amendment History" collapsible section after "Contract Terms" — renders amendment header with date badge, description, and before/after diff table from `source_metadata.changes`
+- `app/projects/components/PricingTariffsTab.tsx`: Added amber "v2 — Amended" badge on tariff cards when `contract_amendment_id` is non-null (in both Tariff & Rate Schedule and BillingProductCard views)
+
+**Design Notes:**
+- Original tariff row has `is_current=false` so `clause_tariff_current_v` view still returns only the amended tariff (id=2)
+- `tariff_annual_rate` (id=1, clause_tariff_id=2) remains correct — it tracks the current active tariff
+- AFTER INSERT trigger (`trg_clause_tariff_supersede`) does not fire for the original row because `supersedes_tariff_id=NULL`
+- Partial unique index `uq_clause_tariff_current_group_validity` does not collide because original has `is_current=false`
+
+---

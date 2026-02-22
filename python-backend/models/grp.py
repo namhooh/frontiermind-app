@@ -122,3 +122,5 @@ class AdminUploadResponse(BaseModel):
     line_items_count: int
     extraction_confidence: str
     message: str
+    billing_month_stored: Optional[str] = None
+    period_mismatch: Optional[Dict[str, str]] = None

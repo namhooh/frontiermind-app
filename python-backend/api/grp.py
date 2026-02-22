@@ -13,10 +13,11 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, Request, UploadFile, File, Form, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form, status
 from psycopg2.extras import Json
 
 from db.database import get_db_connection, init_connection_pool
+from middleware.api_key_auth import require_api_key
 from middleware.rate_limiter import limiter
 from models.grp import (
     AggregateGRPRequest,
@@ -35,7 +36,9 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/api",
     tags=["grp"],
+    dependencies=[Depends(require_api_key)],
     responses={
+        401: {"description": "Missing or invalid API key"},
         404: {"description": "Resource not found"},
         500: {"description": "Internal server error"},
     },
@@ -95,6 +98,184 @@ def _validate_project_ownership(project_id: int, org_id: int) -> None:
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail={"success": False, "message": "Project not found"},
                 )
+
+
+def _reaggregate_annual(cur, project_id: int, org_id: int, operating_year: int) -> None:
+    """Re-aggregate the annual GRP observation if one already exists.
+
+    Preserves the original include_pending setting from source_metadata.
+    Runs within the caller's transaction (no commit).
+    """
+    # Check if an annual observation exists for this operating year
+    cur.execute(
+        """
+        SELECT id, source_metadata
+        FROM reference_price
+        WHERE project_id = %s AND organization_id = %s
+          AND operating_year = %s AND observation_type = 'annual'
+        """,
+        (project_id, org_id, operating_year),
+    )
+    annual_row = cur.fetchone()
+    if not annual_row:
+        return  # No annual observation to update
+
+    # Determine include_pending from original aggregation metadata
+    agg_meta = (annual_row["source_metadata"] or {}).get("aggregation", {})
+    include_pending = agg_meta.get("include_pending", True)
+
+    # Fetch monthly observations with the same filter
+    status_filter = ""
+    if not include_pending:
+        status_filter = "AND rp.verification_status = 'jointly_verified'"
+
+    cur.execute(
+        f"""
+        SELECT rp.id, rp.period_start, rp.verification_status,
+               rp.total_variable_charges, rp.total_kwh_invoiced
+        FROM reference_price rp
+        WHERE rp.project_id = %s AND rp.organization_id = %s
+          AND rp.operating_year = %s AND rp.observation_type = 'monthly'
+          {status_filter}
+        ORDER BY rp.period_start
+        """,
+        (project_id, org_id, operating_year),
+    )
+    monthly_rows = cur.fetchall()
+
+    if not monthly_rows:
+        return  # No qualifying months — leave existing annual as-is
+
+    # Count total monthly for excluded calculation
+    cur.execute(
+        """
+        SELECT COUNT(*) as total_monthly FROM reference_price
+        WHERE project_id = %s AND organization_id = %s
+          AND operating_year = %s AND observation_type = 'monthly'
+        """,
+        (project_id, org_id, operating_year),
+    )
+    total_monthly = cur.fetchone()["total_monthly"]
+    months_included = len(monthly_rows)
+    months_excluded = total_monthly - months_included
+
+    total_charges = Decimal("0")
+    total_kwh = Decimal("0")
+    included_ids = []
+
+    for row in monthly_rows:
+        total_charges += Decimal(str(row["total_variable_charges"] or 0))
+        total_kwh += Decimal(str(row["total_kwh_invoiced"] or 0))
+        included_ids.append(row["id"])
+
+    if total_kwh == 0:
+        return  # Cannot divide by zero — leave existing annual
+
+    annual_grp = total_charges / total_kwh
+
+    # Period boundaries
+    period_start = monthly_rows[0]["period_start"]
+    period_end_row = monthly_rows[-1]["period_start"]
+    from calendar import monthrange
+    _, last_day = monthrange(period_end_row.year, period_end_row.month)
+    period_end = period_end_row.replace(day=last_day)
+
+    source_metadata = {
+        "aggregation": {
+            "method": "weighted_average",
+            "formula": "SUM(total_variable_charges) / SUM(total_kwh_invoiced)",
+            "months_included": months_included,
+            "months_excluded": months_excluded,
+            "included_observation_ids": included_ids,
+            "include_pending": include_pending,
+            "aggregated_at": datetime.utcnow().isoformat(),
+        },
+    }
+
+    cur.execute(
+        """
+        UPDATE reference_price
+        SET calculated_grp_per_kwh = %s,
+            total_variable_charges = %s,
+            total_kwh_invoiced = %s,
+            period_start = %s,
+            period_end = %s,
+            source_metadata = %s,
+            verification_status = 'pending',
+            verified_at = NULL,
+            updated_at = NOW()
+        WHERE id = %s
+        """,
+        (
+            annual_grp, total_charges, total_kwh,
+            period_start, period_end,
+            Json(source_metadata),
+            annual_row["id"],
+        ),
+    )
+    logger.info(
+        f"Re-aggregated annual GRP for project {project_id}, OY {operating_year}: "
+        f"{float(annual_grp):.4f} from {months_included} months"
+    )
+
+
+# =============================================================================
+# POST /api/projects/{project_id}/grp-refresh
+# =============================================================================
+
+@router.post(
+    "/projects/{project_id}/grp-refresh",
+    summary="Refresh stale annual GRP observations",
+)
+async def refresh_grp(request: Request, project_id: int):
+    """
+    Re-aggregate annual GRP observations that are stale.
+
+    An annual observation is stale when any of its constituent monthly
+    observations have been updated more recently than the annual itself.
+    Called on page load to ensure the dashboard always shows fresh data.
+    """
+    org_id = _get_org_id(request)
+    _validate_project_ownership(project_id, org_id)
+
+    refreshed = []
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Find annual observations whose monthly data has changed
+                cur.execute(
+                    """
+                    SELECT a.id, a.operating_year, a.updated_at AS annual_updated
+                    FROM reference_price a
+                    WHERE a.project_id = %s AND a.organization_id = %s
+                      AND a.observation_type = 'annual'
+                      AND EXISTS (
+                          SELECT 1 FROM reference_price m
+                          WHERE m.project_id = a.project_id
+                            AND m.organization_id = a.organization_id
+                            AND m.operating_year = a.operating_year
+                            AND m.observation_type = 'monthly'
+                            AND m.updated_at > a.updated_at
+                      )
+                    """,
+                    (project_id, org_id),
+                )
+                stale_annuals = cur.fetchall()
+
+                for row in stale_annuals:
+                    _reaggregate_annual(cur, project_id, org_id, row["operating_year"])
+                    refreshed.append(row["operating_year"])
+
+                if refreshed:
+                    conn.commit()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error refreshing GRP: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"success": False, "message": str(e)})
+
+    return {"success": True, "refreshed_operating_years": refreshed}
 
 
 # =============================================================================
@@ -326,7 +507,11 @@ async def aggregate_grp(
                         %s, %s, %s, %s, %s, %s, %s, %s, %s,
                         'annual', %s, 'pending'
                     )
-                    ON CONFLICT (project_id, observation_type, period_start) DO UPDATE SET
+                    ON CONFLICT (project_id, operating_year)
+                        WHERE observation_type = 'annual'
+                    DO UPDATE SET
+                        period_start = EXCLUDED.period_start,
+                        period_end = EXCLUDED.period_end,
                         calculated_grp_per_kwh = EXCLUDED.calculated_grp_per_kwh,
                         total_variable_charges = EXCLUDED.total_variable_charges,
                         total_kwh_invoiced = EXCLUDED.total_kwh_invoiced,
@@ -439,7 +624,7 @@ async def verify_observation(
                         source_metadata = %s,
                         updated_at = NOW()
                     WHERE id = %s AND project_id = %s AND organization_id = %s
-                    RETURNING id, verification_status, verified_at
+                    RETURNING id, verification_status, verified_at, operating_year, observation_type
                     """,
                     (
                         body.verification_status.value,
@@ -451,6 +636,11 @@ async def verify_observation(
                     ),
                 )
                 updated = cur.fetchone()
+
+                # Re-aggregate annual observation if this was a monthly observation
+                if updated["observation_type"] == "monthly":
+                    _reaggregate_annual(cur, project_id, org_id, updated["operating_year"])
+
                 conn.commit()
 
     except HTTPException:
@@ -602,4 +792,6 @@ async def admin_grp_upload(
         line_items_count=result["line_items_count"],
         extraction_confidence=result["extraction_confidence"],
         message="Invoice processed successfully via admin upload",
+        billing_month_stored=result.get("billing_month_stored"),
+        period_mismatch=result.get("period_mismatch"),
     )

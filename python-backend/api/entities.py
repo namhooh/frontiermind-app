@@ -9,20 +9,23 @@ import logging
 import json
 from datetime import date, datetime
 from decimal import Decimal
-from fastapi import APIRouter, HTTPException, status, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from pydantic import BaseModel, Field
 from typing import Any, List, Optional
 
 from psycopg2 import sql
 
 from db.database import get_db_connection, init_connection_pool
+from middleware.api_key_auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api",
     tags=["entities"],
+    dependencies=[Depends(require_api_key)],
     responses={
+        401: {"description": "Missing or invalid API key"},
         500: {"description": "Internal server error"},
     },
 )
@@ -138,6 +141,7 @@ class ProjectDashboardResponse(BaseModel):
     rate_periods: List[dict] = Field(default_factory=list)
     monthly_rates: List[dict] = Field(default_factory=list)
     clauses: List[dict] = Field(default_factory=list)
+    amendments: List[dict] = Field(default_factory=list)
     lookups: dict = Field(default_factory=dict)
 
 
@@ -827,6 +831,14 @@ async def get_project_dashboard(
                         WHERE c.project_id = %(pid)s AND c.is_current = true
                         ORDER BY cc.code
                     ),
+                    amendments_data AS (
+                        SELECT ca.id, ca.contract_id, ca.amendment_number, ca.amendment_date,
+                               ca.effective_date, ca.description, ca.source_metadata, ca.file_path
+                        FROM contract_amendment ca
+                        JOIN contract c ON c.id = ca.contract_id
+                        WHERE c.project_id = %(pid)s
+                        ORDER BY ca.amendment_number
+                    ),
                     contract_types_lookup AS (SELECT id, code, name FROM contract_type ORDER BY name),
                     contract_statuses_lookup AS (SELECT id, code, name FROM contract_status ORDER BY name),
                     currencies_lookup AS (SELECT id, code, name FROM currency ORDER BY code),
@@ -868,6 +880,7 @@ async def get_project_dashboard(
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM rate_periods_data d) AS rate_periods,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM monthly_rates_data d) AS monthly_rates,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM clauses_data d) AS clauses,
+                        (SELECT COALESCE(json_agg(d), '[]'::json) FROM amendments_data d) AS amendments,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM contract_types_lookup d) AS contract_types_lookup,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM contract_statuses_lookup d) AS contract_statuses_lookup,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM currencies_lookup d) AS currencies_lookup,
@@ -909,6 +922,7 @@ async def get_project_dashboard(
                 rate_periods = _parse(row['rate_periods'])
                 monthly_rates = _parse(row['monthly_rates'])
                 clauses = _parse(row['clauses'])
+                amendments = _parse(row['amendments'])
 
                 lookups = {
                     "contract_types": _parse(row['contract_types_lookup']),
@@ -938,6 +952,7 @@ async def get_project_dashboard(
                     rate_periods=rate_periods,
                     monthly_rates=monthly_rates,
                     clauses=clauses,
+                    amendments=amendments,
                     lookups=lookups,
                 )
 

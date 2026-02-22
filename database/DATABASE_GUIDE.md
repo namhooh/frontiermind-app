@@ -78,7 +78,8 @@ database/
 │   ├── 034_billing_product_and_rate_period.sql         # Phase 9: billing_product, contract_billing_product, tariff_annual_rate (was tariff_rate_period), CBE seed data, tariff classification cleanup, payment_terms
 │   ├── 036_monthly_tariff_and_fx.sql                  # Phase 9.1: Rename tariff_rate_period→tariff_annual_rate, final_effective_tariff, tariff_monthly_rate
 │   ├── 037_grp_ingestion.sql                          # Phase 9.3: GRP ingestion — monthly observations, file upload, submission_token extensions
-│   │   # (No migration 038 — clause records created via onboarding pipeline, not schema changes)
+│   ├── 038_moh01_amendment_version_history.sql         # Phase 10.2: Amendment version chain for MOH01 (original tariff row + supersedes linkage)
+│   ├── 039_pipeline_integrity_fixes.sql               # Phase 10.1: Annual ref_price partial unique index, asset_type seeds, metering_type CHECK, idempotent GRP seed
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │

@@ -526,6 +526,14 @@ class OnboardingService:
             if excel.tariff_components_to_adjust:
                 ppa_logic_extra["tariff_components_to_adjust"] = excel.tariff_components_to_adjust
 
+            # Set formula_type for rebased market price tariffs so the
+            # rebased_market_price_engine has the formula variant it needs
+            if excel.escalation_type == "REBASED_MARKET_PRICE" and "formula_type" not in ppa_logic_extra:
+                if floor_rate and ceiling_rate:
+                    ppa_logic_extra["formula_type"] = "GRID_DISCOUNT_BOUNDED"
+                elif discount_pct:
+                    ppa_logic_extra["formula_type"] = "GRID_DISCOUNT"
+
             # Main tariff line (energy sales or single service type)
             tariff_line = {
                 "tariff_group_key": f"{ext_contract_id}-MAIN",
@@ -821,7 +829,13 @@ class OnboardingService:
         return sections
 
     def _create_staging_tables(self, cur) -> None:
-        """Create temporary staging tables for the onboarding transaction."""
+        """Create temporary staging tables for the onboarding transaction.
+
+        NOTE: This Python definition is the authoritative source for staging
+        table DDL. The SQL file (onboard_project.sql) also contains CREATE
+        TEMP TABLE statements but they are skipped at runtime (line ~1210).
+        Keep both in sync if columns change.
+        """
         cur.execute("""
             CREATE TEMP TABLE IF NOT EXISTS stg_batch (
                 batch_id UUID DEFAULT gen_random_uuid(),
@@ -1194,14 +1208,36 @@ class OnboardingService:
         except Exception as e:
             logger.warning(f"Failed to insert PAYMENT_TERMS clause (non-fatal): {e}")
 
+    @staticmethod
+    def _section_sort_key(name: str) -> tuple:
+        """Numeric sort key for SQL section names like '4.2 Project'.
+
+        Lexicographic sort puts '4.10' before '4.2'. This extracts the
+        leading major.minor numbers so sections execute in correct order.
+        """
+        match = re.match(r'^(\d+)\.(\d+)', name)
+        return (int(match.group(1)), int(match.group(2))) if match else (999, 0)
+
     def _execute_upserts(self, cur, conn) -> None:
         """Execute the upsert SQL sections from onboard_project.sql."""
         sections = self._load_sql_sections()
 
-        # Execute sections in order
-        for section_name in sorted(sections.keys()):
+        # Run pre-flight validation BEFORE upserts (Step 3 checks: org exists,
+        # FK codes resolve, COD not null, etc.)
+        if "validation" in sections:
+            sql = sections["validation"].replace("BEGIN;", "").replace("COMMIT;", "")
+            try:
+                cur.execute(sql)
+                logger.info("Pre-flight validation passed")
+            except Exception as e:
+                logger.error(f"Pre-flight validation failed: {e}")
+                raise
+
+        # Execute sections in numeric order (not lexicographic — '4.10' must
+        # come after '4.9', not before '4.2')
+        for section_name in sorted(sections.keys(), key=self._section_sort_key):
             if section_name in ("validation", "assertions"):
-                continue  # Handle separately
+                continue  # Handled separately
 
             sql = sections[section_name]
             # Skip BEGIN/COMMIT (Python owns the transaction)

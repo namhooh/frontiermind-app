@@ -81,7 +81,9 @@ def _escalate_component(
     if rule is None:
         return base_value
 
-    esc_type = rule.get("escalation_type", "NONE")
+    # Support both canonical keys (escalation_type/escalation_value) and
+    # legacy keys (type/value) found in existing DB data
+    esc_type = rule.get("escalation_type") or rule.get("type", "NONE")
     if esc_type == "NONE":
         return base_value
 
@@ -89,7 +91,7 @@ def _escalate_component(
     if operating_year < start_year:
         return base_value
 
-    esc_value = Decimal(str(rule.get("escalation_value", 0)))
+    esc_value = Decimal(str(rule.get("escalation_value") or rule.get("value", 0)))
     years_escalated = operating_year - start_year
 
     if esc_type == "FIXED":
@@ -403,13 +405,15 @@ class RebasedMarketPriceEngine:
                              total_variable_charges, total_kwh_invoiced,
                              verification_status, observation_type)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'annual')
-                        ON CONFLICT (project_id, observation_type, period_start)
+                        ON CONFLICT (project_id, operating_year)
+                            WHERE observation_type = 'annual'
                         DO UPDATE SET
                             calculated_grp_per_kwh = EXCLUDED.calculated_grp_per_kwh,
+                            period_start = EXCLUDED.period_start,
+                            period_end = EXCLUDED.period_end,
                             total_variable_charges = EXCLUDED.total_variable_charges,
                             total_kwh_invoiced = EXCLUDED.total_kwh_invoiced,
                             verification_status = EXCLUDED.verification_status,
-                            observation_type = EXCLUDED.observation_type,
                             updated_at = NOW()
                         RETURNING id
                         """,

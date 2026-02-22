@@ -63,6 +63,8 @@ class FileUploadSuccessResponse(BaseModel):
     total_kwh_invoiced: float
     line_items_count: int
     extraction_confidence: str
+    billing_month_stored: Optional[str] = None
+    period_mismatch: Optional[Dict[str, str]] = None
 
 
 def require_services():
@@ -98,11 +100,15 @@ async def get_submission_form(request: Request, token: str) -> SubmissionFormCon
     # Build fields based on submission type
     if submission_type == "grp_upload":
         fields = [
-            {"name": "billing_month", "label": "Billing Month", "type": "month", "required": True},
             {"name": "utility_invoice", "label": "Utility Invoice", "type": "file", "required": True},
         ]
     else:
-        fields = record.get("submission_fields", [])
+        # Handle both legacy array format and new object format
+        raw_fields = record.get("submission_fields", [])
+        if isinstance(raw_fields, dict):
+            fields = raw_fields.get("fields", [])
+        else:
+            fields = raw_fields
 
     # Build invoice summary for display
     invoice_summary = None
@@ -187,7 +193,7 @@ async def submit_file(
     request: Request,
     token: str,
     file: UploadFile = File(...),
-    billing_month: str = Form(...),
+    billing_month: Optional[str] = Form(None),
     submitted_by_email: Optional[str] = Form(None),
 ) -> FileUploadSuccessResponse:
     """
@@ -218,21 +224,25 @@ async def submit_file(
             detail={"success": False, "message": "Token missing project context"},
         )
 
-    # 3. Validate billing_month format
-    try:
-        from datetime import date
-        # Accept YYYY-MM or YYYY-MM-DD
-        if len(billing_month) == 7:
-            billing_month_date = date.fromisoformat(billing_month + "-01")
-        else:
-            billing_month_date = date.fromisoformat(billing_month)
-            billing_month_date = billing_month_date.replace(day=1)
-        billing_month_str = billing_month_date.isoformat()
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"success": False, "message": "Invalid billing_month format. Use YYYY-MM or YYYY-MM-DD."},
-        )
+    # 3. Resolve billing_month — optional; defaults to current month
+    #    (extraction reconciliation will override with the invoice's actual period)
+    from datetime import date
+    if billing_month:
+        try:
+            # Accept YYYY-MM or YYYY-MM-DD
+            if len(billing_month) == 7:
+                billing_month_date = date.fromisoformat(billing_month + "-01")
+            else:
+                billing_month_date = date.fromisoformat(billing_month)
+                billing_month_date = billing_month_date.replace(day=1)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"success": False, "message": "Invalid billing_month format. Use YYYY-MM or YYYY-MM-DD."},
+            )
+    else:
+        billing_month_date = date.today().replace(day=1)
+    billing_month_str = billing_month_date.isoformat()
 
     # 4. Validate file
     if not file.filename:
@@ -290,7 +300,12 @@ async def submit_file(
     _upload_to_s3(file_bytes, s3_key, file.content_type)
 
     # 8. Determine operating year from token fields or calculate from COD
-    token_fields = record.get("submission_fields") or []
+    raw_submission_fields = record.get("submission_fields") or []
+    # Handle both legacy array format and new object format
+    if isinstance(raw_submission_fields, dict):
+        token_fields = raw_submission_fields.get("fields", [])
+    else:
+        token_fields = raw_submission_fields
     operating_year = None
     for field in token_fields:
         if isinstance(field, dict) and "operating_year" in field:
@@ -376,6 +391,8 @@ async def submit_file(
         total_kwh_invoiced=result["total_kwh_invoiced"],
         line_items_count=result["line_items_count"],
         extraction_confidence=result["extraction_confidence"],
+        billing_month_stored=result.get("billing_month_stored"),
+        period_mismatch=result.get("period_mismatch"),
     )
 
 

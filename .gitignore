@@ -63,3 +63,4 @@ env/
 # Logs
 *.log
 logs/
+.env*.local

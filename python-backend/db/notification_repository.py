@@ -631,6 +631,105 @@ class NotificationRepository:
                 conn.commit()
                 return cursor.fetchone() is not None
 
+    def update_submission_token_url(self, token_id: int, submission_url: str) -> None:
+        """Persist the submission URL into the token's submission_fields JSONB."""
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE submission_token
+                    SET submission_fields = CASE
+                        WHEN jsonb_typeof(submission_fields) = 'array'
+                        THEN jsonb_build_object('fields', submission_fields, 'submission_url', %s::text)
+                        ELSE submission_fields || jsonb_build_object('submission_url', %s::text)
+                    END
+                    WHERE id = %s
+                    """,
+                    (submission_url, submission_url, token_id),
+                )
+                conn.commit()
+
+    def list_submission_tokens(
+        self,
+        org_id: int,
+        project_id: Optional[int] = None,
+        submission_type: Optional[str] = None,
+        include_expired: bool = False,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> Tuple[List[Dict[str, Any]], int]:
+        """List submission tokens with metadata, optionally filtered."""
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                where = "WHERE st.organization_id = %s"
+                params: List[Any] = [org_id]
+
+                if project_id is not None:
+                    where += " AND st.project_id = %s"
+                    params.append(project_id)
+
+                if submission_type:
+                    where += " AND st.submission_type = %s"
+                    params.append(submission_type)
+
+                if not include_expired:
+                    where += " AND st.submission_token_status = 'active'"
+
+                # Count
+                cursor.execute(
+                    f"SELECT COUNT(*) as cnt FROM submission_token st {where}",
+                    params,
+                )
+                total = cursor.fetchone()["cnt"]
+
+                # Data
+                cursor.execute(
+                    f"""
+                    SELECT st.id, st.organization_id, st.project_id,
+                           st.submission_type, st.submission_token_status,
+                           st.max_uses, st.use_count, st.expires_at,
+                           st.submission_fields->>'submission_url' as submission_url,
+                           st.created_at,
+                           p.name as project_name
+                    FROM submission_token st
+                    LEFT JOIN project p ON p.id = st.project_id
+                    {where}
+                    ORDER BY st.created_at DESC
+                    LIMIT %s OFFSET %s
+                    """,
+                    params + [limit, offset],
+                )
+                return [dict(row) for row in cursor.fetchall()], total
+
+    def revoke_submission_token(self, token_id: int, org_id: int) -> bool:
+        """Revoke an active submission token.
+
+        Returns True if a row was updated.
+        Raises ValueError if token not found, doesn't belong to org, or is not active.
+        """
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE submission_token
+                    SET submission_token_status = 'revoked'
+                    WHERE id = %s AND organization_id = %s AND submission_token_status = 'active'
+                    """,
+                    (token_id, org_id),
+                )
+                conn.commit()
+                if cursor.rowcount == 0:
+                    # Check if token exists at all for this org
+                    cursor.execute(
+                        "SELECT submission_token_status FROM submission_token WHERE id = %s AND organization_id = %s",
+                        (token_id, org_id),
+                    )
+                    row = cursor.fetchone()
+                    if not row:
+                        raise ValueError("Token not found")
+                    raise ValueError(f"Token is not active (current status: {row['submission_token_status']})")
+                return True
+
     def expire_stale_tokens(self) -> int:
         """Set expired status on tokens past their expires_at."""
         with get_db_connection() as conn:

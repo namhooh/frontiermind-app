@@ -123,12 +123,25 @@ class GRPExtractionService:
 
         logger.info(f"Extraction complete: {len(line_items)} line items, confidence={confidence}")
 
-        # Step 2b: Reconcile billing period
+        # Step 2b: Reconcile billing period — the extracted invoice may show a
+        # different month than what the user submitted
+        original_billing_month = billing_month
         billing_month = self._reconcile_billing_period(
             user_billing_month=billing_month,
             extracted_metadata=metadata,
             filename=filename,
         )
+
+        # If billing month changed, recompute operating year so the stored
+        # observation reflects the reconciled month, not the original
+        if billing_month != original_billing_month:
+            from datetime import date as date_type
+            reconciled_date = date_type.fromisoformat(billing_month)
+            operating_year = self._compute_operating_year(project_id, reconciled_date)
+            logger.info(
+                f"Operating year recomputed after billing period reconciliation: "
+                f"{original_billing_month} -> {billing_month}, year={operating_year}"
+            )
 
         if not line_items:
             raise GRPExtractionError("No line items extracted from invoice")
@@ -182,7 +195,11 @@ class GRPExtractionService:
             "total_kwh_invoiced": float(total_kwh),
             "line_items_count": len(line_items),
             "extraction_confidence": confidence,
+            "billing_month_stored": billing_month,
         }
+
+        if metadata.get("period_mismatch"):
+            result["period_mismatch"] = metadata["period_mismatch"]
 
         logger.info(
             f"GRP stored: observation_id={observation_id}, "
@@ -306,6 +323,29 @@ class GRPExtractionService:
 
         return extracted_month.isoformat()
 
+    @staticmethod
+    def _compute_operating_year(project_id: int, billing_date) -> int:
+        """Compute operating year from project COD date and billing month.
+
+        Same logic as submissions._determine_operating_year but usable within
+        the extraction service without importing from the API layer.
+        """
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT cod_date FROM project WHERE id = %s",
+                    (project_id,),
+                )
+                row = cur.fetchone()
+                if not row or not row["cod_date"]:
+                    return 1  # Default to year 1 if COD not set
+
+                cod_date = row["cod_date"]
+                year_diff = billing_date.year - cod_date.year
+                if billing_date.month < cod_date.month:
+                    year_diff -= 1
+                return max(1, year_diff + 1)
+
     # =========================================================================
     # Format Conversion
     # =========================================================================
@@ -426,6 +466,8 @@ class GRPExtractionService:
                         source_document_hash = EXCLUDED.source_document_hash,
                         source_metadata = EXCLUDED.source_metadata,
                         submission_response_id = EXCLUDED.submission_response_id,
+                        verification_status = 'pending',
+                        verified_at = NULL,
                         updated_at = NOW()
                     RETURNING id
                     """,

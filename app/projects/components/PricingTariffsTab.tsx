@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { ChevronRight, Plus, Trash2, Loader2, Copy, Upload, Link2, Calculator, CheckCircle2, XCircle } from 'lucide-react'
+import { ChevronRight, Plus, Trash2, Loader2, Copy, Upload, Link2, Calculator, CheckCircle2, XCircle, Ban } from 'lucide-react'
 import { toast } from 'sonner'
 import { Card, CardHeader, CardTitle, CardContent } from '@/app/components/ui/card'
 import { Badge } from '@/app/components/ui/badge'
@@ -15,7 +15,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/app/components/ui/dialog'
-import type { ProjectDashboardResponse, GRPObservation } from '@/lib/api/adminClient'
+import type { ProjectDashboardResponse, GRPObservation, SubmissionTokenItem } from '@/lib/api/adminClient'
 import { adminClient } from '@/lib/api/adminClient'
 import { CollapsibleSection } from './CollapsibleSection'
 import { EditableCell } from './EditableCell'
@@ -517,8 +517,13 @@ function BillingProductCard({ pw, pid, rate_periods, monthly_rates, onSaved, edi
             ) : (
               pw.tariffs.map((t, j) => (
                 <div key={j} className={j > 0 ? 'mt-3 pt-3 border-t border-slate-100' : 'mt-2'}>
-                  <div className="text-xs font-medium text-slate-400 uppercase mb-1">
+                  <div className="flex items-center gap-2 text-xs font-medium text-slate-400 uppercase mb-1">
                     {str(t.tariff_type_name ?? t.tariff_type_code ?? 'Tariff')}
+                    {t.contract_amendment_id != null && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200 normal-case">
+                        v{t.version != null ? String(t.version) : '2'} &mdash; Amended
+                      </span>
+                    )}
                   </div>
                   {isNonEnergyTariff(t) ? (
                     <NonEnergyTariffPanel
@@ -683,6 +688,7 @@ function GRPSection({
   const pid = projectId
   const [monthlyObs, setMonthlyObs] = useState<GRPObservation[]>([])
   const [annualObs, setAnnualObs] = useState<GRPObservation[]>([])
+  const [existingTokens, setExistingTokens] = useState<SubmissionTokenItem[]>([])
   const [loading, setLoading] = useState(true)
 
   const [showTokenDialog, setShowTokenDialog] = useState(false)
@@ -705,12 +711,16 @@ function GRPSection({
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      const [monthlyRes, annualRes] = await Promise.all([
+      // Refresh stale annual observations before fetching
+      await adminClient.refreshGRP(pid, orgId).catch(() => {})
+      const [monthlyRes, annualRes, tokensRes] = await Promise.all([
         adminClient.listGRPObservations(pid, orgId, { observation_type: 'monthly' }),
         adminClient.listGRPObservations(pid, orgId, { observation_type: 'annual' }),
+        adminClient.listTokens(orgId, { project_id: pid, submission_type: 'grp_upload', include_expired: true }),
       ])
       setMonthlyObs(monthlyRes.observations)
       setAnnualObs(annualRes.observations)
+      setExistingTokens(tokensRes.tokens)
     } catch {
       // silently ignore — GRP data may not exist yet
     } finally {
@@ -732,6 +742,11 @@ function GRPSection({
       })
       setTokenResult({ url: res.submission_url, tokenId: res.token_id })
       toast.success(res.message)
+      // Refresh token list
+      try {
+        const tokensRes = await adminClient.listTokens(orgId, { project_id: pid, submission_type: 'grp_upload', include_expired: true })
+        setExistingTokens(tokensRes.tokens)
+      } catch { /* non-critical */ }
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to generate token')
     } finally {
@@ -747,7 +762,13 @@ function GRPSection({
       formData.append('file', uploadFile)
       formData.append('billing_month', uploadMonth)
       const res = await adminClient.uploadGRPInvoice(pid, orgId, formData)
-      toast.success(`GRP extracted: ${grpFormatGRP(res.grp_per_kwh)} /kWh (${res.extraction_confidence} confidence)`)
+      const storedLabel = res.billing_month_stored ? formatBillingMonth(res.billing_month_stored) : ''
+      toast.success(`GRP extracted: ${grpFormatGRP(res.grp_per_kwh)} /kWh (${res.extraction_confidence} confidence)${storedLabel ? ` — ${storedLabel}` : ''}`)
+      if (res.period_mismatch) {
+        const extracted = formatBillingMonth(res.period_mismatch.extracted)
+        const userProvided = formatBillingMonth(res.period_mismatch.user_provided)
+        toast.warning(`Billing period corrected: invoice shows ${extracted}, you entered ${userProvided}.`)
+      }
       setShowUploadDialog(false)
       setUploadFile(null)
       setUploadMonth('')
@@ -773,6 +794,17 @@ function GRPSection({
       toast.error(e instanceof Error ? e.message : 'Aggregation failed')
     } finally {
       setAggLoading(false)
+    }
+  }
+
+  async function handleRevokeToken(tokenId: number) {
+    try {
+      await adminClient.revokeToken(orgId, tokenId)
+      toast.success('Token revoked')
+      const tokensRes = await adminClient.listTokens(orgId, { project_id: pid, submission_type: 'grp_upload', include_expired: true })
+      setExistingTokens(tokensRes.tokens)
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to revoke token')
     }
   }
 
@@ -899,6 +931,62 @@ function GRPSection({
               <Calculator className="h-4 w-4" /> Aggregate Year
             </Button>
           </div>
+
+          {/* Collection Links */}
+          {existingTokens.length > 0 && (
+            <div className="space-y-2">
+              <div className="text-xs font-medium text-slate-400 uppercase">Collection Links</div>
+              <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                {existingTokens.map((tk) => {
+                  const isActive = tk.submission_token_status === 'active'
+                  const isExpired = tk.submission_token_status === 'expired' || (tk.expires_at && new Date(tk.expires_at) < new Date())
+                  const isUsed = tk.submission_token_status === 'used'
+                  const isRevoked = tk.submission_token_status === 'revoked'
+                  const statusVariant: 'success' | 'warning' | 'destructive' = isActive ? 'success' : isUsed ? 'warning' : 'destructive'
+                  const statusLabel = isActive ? 'Active' : isUsed ? 'Used' : isRevoked ? 'Revoked' : isExpired ? 'Expired' : tk.submission_token_status
+                  return (
+                    <div key={tk.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                      <Badge variant={statusVariant}>{statusLabel}</Badge>
+                      <span className="text-slate-600 tabular-nums">{tk.use_count}/{tk.max_uses} uses</span>
+                      {tk.expires_at && (
+                        <span className="text-xs text-slate-400">
+                          Expires {new Date(tk.expires_at).toLocaleDateString()}
+                        </span>
+                      )}
+                      <span className="ml-auto flex items-center gap-1">
+                        {isActive && tk.submission_url && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => {
+                              navigator.clipboard.writeText(tk.submission_url!)
+                              toast.success('URL copied to clipboard')
+                            }}
+                          >
+                            <Copy className="h-3.5 w-3.5" /> Copy URL
+                          </Button>
+                        )}
+                        {isActive && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs text-red-600 hover:text-red-700"
+                            onClick={() => handleRevokeToken(tk.id)}
+                          >
+                            <Ban className="h-3.5 w-3.5" /> Revoke
+                          </Button>
+                        )}
+                        {!isActive && !tk.submission_url && (
+                          <span className="text-xs text-slate-400 italic">No URL</span>
+                        )}
+                      </span>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          )}
 
           {/* Annual GRP Cards */}
           {annualObs.map(obs => {
@@ -1133,6 +1221,11 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
                     <span className="text-xs text-slate-400">
                       {[t.tariff_type_code, t.escalation_type_code].filter(Boolean).join(' / ')}
                     </span>
+                    {t.contract_amendment_id != null && (
+                      <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                        v{t.version != null ? String(t.version) : '2'} &mdash; Amended
+                      </span>
+                    )}
                     {t.valid_from != null && (
                       <span className="text-xs text-slate-400 ml-auto">
                         {str(t.valid_from)}{t.valid_to != null ? ` — ${str(t.valid_to)}` : ''}

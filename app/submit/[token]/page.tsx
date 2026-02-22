@@ -30,12 +30,28 @@ interface FormConfig {
   expires_at: string
 }
 
+interface PeriodMismatch {
+  user_provided: string
+  extracted: string
+  resolution: string
+}
+
 interface ExtractionResult {
   grp_per_kwh: number
   total_variable_charges: number
   total_kwh_invoiced: number
   line_items_count: number
   extraction_confidence: string
+  billing_month_stored?: string
+  period_mismatch?: PeriodMismatch
+}
+
+/** Format a date string (e.g. "2025-10-01" or "2025-10") into "Oct 2025". */
+function formatMonthLabel(dateStr: string): string {
+  const normalized = dateStr.length === 7 ? dateStr + '-01' : dateStr
+  const d = new Date(normalized + 'T00:00:00')
+  if (isNaN(d.getTime())) return dateStr
+  return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
 }
 
 type PageState = 'loading' | 'form' | 'success' | 'error'
@@ -89,6 +105,7 @@ export default function SubmissionPage() {
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0] || null
     setSelectedFile(file)
+    if (file) setErrorMessage('')
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -104,15 +121,11 @@ export default function SubmissionPage() {
           setSubmitting(false)
           return
         }
-        if (!formData.billing_month) {
-          setErrorMessage('Please select a billing month.')
-          setSubmitting(false)
-          return
-        }
 
         const fd = new FormData()
         fd.append('file', selectedFile)
-        fd.append('billing_month', formData.billing_month)
+        // billing_month is optional — extraction auto-detects the period
+        if (formData.billing_month) fd.append('billing_month', formData.billing_month)
         if (email) fd.append('submitted_by_email', email)
 
         const res = await fetch(`${API_BASE_URL}/api/submit/${token}/upload`, {
@@ -122,7 +135,12 @@ export default function SubmissionPage() {
 
         if (!res.ok) {
           const data = await res.json().catch(() => null)
-          setErrorMessage(data?.detail?.message || 'Upload failed. Please try again.')
+          const msg = data?.detail?.message || 'Upload failed. Please try again.'
+          setErrorMessage(msg)
+          // Reset file on duplicate so user can pick a different file
+          if (res.status === 409) {
+            setSelectedFile(null)
+          }
           setSubmitting(false)
           return
         }
@@ -134,6 +152,8 @@ export default function SubmissionPage() {
           total_kwh_invoiced: result.total_kwh_invoiced,
           line_items_count: result.line_items_count,
           extraction_confidence: result.extraction_confidence,
+          billing_month_stored: result.billing_month_stored,
+          period_mismatch: result.period_mismatch,
         })
         setState('success')
       } else {
@@ -259,6 +279,16 @@ export default function SubmissionPage() {
                   </span>
                 </div>
               </div>
+              {extractionResult.period_mismatch && (
+                <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 flex items-start gap-2 text-left">
+                  <svg className="w-5 h-5 text-amber-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                  <p className="text-amber-800 text-sm">
+                    The billing period on this invoice ({formatMonthLabel(extractionResult.period_mismatch.extracted)}) differs from the month you selected ({formatMonthLabel(extractionResult.period_mismatch.user_provided)}). The extracted period ({formatMonthLabel(extractionResult.period_mismatch.extracted)}) has been recorded.
+                  </p>
+                </div>
+              )}
               <p className="text-slate-400 text-xs mt-4">
                 You can upload another invoice using the same link.
               </p>
@@ -266,8 +296,9 @@ export default function SubmissionPage() {
                 onClick={() => {
                   setState('form')
                   setSelectedFile(null)
-                  setFormData(prev => ({ ...prev, billing_month: '' }))
+                  setFormData({})
                   setExtractionResult(null)
+                  setErrorMessage('')
                 }}
                 className="mt-4 text-blue-600 text-sm font-medium hover:underline"
               >
@@ -425,7 +456,17 @@ export default function SubmissionPage() {
             </div>
 
             {errorMessage && (
-              <p className="text-red-600 text-sm">{errorMessage}</p>
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 flex items-start gap-2">
+                <svg className="w-5 h-5 text-red-500 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                <div>
+                  <p className="text-red-800 text-sm font-medium">{errorMessage}</p>
+                  {selectedFile === null && (
+                    <p className="text-red-600 text-xs mt-1">Please select a different file to continue.</p>
+                  )}
+                </div>
+              </div>
             )}
 
             <button

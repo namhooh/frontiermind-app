@@ -764,29 +764,42 @@ class ExcelParser:
 
     @staticmethod
     def _map_asset_type(name: str) -> str:
-        """Map common asset type names to database codes."""
+        """Map common asset type names to canonical database asset_type codes.
+
+        Codes must match the `asset_type.code` column (lowercase, underscore-
+        separated) seeded in migrations 033 and 039.
+        """
         name_lower = name.lower()
+        # Ordered most-specific first to avoid substring false positives
         mappings = {
-            "panel": "SOLAR_PANEL",
-            "module": "SOLAR_PANEL",
-            "solar panel": "SOLAR_PANEL",
-            "inverter": "INVERTER",
-            "string inverter": "INVERTER",
-            "central inverter": "INVERTER",
-            "transformer": "TRANSFORMER",
-            "meter": "METER",
-            "battery": "BATTERY",
-            "bess": "BATTERY",
-            "tracker": "TRACKER",
-            "mounting": "MOUNTING_STRUCTURE",
-            "structure": "MOUNTING_STRUCTURE",
-            "combiner": "COMBINER_BOX",
-            "combiner box": "COMBINER_BOX",
+            "solar panel": "pv_module",
+            "pv module": "pv_module",
+            "panel": "pv_module",
+            "module": "pv_module",
+            "string inverter": "inverter",
+            "central inverter": "inverter",
+            "inverter": "inverter",
+            "transformer": "transformer",
+            "combiner box": "combiner_box",
+            "combiner": "combiner_box",
+            "mounting structure": "mounting_structure",
+            "mounting": "mounting_structure",
+            "structure": "mounting_structure",
+            "battery": "bess",
+            "bess": "bess",
+            "tracker": "tracker",
+            "meter": "meter",
+            "data logger": "data_logger",
+            "generator": "generator",
+            "power plant controller": "ppc",
+            "ppc": "ppc",
+            "power conversion": "pcs",
+            "pcs": "pcs",
         }
         for key, code in mappings.items():
             if key in name_lower:
                 return code
-        return name.upper().replace(" ", "_")
+        return name.lower().replace(" ", "_")
 
     @staticmethod
     def _to_date(value: Any) -> Optional[date]:

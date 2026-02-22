@@ -71,7 +71,9 @@ class NotificationService:
                 fields=submission_fields or [],
             )
             submission_token_id = token_raw["token_id"]
-            context["submission_url"] = f"{self.app_base_url}/submit/{token_raw['token']}"
+            full_url = f"{self.app_base_url}/submit/{token_raw['token']}"
+            context["submission_url"] = full_url
+            self.token_service.store_submission_url(token_raw["token_id"], full_url)
 
         # Render email
         rendered = self.renderer.render_email(
@@ -216,9 +218,9 @@ class NotificationService:
                     fields=schedule.get("submission_fields") or [],
                 )
                 submission_token_id = token_raw["token_id"]
-                context["submission_url"] = (
-                    f"{self.app_base_url}/submit/{token_raw['token']}"
-                )
+                full_url = f"{self.app_base_url}/submit/{token_raw['token']}"
+                context["submission_url"] = full_url
+                self.token_service.store_submission_url(token_raw["token_id"], full_url)
 
             # Render email
             rendered = self.renderer.render_email(

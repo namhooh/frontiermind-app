@@ -14,7 +14,7 @@
 --   Option C: Adapt staging table INSERTs for specific project data
 --
 -- Prerequisites:
---   - Migrations 033 and 034 (billing product, rate periods, tariff_type service codes) applied
+--   - Migrations 033, 034, and 036 (billing product, rate periods, tariff_type service codes, tariff_annual_rate rename) applied
 --   - Organization must exist in organization table
 --   - Lookup types (tariff_type, escalation_type, currency, asset_type) must be seeded
 --   - billing_product seed data must be loaded (migration 034)

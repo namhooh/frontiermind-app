@@ -33,6 +33,7 @@ class TokenService:
         email_log_id: Optional[int] = None,
         project_id: Optional[int] = None,
         submission_type: str = "form_response",
+        submission_url: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Generate a new submission token.
@@ -40,6 +41,7 @@ class TokenService:
         Args:
             project_id: Project context for GRP and other project-scoped submissions.
             submission_type: 'form_response' (default) or 'grp_upload'.
+            submission_url: Full URL to embed in submission_fields for later retrieval.
 
         Returns:
             Dict with 'token' (raw URL-safe string) and 'token_id' (DB id)
@@ -50,10 +52,15 @@ class TokenService:
         # Store SHA-256 hash
         token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
 
+        # Wrap fields in an object so we can attach submission_url
+        fields_data: Dict[str, Any] = {"fields": fields or []}
+        if submission_url:
+            fields_data["submission_url"] = submission_url
+
         token_id = self.repo.create_submission_token({
             "organization_id": org_id,
             "token_hash": token_hash,
-            "submission_fields": fields or [],
+            "submission_fields": fields_data,
             "max_uses": max_uses,
             "expires_at": datetime.now(timezone.utc) + timedelta(hours=expiry_hours),
             "invoice_header_id": invoice_header_id,
@@ -72,6 +79,10 @@ class TokenService:
             "token": raw_token,
             "token_id": token_id,
         }
+
+    def store_submission_url(self, token_id: int, submission_url: str) -> None:
+        """Persist the submission URL into the token's submission_fields JSONB."""
+        self.repo.update_submission_token_url(token_id, submission_url)
 
     def validate_token(self, raw_token: str) -> Optional[Dict[str, Any]]:
         """
