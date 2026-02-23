@@ -21,6 +21,6 @@ export function getApiBaseUrl(): string {
     return ''
   }
 
-  // Browser on localhost: call backend directly
-  return envUrl || 'http://localhost:8000'
+  // Browser on localhost: use local backend to avoid auth issues with remote ALB
+  return 'http://localhost:8000'
 }

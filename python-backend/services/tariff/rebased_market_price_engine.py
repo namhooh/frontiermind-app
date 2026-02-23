@@ -12,6 +12,7 @@ GHS is the system of record: GRP is in GHS, floor/ceiling are converted from USD
 to GHS at the monthly FX rate. USD billing amounts are derived from the GHS rate.
 """
 
+import json
 import logging
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -214,10 +215,10 @@ class RebasedMarketPriceEngine:
 
             effective_rate = effective_rate.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
+            disc_pct_display = int(discount_pct * 100) if discount_pct * 100 == int(discount_pct * 100) else float(discount_pct * 100)
             basis = (
-                f"GRP={grp_local}, disc={discount_pct}, "
-                f"floor_usd={escalated_floor}→GHS={floor_ghs} (FX={fx_rate}), "
-                f"ceil_usd={escalated_ceiling}→GHS={ceiling_ghs}, "
+                f"GRP per kWh less {disc_pct_display}% solar discount, "
+                f"bounded by floor/ceiling (USD→local at monthly FX rate), "
                 f"binding={rate_binding}"
             )
 
@@ -240,11 +241,10 @@ class RebasedMarketPriceEngine:
         latest_month = monthly_results[-1]
         final_effective_tariff = latest_month["effective_tariff_local"]
 
+        disc_pct_display = int(discount_pct * 100) if discount_pct * 100 == int(discount_pct * 100) else float(discount_pct * 100)
         annual_basis = (
-            f"REBASED_MARKET_PRICE Y{operating_year}: "
-            f"GRP={grp_local}/kWh, discount={discount_pct}, "
-            f"floor_usd={escalated_floor}, ceiling_usd={escalated_ceiling}, "
-            f"formula={formula_type}, months={len(monthly_results)}"
+            f"GRP per kWh less {disc_pct_display}% solar discount, "
+            f"bounded by floor/ceiling (USD), converted at monthly FX rate"
         )
 
         # 8. Write to DB in a single transaction
@@ -258,6 +258,9 @@ class RebasedMarketPriceEngine:
             final_effective_tariff=final_effective_tariff,
             annual_basis=annual_basis,
             monthly_results=monthly_results,
+            discount_pct=discount_pct,
+            escalated_floor=escalated_floor,
+            escalated_ceiling=escalated_ceiling,
         )
 
         logger.info(
@@ -304,6 +307,7 @@ class RebasedMarketPriceEngine:
                 cur.execute(
                     """
                     SELECT ct.id, ct.base_rate, ct.valid_from, ct.currency_id,
+                           ct.market_ref_currency_id,
                            ct.logic_parameters, ct.organization_id, ct.project_id,
                            esc.code AS escalation_type_code,
                            c.contract_term_years
@@ -348,8 +352,11 @@ class RebasedMarketPriceEngine:
         final_effective_tariff: Decimal,
         annual_basis: str,
         monthly_results: List[dict],
+        discount_pct: Decimal,
+        escalated_floor: Decimal,
+        escalated_ceiling: Decimal,
     ) -> dict:
-        """Write results to exchange_rate, reference_price, tariff_annual_rate, tariff_monthly_rate."""
+        """Write results to exchange_rate, reference_price, and tariff_rate."""
         ct_id = tariff["id"]
         org_id = tariff["organization_id"]
         currency_id = tariff["currency_id"]
@@ -360,12 +367,15 @@ class RebasedMarketPriceEngine:
             conn.autocommit = False
             try:
                 with conn.cursor() as cur:
-                    # Get currency_id for GHS (for FX rates)
-                    cur.execute(
-                        "SELECT id FROM currency WHERE code = 'GHS'"
-                    )
-                    ghs_row = cur.fetchone()
-                    ghs_currency_id = ghs_row["id"] if ghs_row else None
+                    # Get currency IDs — resolve from clause_tariff metadata
+                    cur.execute("SELECT id FROM currency WHERE code = 'USD'")
+                    usd_row = cur.fetchone()
+                    usd_currency_id = usd_row["id"] if usd_row else None
+
+                    # hard = clause_tariff.currency_id (USD — contract/billing currency)
+                    hard_ccy_from_tariff = currency_id
+                    # local = market_ref_currency (GHS — local market currency where GRP is denominated)
+                    local_ccy_from_tariff = tariff.get("market_ref_currency_id") or currency_id
 
                     # --- a. exchange_rate: 1 row per month ---
                     fx_id_map = {}  # billing_month -> exchange_rate.id
@@ -381,7 +391,7 @@ class RebasedMarketPriceEngine:
                             """,
                             (
                                 org_id,
-                                ghs_currency_id,
+                                local_ccy_from_tariff,
                                 m["rate_date"],
                                 m["fx_rate"],
                                 "rebased_market_price_engine",
@@ -390,7 +400,6 @@ class RebasedMarketPriceEngine:
                         fx_id_map[m["billing_month"]] = cur.fetchone()["id"]
 
                     # --- b. reference_price: annual GRP observation ---
-                    # Derive period_start/end from valid_from + operating_year
                     if hasattr(valid_from, "date"):
                         valid_from = valid_from.date()
 
@@ -424,7 +433,7 @@ class RebasedMarketPriceEngine:
                             period_start,
                             period_end,
                             grp_local,
-                            ghs_currency_id,
+                            local_ccy_from_tariff,
                             grp_totals.get("total_variable_charges"),
                             grp_totals.get("total_kwh_invoiced"),
                             verification_status,
@@ -432,106 +441,240 @@ class RebasedMarketPriceEngine:
                     )
                     ref_price_id = cur.fetchone()["id"]
 
-                    # --- c. tariff_annual_rate: annual anchor row ---
-                    # Clear is_current on existing rows
+                    latest_month_date = max(m["billing_month"] for m in monthly_results)
+
+                    # =============================================================
+                    # c. tariff_rate: unified table
+                    # =============================================================
+
+                    # Currency FKs: hard=clause_tariff.currency_id (USD), local=market_ref (GHS), billing=local (GHS)
+                    hard_ccy_id = hard_ccy_from_tariff
+                    local_ccy_id = local_ccy_from_tariff
+                    billing_ccy_id = local_ccy_from_tariff  # billing in local currency (GHS)
+
+                    # --- c1. Annual row in tariff_rate ---
+                    # For annual: representative_rate is discounted GRP in local ccy
+                    # Convert to hard ccy using a reference FX rate (use latest month's rate)
+                    latest_fx = monthly_results[-1]["fx_rate"]
+                    annual_hard = (representative_rate / latest_fx).quantize(
+                        Decimal("0.00000001"), rounding=ROUND_HALF_UP
+                    ) if latest_fx else None
+
+                    # Clear is_current on existing annual tariff_rate rows
                     cur.execute(
-                        "UPDATE tariff_annual_rate SET is_current = false WHERE clause_tariff_id = %s AND is_current = true",
+                        """
+                        UPDATE tariff_rate SET is_current = false
+                        WHERE clause_tariff_id = %s AND rate_granularity = 'annual' AND is_current = true
+                        """,
                         (ct_id,),
                     )
 
                     cur.execute(
                         """
-                        INSERT INTO tariff_annual_rate
-                            (clause_tariff_id, contract_year, period_start, period_end,
-                             effective_tariff, currency_id, calculation_basis, is_current,
-                             final_effective_tariff, final_effective_tariff_source)
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, true, %s, 'monthly')
+                        INSERT INTO tariff_rate (
+                            clause_tariff_id, contract_year, rate_granularity,
+                            period_start, period_end,
+                            hard_currency_id, local_currency_id, billing_currency_id,
+                            fx_rate_hard_id, fx_rate_local_id,
+                            effective_rate_contract_ccy, effective_rate_hard_ccy,
+                            effective_rate_local_ccy, effective_rate_billing_ccy,
+                            effective_rate_contract_role,
+                            calc_detail,
+                            rate_binding,
+                            reference_price_id, discount_pct_applied, formula_version,
+                            calc_status, calculation_basis, is_current
+                        ) VALUES (
+                            %s, %s, 'annual',
+                            %s, %s,
+                            %s, %s, %s,
+                            NULL, %s,
+                            %s, %s, %s, %s,
+                            'local',
+                            NULL,
+                            'fixed',
+                            %s, %s, 'rebased_v1',
+                            'computed', %s, true
+                        )
                         ON CONFLICT (clause_tariff_id, contract_year)
+                            WHERE rate_granularity = 'annual'
                         DO UPDATE SET
-                            effective_tariff = EXCLUDED.effective_tariff,
+                            effective_rate_contract_ccy = EXCLUDED.effective_rate_contract_ccy,
+                            effective_rate_hard_ccy = EXCLUDED.effective_rate_hard_ccy,
+                            effective_rate_local_ccy = EXCLUDED.effective_rate_local_ccy,
+                            effective_rate_billing_ccy = EXCLUDED.effective_rate_billing_ccy,
+                            fx_rate_local_id = EXCLUDED.fx_rate_local_id,
+                            reference_price_id = EXCLUDED.reference_price_id,
+                            discount_pct_applied = EXCLUDED.discount_pct_applied,
+                            calc_status = 'computed',
                             calculation_basis = EXCLUDED.calculation_basis,
                             is_current = true,
-                            final_effective_tariff = EXCLUDED.final_effective_tariff,
-                            final_effective_tariff_source = EXCLUDED.final_effective_tariff_source
-                        RETURNING id
+                            updated_at = NOW()
                         """,
                         (
-                            ct_id,
-                            operating_year,
-                            period_start,
-                            period_end,
-                            representative_rate,
-                            currency_id,
+                            ct_id, operating_year,
+                            period_start, period_end,
+                            hard_ccy_id, local_ccy_id, billing_ccy_id,
+                            fx_id_map[latest_month_date],  # fx_rate_local_id = latest month's FX
+                            representative_rate,   # contract_ccy = local
+                            annual_hard,           # hard_ccy
+                            representative_rate,   # local_ccy
+                            representative_rate,   # billing_ccy = local
+                            ref_price_id, discount_pct,
                             annual_basis,
-                            final_effective_tariff,
                         ),
                     )
-                    annual_rate_id = cur.fetchone()["id"]
 
-                    # Ensure only this row is current
+                    # Ensure only this annual row is current
                     cur.execute(
                         """
-                        UPDATE tariff_annual_rate
-                        SET is_current = false
-                        WHERE clause_tariff_id = %s AND id != %s AND is_current = true
+                        UPDATE tariff_rate SET is_current = false
+                        WHERE clause_tariff_id = %s AND rate_granularity = 'annual'
+                          AND contract_year != %s AND is_current = true
                         """,
-                        (ct_id, annual_rate_id),
+                        (ct_id, operating_year),
                     )
 
-                    # --- d. tariff_monthly_rate: up to 12 rows ---
-                    # Clear is_current on existing monthly rows for this annual rate
+                    # --- c2. Monthly rows in tariff_rate ---
+                    # Clear is_current on existing monthly tariff_rate rows
                     cur.execute(
-                        "UPDATE tariff_monthly_rate SET is_current = false WHERE tariff_annual_rate_id = %s AND is_current = true",
-                        (annual_rate_id,),
+                        """
+                        UPDATE tariff_rate SET is_current = false
+                        WHERE clause_tariff_id = %s AND rate_granularity = 'monthly' AND is_current = true
+                        """,
+                        (ct_id,),
                     )
 
-                    monthly_ids = []
-                    latest_month_date = max(m["billing_month"] for m in monthly_results)
-
+                    new_monthly_ids = []
                     for m in monthly_results:
                         is_current = (m["billing_month"] == latest_month_date)
+                        fx_rate = m["fx_rate"]
+                        fx_local_id = fx_id_map[m["billing_month"]]
+
+                        # Look up monthly reference_price if it exists, else fall back to annual
+                        cur.execute("""
+                            SELECT id FROM reference_price
+                            WHERE project_id = %s AND observation_type = 'monthly'
+                              AND period_start = %s
+                            LIMIT 1
+                        """, (project_id, m["billing_month"]))
+                        monthly_ref_row = cur.fetchone()
+                        monthly_ref_id = monthly_ref_row["id"] if monthly_ref_row else ref_price_id
+
+                        # Compute hard-currency values
+                        eff_hard = (m["effective_tariff_local"] / fx_rate).quantize(
+                            Decimal("0.00000001"), rounding=ROUND_HALF_UP
+                        ) if fx_rate else None
+
+                        # Build calc_detail JSONB
+                        floor_hard = (m["floor_local"] / fx_rate).quantize(
+                            Decimal("0.00000001"), rounding=ROUND_HALF_UP
+                        ) if fx_rate else None
+                        ceiling_hard = (m["ceiling_local"] / fx_rate).quantize(
+                            Decimal("0.00000001"), rounding=ROUND_HALF_UP
+                        ) if fx_rate else None
+                        disc_hard = (m["discounted_grp_local"] / fx_rate).quantize(
+                            Decimal("0.00000001"), rounding=ROUND_HALF_UP
+                        ) if fx_rate else None
+
+                        calc_detail = json.dumps({
+                            "floor": {
+                                "contract_ccy": float(floor_hard) if floor_hard else None,
+                                "hard_ccy": float(floor_hard) if floor_hard else None,
+                                "local_ccy": float(m["floor_local"]),
+                                "billing_ccy": float(m["floor_local"]),
+                                "contract_role": "hard",
+                            },
+                            "ceiling": {
+                                "contract_ccy": float(ceiling_hard) if ceiling_hard else None,
+                                "hard_ccy": float(ceiling_hard) if ceiling_hard else None,
+                                "local_ccy": float(m["ceiling_local"]),
+                                "billing_ccy": float(m["ceiling_local"]),
+                                "contract_role": "hard",
+                            },
+                            "discounted_base": {
+                                "contract_ccy": float(m["discounted_grp_local"]),
+                                "hard_ccy": float(disc_hard) if disc_hard else None,
+                                "local_ccy": float(m["discounted_grp_local"]),
+                                "billing_ccy": float(m["discounted_grp_local"]),
+                                "contract_role": "local",
+                            },
+                            "grp_per_kwh": float(grp_local),
+                            "discount_pct": float(discount_pct),
+                            "escalated_floor_usd": float(escalated_floor),
+                            "escalated_ceiling_usd": float(escalated_ceiling),
+                            "fx_rate": float(fx_rate),
+                            "formula": "MAX(floor_local, MIN(discounted_base_local, ceiling_local))",
+                        })
+
+                        month_end = (m["billing_month"].replace(day=28) + timedelta(days=4))
+                        month_end = month_end.replace(day=1) - timedelta(days=1)
 
                         cur.execute(
                             """
-                            INSERT INTO tariff_monthly_rate
-                                (tariff_annual_rate_id, exchange_rate_id, billing_month,
-                                 floor_local, ceiling_local, discounted_grp_local,
-                                 effective_tariff_local, rate_binding, calculation_basis,
-                                 is_current)
-                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                            ON CONFLICT (tariff_annual_rate_id, billing_month)
+                            INSERT INTO tariff_rate (
+                                clause_tariff_id, contract_year, rate_granularity,
+                                billing_month, period_start, period_end,
+                                hard_currency_id, local_currency_id, billing_currency_id,
+                                fx_rate_hard_id, fx_rate_local_id,
+                                effective_rate_contract_ccy, effective_rate_hard_ccy,
+                                effective_rate_local_ccy, effective_rate_billing_ccy,
+                                effective_rate_contract_role,
+                                calc_detail,
+                                rate_binding,
+                                reference_price_id, discount_pct_applied, formula_version,
+                                calc_status, calculation_basis, is_current
+                            ) VALUES (
+                                %s, %s, 'monthly',
+                                %s, %s, %s,
+                                %s, %s, %s,
+                                NULL, %s,
+                                %s, %s, %s, %s,
+                                'local',
+                                %s::jsonb,
+                                %s,
+                                %s, %s, 'rebased_v1',
+                                'computed', %s, %s
+                            )
+                            ON CONFLICT (clause_tariff_id, billing_month)
+                                WHERE rate_granularity = 'monthly'
                             DO UPDATE SET
-                                exchange_rate_id = EXCLUDED.exchange_rate_id,
-                                floor_local = EXCLUDED.floor_local,
-                                ceiling_local = EXCLUDED.ceiling_local,
-                                discounted_grp_local = EXCLUDED.discounted_grp_local,
-                                effective_tariff_local = EXCLUDED.effective_tariff_local,
+                                fx_rate_local_id = EXCLUDED.fx_rate_local_id,
+                                effective_rate_contract_ccy = EXCLUDED.effective_rate_contract_ccy,
+                                effective_rate_hard_ccy = EXCLUDED.effective_rate_hard_ccy,
+                                effective_rate_local_ccy = EXCLUDED.effective_rate_local_ccy,
+                                effective_rate_billing_ccy = EXCLUDED.effective_rate_billing_ccy,
+                                calc_detail = EXCLUDED.calc_detail,
                                 rate_binding = EXCLUDED.rate_binding,
+                                reference_price_id = EXCLUDED.reference_price_id,
+                                discount_pct_applied = EXCLUDED.discount_pct_applied,
+                                calc_status = 'computed',
                                 calculation_basis = EXCLUDED.calculation_basis,
-                                is_current = EXCLUDED.is_current
+                                is_current = EXCLUDED.is_current,
+                                updated_at = NOW()
                             RETURNING id
                             """,
                             (
-                                annual_rate_id,
-                                fx_id_map[m["billing_month"]],
-                                m["billing_month"],
-                                m["floor_local"],
-                                m["ceiling_local"],
-                                m["discounted_grp_local"],
-                                m["effective_tariff_local"],
+                                ct_id, operating_year,
+                                m["billing_month"], m["billing_month"], month_end,
+                                hard_ccy_id, local_ccy_id, billing_ccy_id,
+                                fx_local_id,
+                                m["effective_tariff_local"],  # contract_ccy = local
+                                eff_hard,                     # hard_ccy
+                                m["effective_tariff_local"],  # local_ccy
+                                m["effective_tariff_local"],  # billing_ccy = local
+                                calc_detail,
                                 m["rate_binding"],
-                                m["calculation_basis"],
-                                is_current,
+                                monthly_ref_id, discount_pct,
+                                m["calculation_basis"], is_current,
                             ),
                         )
-                        monthly_ids.append(cur.fetchone()["id"])
+                        new_monthly_ids.append(cur.fetchone()["id"])
 
                 conn.commit()
 
                 return {
                     "reference_price_id": ref_price_id,
-                    "tariff_annual_rate_id": annual_rate_id,
-                    "tariff_monthly_rate_ids": monthly_ids,
+                    "tariff_rate_monthly_ids": new_monthly_ids,
                     "exchange_rate_ids": list(fx_id_map.values()),
                 }
 

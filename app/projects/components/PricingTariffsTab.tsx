@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
 import { ChevronRight, Plus, Trash2, Loader2, Copy, Upload, Link2, Calculator, CheckCircle2, XCircle, Ban } from 'lucide-react'
 import { toast } from 'sonner'
 import { Card, CardHeader, CardTitle, CardContent } from '@/app/components/ui/card'
@@ -17,6 +17,7 @@ import {
 } from '@/app/components/ui/dialog'
 import type { ProjectDashboardResponse, GRPObservation, SubmissionTokenItem } from '@/lib/api/adminClient'
 import { adminClient } from '@/lib/api/adminClient'
+import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from 'recharts'
 import { CollapsibleSection } from './CollapsibleSection'
 import { EditableCell } from './EditableCell'
 import { FieldGrid, type FieldDef } from './shared/FieldGrid'
@@ -96,17 +97,28 @@ function TariffDetailPanel({ t, pid, rate_periods, monthly_rates, onSaved, editM
   )
   const localCurrency = currentMonthlyRate?.currency_code ? ` (${currentMonthlyRate.currency_code})` : ''
   const baseCurrency = t.currency_code ? ` (${t.currency_code})` : ''
+  const isRebased = String(t.escalation_type_code ?? '') === 'REBASED_MARKET_PRICE'
+  const monthSuffix = currentMonthlyRate?.billing_month ? ` — ${formatBillingMonth(currentMonthlyRate.billing_month)}` : ''
+  const fxRate = currentMonthlyRate?.exchange_rate != null ? Number(currentMonthlyRate.exchange_rate) : null
+  const effectiveLocal = currentMonthlyRate?.effective_tariff_local != null ? Number(currentMonthlyRate.effective_tariff_local) : null
+  const effectiveUsd = effectiveLocal != null && fxRate ? effectiveLocal / fxRate : null
 
   return (
     <div className="mt-2">
       <FieldGrid onSaved={onSaved} editMode={editMode} fields={[
-        ...(currentMonthlyRate ? [[`Effective Rate${localCurrency}${currentMonthlyRate.billing_month ? ` — ${formatBillingMonth(currentMonthlyRate.billing_month)}` : ''}`, currentMonthlyRate.effective_tariff_local] as FieldDef] : []),
-        [`Base Rate${baseCurrency}`, t.base_rate, { fieldKey: 'base_rate', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const }],
+        ...(currentMonthlyRate ? [[`Effective Rate${localCurrency}${monthSuffix}`, currentMonthlyRate.effective_tariff_local] as FieldDef] : []),
+        ...(isRebased && fxRate != null ? [
+          [`Exchange Rate${localCurrency}/${baseCurrency || ' (USD)'}${monthSuffix}`, fxRate] as FieldDef,
+          [`Effective Rate${baseCurrency || ' (USD)'}${monthSuffix}`, effectiveUsd != null ? Number(effectiveUsd.toFixed(6)) : null] as FieldDef,
+        ] : [
+          [`Base Rate${baseCurrency}`, t.base_rate, { fieldKey: 'base_rate', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const }] as FieldDef,
+        ]),
         ...(currentPeriod ? [['Contract Year', currentPeriod.contract_year, { fieldKey: 'contract_year', entity: 'rate-periods' as const, entityId: currentPeriod.id as number, type: 'number' as const }] as FieldDef] : []),
         ['Market Ref Currency', t.market_ref_currency_code, { fieldKey: 'market_ref_currency_id', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'select' as const, options: currencyOpts, selectValue: t.market_ref_currency_id }],
         ['Solar Discount (%)', lp.discount_pct != null ? Number((Number(lp.discount_pct) * 100).toFixed(4)) : null, { fieldKey: 'lp_discount_pct', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const, scaleOnSave: 0.01 }],
         [`Floor Rate${baseCurrency}`, lp.floor_rate, { fieldKey: 'lp_floor_rate', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const }],
         [`Ceiling Rate${baseCurrency}`, lp.ceiling_rate, { fieldKey: 'lp_ceiling_rate', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const }],
+        ['Annual Degradation (%)', lp.degradation_pct != null ? Number((Number(lp.degradation_pct) * 100).toFixed(4)) : null, { fieldKey: 'lp_degradation_pct', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const, scaleOnSave: 0.01 }],
       ]} />
 
       {/* Rate Calculation Basis */}
@@ -688,9 +700,11 @@ function GRPSection({
   const pid = projectId
   const [monthlyObs, setMonthlyObs] = useState<GRPObservation[]>([])
   const [annualObs, setAnnualObs] = useState<GRPObservation[]>([])
+  const [baselineObs, setBaselineObs] = useState<GRPObservation[]>([])
   const [existingTokens, setExistingTokens] = useState<SubmissionTokenItem[]>([])
   const [loading, setLoading] = useState(true)
 
+  const [expandedBaseline, setExpandedBaseline] = useState(false)
   const [showTokenDialog, setShowTokenDialog] = useState(false)
   const [showUploadDialog, setShowUploadDialog] = useState(false)
   const [showAggregateDialog, setShowAggregateDialog] = useState(false)
@@ -713,13 +727,19 @@ function GRPSection({
     try {
       // Refresh stale annual observations before fetching
       await adminClient.refreshGRP(pid, orgId).catch(() => {})
-      const [monthlyRes, annualRes, tokensRes] = await Promise.all([
-        adminClient.listGRPObservations(pid, orgId, { observation_type: 'monthly' }),
-        adminClient.listGRPObservations(pid, orgId, { observation_type: 'annual' }),
-        adminClient.listTokens(orgId, { project_id: pid, submission_type: 'grp_upload', include_expired: true }),
+      const [monthlyRes, annualRes, baselineRes, tokensRes] = await Promise.all([
+        adminClient.listGRPObservations(pid, orgId, { observation_type: 'monthly' })
+          .catch(() => ({ observations: [] as GRPObservation[], total: 0 })),
+        adminClient.listGRPObservations(pid, orgId, { observation_type: 'annual' })
+          .catch(() => ({ observations: [] as GRPObservation[], total: 0 })),
+        adminClient.listGRPObservations(pid, orgId, { observation_type: 'monthly', operating_year: 0 })
+          .catch(() => ({ observations: [] as GRPObservation[], total: 0 })),
+        adminClient.listTokens(orgId, { project_id: pid, submission_type: 'grp_upload', include_expired: true })
+          .catch(() => ({ tokens: [] as SubmissionTokenItem[] })),
       ])
-      setMonthlyObs(monthlyRes.observations)
+      setMonthlyObs(monthlyRes.observations.filter(o => o.operating_year !== 0))
       setAnnualObs(annualRes.observations)
+      setBaselineObs(baselineRes.observations)
       setExistingTokens(tokensRes.tokens)
     } catch {
       // silently ignore — GRP data may not exist yet
@@ -730,6 +750,56 @@ function GRPSection({
 
   useEffect(() => { fetchData() }, [fetchData])
 
+  const baselineData = useMemo(() => {
+    if (baselineObs.length === 0) return null
+
+    const sorted = [...baselineObs].sort(
+      (a, b) => new Date(a.period_start).getTime() - new Date(b.period_start).getTime()
+    )
+
+    // Extract component keys from source_metadata.tariff_components
+    const componentKeysSet = new Set<string>()
+    for (const obs of sorted) {
+      const tc = obs.source_metadata?.tariff_components as Record<string, unknown> | undefined
+      if (tc) Object.keys(tc).forEach(k => componentKeysSet.add(k))
+    }
+    const componentKeys = [...componentKeysSet].sort()
+
+    const chartPoints = sorted.map(obs => {
+      const tc = obs.source_metadata?.tariff_components as Record<string, number> | undefined
+      const point: Record<string, unknown> = {
+        period: grpFormatPeriod(obs.period_start),
+        grp: obs.calculated_grp_per_kwh,
+      }
+      for (const key of componentKeys) {
+        point[key] = tc?.[key] ?? null
+      }
+      return point
+    })
+
+    const grpValues = sorted
+      .map(o => o.calculated_grp_per_kwh)
+      .filter((v): v is number => v != null)
+
+    const avg = grpValues.length > 0 ? grpValues.reduce((s, v) => s + v, 0) / grpValues.length : 0
+    const min = grpValues.length > 0 ? Math.min(...grpValues) : 0
+    const max = grpValues.length > 0 ? Math.max(...grpValues) : 0
+    const latestObs = sorted[sorted.length - 1]
+    const latest = latestObs?.calculated_grp_per_kwh ?? null
+    const latestPeriod = latestObs ? grpFormatPeriod(latestObs.period_start) : null
+
+    return {
+      chartPoints,
+      avg,
+      min,
+      max,
+      latest,
+      latestPeriod,
+      totalMonths: sorted.length,
+      componentKeys,
+      observations: sorted,
+    }
+  }, [baselineObs])
 
   async function handleGenerateToken() {
     setTokenLoading(true)
@@ -919,6 +989,114 @@ function GRPSection({
         </div>
       ) : (
         <>
+          {/* Baseline GRP (OY=0) */}
+          {baselineData && (() => {
+            const [baselineOpen, setBaselineOpen] = [expandedBaseline, setExpandedBaseline]
+            return (
+            <div className="space-y-4">
+              <button
+                type="button"
+                onClick={() => setBaselineOpen((v) => !v)}
+                className="flex items-center gap-1.5 text-xs font-medium text-slate-400 uppercase hover:text-slate-600 transition-colors"
+              >
+                <ChevronRight className={`h-3.5 w-3.5 transition-transform ${baselineOpen ? 'rotate-90' : ''}`} />
+                Baseline Grid Reference Price (Pre-COD)
+              </button>
+
+              {baselineOpen && (<>
+              {/* Summary Stats */}
+              <div className="grid grid-cols-4 gap-4">
+                <div className="rounded-lg border border-blue-200 bg-blue-50/50 px-4 py-3">
+                  <div className="text-xs text-blue-500 font-medium">Latest GRP</div>
+                  <div className="text-lg font-mono font-semibold text-slate-900 mt-0.5">{grpFormatGRP(baselineData.latest)}</div>
+                  <div className="text-[10px] text-blue-400 mt-0.5">{baselineData.latestPeriod ?? 'GHS/kWh'}</div>
+                </div>
+                <div className="rounded-lg border border-slate-200 px-4 py-3">
+                  <div className="text-xs text-slate-400">Average ({baselineData.totalMonths}mo)</div>
+                  <div className="text-lg font-mono font-semibold text-slate-800 mt-0.5">{grpFormatGRP(baselineData.avg)}</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">GHS/kWh</div>
+                </div>
+                <div className="rounded-lg border border-slate-200 px-4 py-3">
+                  <div className="text-xs text-slate-400">Minimum</div>
+                  <div className="text-lg font-mono font-semibold text-slate-800 mt-0.5">{grpFormatGRP(baselineData.min)}</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">GHS/kWh</div>
+                </div>
+                <div className="rounded-lg border border-slate-200 px-4 py-3">
+                  <div className="text-xs text-slate-400">Maximum</div>
+                  <div className="text-lg font-mono font-semibold text-slate-800 mt-0.5">{grpFormatGRP(baselineData.max)}</div>
+                  <div className="text-[10px] text-slate-400 mt-0.5">GHS/kWh</div>
+                </div>
+              </div>
+
+              {/* Area Chart */}
+              <div className="rounded-lg border border-slate-200 p-4">
+                <ResponsiveContainer width="100%" height={220}>
+                  <AreaChart data={baselineData.chartPoints} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
+                    <defs>
+                      <linearGradient id="grpGradient" x1="0" y1="0" x2="0" y2="1">
+                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
+                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
+                      </linearGradient>
+                    </defs>
+                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                    <XAxis dataKey="period" tick={{ fontSize: 11, fill: '#94a3b8' }} />
+                    <YAxis
+                      tick={{ fontSize: 11, fill: '#94a3b8' }}
+                      domain={['auto', 'auto']}
+                      tickFormatter={(v: number) => v.toFixed(2)}
+                    />
+                    <Tooltip
+                      formatter={(value) => [grpFormatGRP(value as number | null), 'GRP/kWh']}
+                      labelStyle={{ fontWeight: 600 }}
+                      contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
+                    />
+                    <ReferenceLine y={baselineData.avg} stroke="#94a3b8" strokeDasharray="4 4" label={{ value: `Avg ${grpFormatGRP(baselineData.avg)}`, position: 'right', fontSize: 10, fill: '#94a3b8' }} />
+                    <Area type="monotone" dataKey="grp" stroke="#3b82f6" strokeWidth={2} fill="url(#grpGradient)" dot={{ r: 3, fill: '#3b82f6' }} />
+                  </AreaChart>
+                </ResponsiveContainer>
+              </div>
+
+              {/* Component Breakdown Table */}
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-600">
+                    <tr>
+                      <th className="text-left px-4 py-2.5 font-medium">Period</th>
+                      <th className="text-right px-4 py-2.5 font-medium">GRP/kWh</th>
+                      {baselineData.componentKeys.map(key => (
+                        <th key={key} className="text-right px-4 py-2.5 font-medium capitalize">
+                          {key.replace(/_/g, ' ')}
+                        </th>
+                      ))}
+                      <th className="text-center px-4 py-2.5 font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {baselineData.observations.map(obs => (
+                      <tr key={obs.id} className="hover:bg-slate-50">
+                        <td className="px-4 py-2.5">{grpFormatPeriod(obs.period_start)}</td>
+                        <td className="px-4 py-2.5 text-right font-mono font-medium">{grpFormatGRP(obs.calculated_grp_per_kwh)}</td>
+                        {baselineData.componentKeys.map(key => {
+                          const tc = obs.source_metadata?.tariff_components as Record<string, number> | undefined
+                          return (
+                            <td key={key} className="px-4 py-2.5 text-right font-mono tabular-nums">
+                              {tc?.[key] != null ? grpFormatGRP(tc[key]) : '-'}
+                            </td>
+                          )
+                        })}
+                        <td className="px-4 py-2.5 text-center">
+                          <Badge variant={grpStatusBadge(obs.verification_status)}>{grpStatusLabel(obs.verification_status)}</Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              </>)}
+            </div>
+            )
+          })()}
+
           {/* Actions Bar */}
           <div className="flex items-center gap-3">
             <Button variant="outline" size="sm" onClick={() => { setTokenResult(null); setShowTokenDialog(true) }}>
@@ -1167,12 +1345,21 @@ interface PricingTariffsTabProps {
 }
 
 export function PricingTariffsTab({ data, onSaved, editMode, projectId }: PricingTariffsTabProps) {
-  const { contracts, tariffs, billing_products, rate_periods, monthly_rates, lookups } = data
+  const { contracts, tariffs, billing_products, rate_periods, monthly_rates, tariff_rates, exchange_rates, lookups } = data
   const pid = data.project.id as number
 
   const [openProducts, setOpenProducts] = useState<Set<unknown>>(new Set())
   const toggleProduct = (id: unknown) =>
     setOpenProducts((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+
+  const [expandedPeriods, setExpandedPeriods] = useState<Set<unknown>>(new Set())
+  const togglePeriod = (id: unknown) =>
+    setExpandedPeriods((prev) => {
       const next = new Set(prev)
       if (next.has(id)) next.delete(id)
       else next.add(id)
@@ -1213,6 +1400,15 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
               const periods = rate_periods
                 .filter((rp) => rp.clause_tariff_id === t.id)
                 .sort((a, b) => Number(a.contract_year) - Number(b.contract_year))
+              const isRebasedTariffHeader = String(t.escalation_type_code ?? '') === 'REBASED_MARKET_PRICE'
+              const tariffMonthlyRates = isRebasedTariffHeader
+                ? (monthly_rates ?? [])
+                    .filter((mr: R) => mr.clause_tariff_id === t.id)
+                    .sort((a: R, b: R) => String(b.billing_month ?? '').localeCompare(String(a.billing_month ?? '')))
+                : []
+              const latestMonthLabel = tariffMonthlyRates.length > 0
+                ? formatBillingMonth(tariffMonthlyRates[0].billing_month)
+                : null
               return (
                 <div key={i} className={i > 0 ? 'pt-5 border-t border-slate-200' : ''}>
                   {/* Tariff summary line */}
@@ -1226,21 +1422,31 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
                         v{t.version != null ? String(t.version) : '2'} &mdash; Amended
                       </span>
                     )}
-                    {t.valid_from != null && (
-                      <span className="text-xs text-slate-400 ml-auto">
-                        {str(t.valid_from)}{t.valid_to != null ? ` — ${str(t.valid_to)}` : ''}
-                      </span>
-                    )}
+                    <span className="text-xs text-slate-400 ml-auto">
+                      {latestMonthLabel
+                        ? `As of ${latestMonthLabel}`
+                        : t.valid_from != null
+                          ? `${str(t.valid_from)}${t.valid_to != null ? ` — ${str(t.valid_to)}` : ''}`
+                          : ''}
+                    </span>
                   </div>
 
                   {/* Rate periods table */}
                   {periods.length === 0 ? (
                     <div className="text-xs text-slate-400 italic pl-1">No rate periods</div>
-                  ) : (
+                  ) : (() => {
+                    const isRebasedTariff = String(t.escalation_type_code ?? '') === 'REBASED_MARKET_PRICE'
+                    const tLp = (t.logic_parameters ?? {}) as R
+                    const discPctDisplay = tLp.discount_pct != null ? `${Number((Number(tLp.discount_pct) * 100).toFixed(2)).toString().replace(/\.?0+$/, '')}%` : ''
+                    const basisOverride = isRebasedTariff && discPctDisplay
+                      ? `GRP per kWh less ${discPctDisplay} solar discount, bounded by floor/ceiling (USD), converted at monthly FX rate`
+                      : null
+                    return (
                     <div className="overflow-x-auto">
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-slate-200">
+                            {isRebasedTariff && <th className="w-6" />}
                             <th className="text-left px-3 py-1.5 text-xs font-medium text-slate-500">Year</th>
                             <th className="text-left px-3 py-1.5 text-xs font-medium text-slate-500">Period</th>
                             <th className="text-right px-3 py-1.5 text-xs font-medium text-slate-500">Rate</th>
@@ -1250,42 +1456,168 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
                           </tr>
                         </thead>
                         <tbody>
-                          {periods.map((rp, j) => (
-                            <tr key={j} className={`border-b border-slate-50 ${rp.is_current ? 'bg-blue-50/40' : 'hover:bg-slate-50'}`}>
-                              <td className="px-3 py-1.5 text-slate-700 tabular-nums">
-                                {editMode && rp.id != null ? (
-                                  <EditableCell value={rp.contract_year} fieldKey="contract_year" entity="rate-periods" entityId={rp.id as number} type="number" editMode onSaved={onSaved} />
-                                ) : str(rp.contract_year)}
-                              </td>
-                              <td className="px-3 py-1.5 text-slate-600 text-xs tabular-nums">
-                                {str(rp.period_start)}{rp.period_end ? ` — ${str(rp.period_end)}` : ''}
-                              </td>
-                              <td className="px-3 py-1.5 text-right text-slate-700 tabular-nums font-medium">
-                                {editMode && rp.id != null ? (
-                                  <EditableCell value={rp.effective_tariff} fieldKey="effective_tariff" entity="rate-periods" entityId={rp.id as number} type="number" editMode onSaved={onSaved} />
-                                ) : str(rp.effective_tariff)}
-                              </td>
-                              <td className="px-3 py-1.5 text-slate-500 text-xs">{str(rp.currency_code)}</td>
-                              <td className="px-3 py-1.5 text-slate-500 text-xs whitespace-pre-line max-w-[160px] break-words">
-                                {editMode && rp.id != null ? (
-                                  <EditableCell value={rp.calculation_basis} fieldKey="calculation_basis" entity="rate-periods" entityId={rp.id as number} type="text" editMode onSaved={onSaved} />
-                                ) : str(rp.calculation_basis)}
-                              </td>
-                              <td className="px-3 py-1.5 text-center">
-                                {rp.is_current === true && <span className="inline-block w-2 h-2 rounded-full bg-blue-500" title="Current" />}
-                              </td>
-                            </tr>
-                          ))}
+                          {periods.map((rp, j) => {
+                            const periodMonthlyRates = isRebasedTariff
+                              ? (monthly_rates ?? [])
+                                  .filter((mr: R) => mr.clause_tariff_id === rp.clause_tariff_id && mr.contract_year === rp.contract_year)
+                                  .sort((a: R, b: R) => String(b.billing_month ?? '').localeCompare(String(a.billing_month ?? '')))
+                              : []
+                            const isExpanded = expandedPeriods.has(rp.id)
+                            return (
+                              <Fragment key={j}>
+                              <tr
+                                className={`border-b border-slate-50 ${rp.is_current ? 'bg-blue-50/40' : 'hover:bg-slate-50'} ${isRebasedTariff && periodMonthlyRates.length > 0 ? 'cursor-pointer' : ''}`}
+                                onClick={isRebasedTariff && periodMonthlyRates.length > 0 ? () => togglePeriod(rp.id) : undefined}
+                              >
+                                {isRebasedTariff && (
+                                  <td className="pl-2 py-1.5 w-6">
+                                    {periodMonthlyRates.length > 0 && (
+                                      <ChevronRight className={`h-3.5 w-3.5 text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
+                                    )}
+                                  </td>
+                                )}
+                                <td className="px-3 py-1.5 text-slate-700 tabular-nums">
+                                  {editMode && rp.id != null ? (
+                                    <EditableCell value={rp.contract_year} fieldKey="contract_year" entity="rate-periods" entityId={rp.id as number} type="number" editMode onSaved={onSaved} />
+                                  ) : str(rp.contract_year)}
+                                </td>
+                                <td className="px-3 py-1.5 text-slate-600 text-xs tabular-nums">
+                                  {isRebasedTariff && periodMonthlyRates.length > 0
+                                    ? `As of ${formatBillingMonth(periodMonthlyRates[0].billing_month)}`
+                                    : `${str(rp.period_start)}${rp.period_end ? ` — ${str(rp.period_end)}` : ''}`}
+                                </td>
+                                <td className="px-3 py-1.5 text-right text-slate-700 tabular-nums font-medium">
+                                  {editMode && rp.id != null ? (
+                                    <EditableCell value={rp.effective_rate_contract_ccy} fieldKey="effective_rate_contract_ccy" entity="rate-periods" entityId={rp.id as number} type="number" editMode onSaved={onSaved} />
+                                  ) : (() => {
+                                    if (isRebasedTariff && periodMonthlyRates.length > 0) {
+                                      const latestMr = periodMonthlyRates[0]
+                                      const mrFx = latestMr.exchange_rate != null ? Number(latestMr.exchange_rate) : null
+                                      const mrLocal = latestMr.effective_tariff_local != null ? Number(latestMr.effective_tariff_local) : null
+                                      const latestUsd = mrLocal != null && mrFx ? mrLocal / mrFx : null
+                                      return latestUsd != null ? (
+                                        <span title={`Latest: ${formatBillingMonth(latestMr.billing_month)}`}>
+                                          {latestUsd.toFixed(6)}
+                                        </span>
+                                      ) : str(rp.effective_rate_contract_ccy)
+                                    }
+                                    return str(rp.effective_rate_contract_ccy)
+                                  })()}
+                                </td>
+                                <td className="px-3 py-1.5 text-slate-500 text-xs">{str(rp.currency_code)}</td>
+                                <td className="px-3 py-1.5 text-slate-500 text-xs whitespace-pre-line max-w-[160px] break-words">
+                                  {editMode && rp.id != null ? (
+                                    <EditableCell value={rp.calculation_basis} fieldKey="calculation_basis" entity="rate-periods" entityId={rp.id as number} type="text" editMode onSaved={onSaved} />
+                                  ) : str(basisOverride ?? rp.calculation_basis)}
+                                </td>
+                                <td className="px-3 py-1.5 text-center">
+                                  {rp.is_current === true && <span className="inline-block w-2 h-2 rounded-full bg-blue-500" title="Current" />}
+                                </td>
+                              </tr>
+                              {/* Monthly sub-header + sub-rows */}
+                              {isExpanded && periodMonthlyRates.length > 0 && (
+                                <tr className="bg-slate-100/60">
+                                  <td />{/* chevron col */}
+                                  <td className="px-3 py-1 text-[10px] font-medium text-slate-400 uppercase tracking-wider">Month</td>
+                                  <td className="px-3 py-1 text-[10px] font-medium text-slate-400 uppercase tracking-wider">Binding</td>
+                                  <td className="px-3 py-1 text-right text-[10px] font-medium text-slate-400 uppercase tracking-wider">Rate (GHS)</td>
+                                  <td className="px-3 py-1 text-[10px] font-medium text-slate-400 uppercase tracking-wider">FX Rate</td>
+                                  <td className="px-3 py-1 text-[10px] font-medium text-slate-400 uppercase tracking-wider">Rate (USD)</td>
+                                  <td className="px-3 py-1 text-center text-[10px] font-medium text-slate-400 uppercase tracking-wider">Current</td>
+                                </tr>
+                              )}
+                              {isExpanded && periodMonthlyRates.map((mr: R, k: number) => {
+                                const mrFx = mr.exchange_rate != null ? Number(mr.exchange_rate) : null
+                                const mrLocal = mr.effective_tariff_local != null ? Number(mr.effective_tariff_local) : null
+                                const mrUsd = mrLocal != null && mrFx ? mrLocal / mrFx : null
+                                return (
+                                  <tr key={`m-${k}`} className={`border-b border-slate-50 ${mr.is_current ? 'bg-blue-50/20' : 'bg-slate-50/50'}`}>
+                                    <td />{/* chevron col */}
+                                    <td className="px-3 py-1 text-xs text-slate-500 pl-6">
+                                      {formatBillingMonth(mr.billing_month)}
+                                    </td>
+                                    <td className="px-3 py-1 text-xs text-slate-500 tabular-nums">
+                                      {str(mr.rate_binding)}
+                                    </td>
+                                    <td className="px-3 py-1 text-right text-xs text-slate-600 tabular-nums">
+                                      {str(mr.effective_tariff_local)}
+                                    </td>
+                                    <td className="px-3 py-1 text-xs text-slate-500 tabular-nums">
+                                      {mrFx != null ? mrFx.toFixed(2) : '—'}
+                                    </td>
+                                    <td className="px-3 py-1 text-xs text-slate-500 tabular-nums">
+                                      {mrUsd != null ? mrUsd.toFixed(6) : '—'}
+                                    </td>
+                                    <td className="px-3 py-1 text-center">
+                                      {mr.is_current === true && <span className="inline-block w-2 h-2 rounded-full bg-blue-400" title="Current" />}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                              </Fragment>
+                            )
+                          })}
                         </tbody>
                       </table>
                     </div>
-                  )}
+                    )
+                  })()}
                 </div>
               )
             })}
           </div>
         )}
       </CollapsibleSection>
+
+      {/* Exchange Rates */}
+      {(exchange_rates ?? []).length > 0 && (
+        <CollapsibleSection title="Exchange Rates">
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200">
+                  <th className="text-left px-3 py-1.5 text-xs font-medium text-slate-500">Date</th>
+                  <th className="text-left px-3 py-1.5 text-xs font-medium text-slate-500">Currency</th>
+                  <th className="text-right px-3 py-1.5 text-xs font-medium text-slate-500">Rate (USD → Local)</th>
+                  <th className="text-right px-3 py-1.5 text-xs font-medium text-slate-500">MoM Change</th>
+                  <th className="text-left px-3 py-1.5 text-xs font-medium text-slate-500">Source</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(() => {
+                  const sorted = [...(exchange_rates ?? [])].sort(
+                    (a, b) => String(b.rate_date ?? '').localeCompare(String(a.rate_date ?? ''))
+                  )
+                  return sorted.map((er, idx) => {
+                    const rate = Number(er.rate)
+                    const prevRate = idx < sorted.length - 1 ? Number(sorted[idx + 1].rate) : null
+                    const momChange = prevRate != null && prevRate !== 0
+                      ? ((rate - prevRate) / prevRate) * 100
+                      : null
+                    return (
+                      <tr key={er.id as number} className={`border-b border-slate-50 ${idx === 0 ? 'bg-blue-50/40' : 'hover:bg-slate-50'}`}>
+                        <td className="px-3 py-1.5 text-slate-700 tabular-nums">{formatBillingMonth(er.rate_date)}</td>
+                        <td className="px-3 py-1.5 text-slate-500 text-xs">{str(er.currency_code)}</td>
+                        <td className="px-3 py-1.5 text-right text-slate-700 tabular-nums font-medium">{rate.toFixed(2)}</td>
+                        <td className="px-3 py-1.5 text-right tabular-nums">
+                          {momChange != null ? (
+                            <span className={momChange > 0 ? 'text-red-600' : momChange < 0 ? 'text-green-600' : 'text-slate-400'}>
+                              {momChange > 0 ? '+' : ''}{momChange.toFixed(2)}%
+                            </span>
+                          ) : (
+                            <span className="text-slate-300">—</span>
+                          )}
+                        </td>
+                        <td className="px-3 py-1.5 text-slate-500 text-xs">{str(er.source)}</td>
+                      </tr>
+                    )
+                  })
+                })()}
+              </tbody>
+            </table>
+          </div>
+        </CollapsibleSection>
+      )}
 
       {contracts.map((c, i) => {
         const cid = c.id as number

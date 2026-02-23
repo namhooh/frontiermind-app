@@ -100,8 +100,10 @@ export interface ProjectDashboardResponse {
   billing_products: Record<string, unknown>[]
   rate_periods: Record<string, unknown>[]
   monthly_rates: Record<string, unknown>[]
+  tariff_rates: Record<string, unknown>[]
   clauses: Record<string, unknown>[]
   amendments: Record<string, unknown>[]
+  exchange_rates: Record<string, unknown>[]
   lookups: Record<string, { id: number; code?: string; name: string }[]>
 }
 
@@ -227,6 +229,104 @@ export interface AdminUploadResponse {
   message: string
   billing_month_stored?: string
   period_mismatch?: { user_provided: string; extracted: string; resolution: string }
+}
+
+// ============================================================================
+// Spreadsheet Types
+// ============================================================================
+
+export interface SpreadsheetColumnMeta {
+  name: string
+  type: string
+  nullable: boolean
+  has_default: boolean
+}
+
+export interface SpreadsheetTable {
+  table_name: string
+  columns: SpreadsheetColumnMeta[]
+}
+
+export interface SpreadsheetTablesResponse {
+  success: boolean
+  tables: SpreadsheetTable[]
+}
+
+export interface SpreadsheetQueryRequest {
+  table: string
+  project_id: number
+  limit?: number
+  offset?: number
+}
+
+export interface SpreadsheetQueryResponse {
+  success: boolean
+  columns: SpreadsheetColumnMeta[]
+  rows: Record<string, unknown>[]
+  total_count: number
+}
+
+export interface SpreadsheetCellChange {
+  row_id: number
+  column: string
+  value: unknown
+}
+
+export interface SpreadsheetSaveRequest {
+  table: string
+  project_id: number
+  changes: SpreadsheetCellChange[]
+  deletions?: number[]
+}
+
+export interface SpreadsheetSaveResponse {
+  success: boolean
+  updated_count: number
+  deleted_count?: number
+}
+
+// ============================================================================
+// Monthly Billing Types
+// ============================================================================
+
+export interface MonthlyBillingProductColumn {
+  billing_product_id: number
+  product_code: string
+  product_name: string
+  clause_tariff_id: number | null
+  tariff_name: string | null
+  is_metered: boolean
+}
+
+export interface MonthlyBillingRow {
+  billing_month: string
+  billing_period_id: number | null
+  actual_kwh: number | null
+  forecast_kwh: number | null
+  variance_kwh: number | null
+  variance_pct: number | null
+  product_amounts: Record<string, number | null>
+  product_rates: Record<string, number | null>
+  total_billing_amount: number | null
+}
+
+export interface MonthlyBillingResponse {
+  success: boolean
+  rows: MonthlyBillingRow[]
+  products: MonthlyBillingProductColumn[]
+  currency_code: string | null
+  degradation_pct: number | null
+  summary: {
+    actual_kwh: number
+    forecast_kwh: number
+    total_billing: number
+  }
+}
+
+export interface MonthlyBillingImportResponse {
+  success: boolean
+  imported_rows: number
+  message: string
 }
 
 // ============================================================================
@@ -640,6 +740,112 @@ export class AdminClient {
       { headers: { 'X-Organization-ID': String(orgId) } }
     )
     return this.handleResponse<SubmissionTokenListResponse>(response)
+  }
+
+  // =========================================================================
+  // Spreadsheet
+  // =========================================================================
+
+  async getSpreadsheetTables(projectId: number): Promise<SpreadsheetTable[]> {
+    this.log('Fetching spreadsheet tables', { projectId })
+    const response = await fetch(
+      `${this.baseUrl}/api/spreadsheet/tables?project_id=${projectId}`
+    )
+    const data = await this.handleResponse<SpreadsheetTablesResponse>(response)
+    return data.tables
+  }
+
+  async querySpreadsheetData(request: SpreadsheetQueryRequest): Promise<SpreadsheetQueryResponse> {
+    this.log('Querying spreadsheet data', request)
+    const response = await fetch(
+      `${this.baseUrl}/api/spreadsheet/query`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      }
+    )
+    return this.handleResponse<SpreadsheetQueryResponse>(response)
+  }
+
+  async saveSpreadsheetChanges(request: SpreadsheetSaveRequest): Promise<SpreadsheetSaveResponse> {
+    this.log('Saving spreadsheet changes', request)
+    const response = await fetch(
+      `${this.baseUrl}/api/spreadsheet/save`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      }
+    )
+    return this.handleResponse<SpreadsheetSaveResponse>(response)
+  }
+
+  // =========================================================================
+  // Monthly Billing
+  // =========================================================================
+
+  async getMonthlyBilling(projectId: number): Promise<MonthlyBillingResponse> {
+    this.log('Fetching monthly billing', { projectId })
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/monthly-billing`
+    )
+    return this.handleResponse<MonthlyBillingResponse>(response)
+  }
+
+  async importMonthlyBilling(projectId: number, file: File): Promise<MonthlyBillingImportResponse> {
+    this.log('Importing monthly billing', { projectId, filename: file.name })
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/monthly-billing/import`,
+      { method: 'POST', body: formData }
+    )
+    return this.handleResponse<MonthlyBillingImportResponse>(response)
+  }
+
+  async addManualBillingEntry(
+    projectId: number,
+    body: { billing_month: string; actual_kwh?: number; forecast_kwh?: number }
+  ): Promise<MonthlyBillingImportResponse> {
+    this.log('Adding manual billing entry', { projectId, body })
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/monthly-billing/manual`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }
+    )
+    return this.handleResponse<MonthlyBillingImportResponse>(response)
+  }
+
+  // =========================================================================
+  // Degradation
+  // =========================================================================
+
+  async applyDegradation(projectId: number): Promise<{ success: boolean; updated_rows: number; annual_degradation_pct: number }> {
+    this.log('Applying degradation', { projectId })
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/apply-degradation`,
+      { method: 'POST' }
+    )
+    return this.handleResponse<{ success: boolean; updated_rows: number; annual_degradation_pct: number }>(response)
+  }
+
+  async exportMonthlyBilling(projectId: number): Promise<Blob> {
+    this.log('Exporting monthly billing', { projectId })
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/monthly-billing/export`
+    )
+    if (!response.ok) {
+      const errorBody = await response.json().catch(() => ({}))
+      throw new AdminAPIError(
+        errorBody.message || errorBody.detail || `HTTP ${response.status}`,
+        response.status
+      )
+    }
+    return response.blob()
   }
 }
 

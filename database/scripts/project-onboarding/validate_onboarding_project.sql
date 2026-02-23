@@ -189,36 +189,36 @@ FROM (
 
   SELECT
     'core',
-    'tariff_annual_rate_count',
+    'tariff_rate_annual_count',
     CASE
       WHEN (
         SELECT COUNT(*)
-        FROM tariff_annual_rate trp
-        JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
-        WHERE ct.project_id IN (SELECT project_id FROM ctx)
+        FROM tariff_rate tr
+        JOIN clause_tariff ct ON ct.id = tr.clause_tariff_id
+        WHERE ct.project_id IN (SELECT project_id FROM ctx) AND tr.rate_granularity = 'annual'
       ) >= 1 THEN 'PASS'
       ELSE 'WARN'
     END,
     (
       SELECT COUNT(*)::text
-      FROM tariff_annual_rate trp
-      JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
-      WHERE ct.project_id IN (SELECT project_id FROM ctx)
+      FROM tariff_rate tr
+      JOIN clause_tariff ct ON ct.id = tr.clause_tariff_id
+      WHERE ct.project_id IN (SELECT project_id FROM ctx) AND tr.rate_granularity = 'annual'
     ),
     '>=1',
-    'At least one tariff rate period (Year 1) per tariff'
+    'At least one tariff_rate annual row (Year 1) per tariff'
 
   UNION ALL
 
   SELECT
     'core',
-    'tariff_annual_rate_single_current',
+    'tariff_rate_annual_single_current',
     CASE
       WHEN (
         SELECT COUNT(*)
-        FROM tariff_annual_rate trp
-        JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
-        WHERE ct.project_id IN (SELECT project_id FROM ctx) AND trp.is_current = true
+        FROM tariff_rate tr
+        JOIN clause_tariff ct ON ct.id = tr.clause_tariff_id
+        WHERE ct.project_id IN (SELECT project_id FROM ctx) AND tr.rate_granularity = 'annual' AND tr.is_current = true
       ) = (
         SELECT COUNT(*)
         FROM clause_tariff ct
@@ -226,24 +226,24 @@ FROM (
       ) THEN 'PASS'
       WHEN (
         SELECT COUNT(*)
-        FROM tariff_annual_rate trp
-        JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
-        WHERE ct.project_id IN (SELECT project_id FROM ctx)
+        FROM tariff_rate tr
+        JOIN clause_tariff ct ON ct.id = tr.clause_tariff_id
+        WHERE ct.project_id IN (SELECT project_id FROM ctx) AND tr.rate_granularity = 'annual'
       ) = 0 THEN 'WARN'
       ELSE 'FAIL'
     END,
     (
       SELECT COUNT(*)::text
-      FROM tariff_annual_rate trp
-      JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
-      WHERE ct.project_id IN (SELECT project_id FROM ctx) AND trp.is_current = true
+      FROM tariff_rate tr
+      JOIN clause_tariff ct ON ct.id = tr.clause_tariff_id
+      WHERE ct.project_id IN (SELECT project_id FROM ctx) AND tr.rate_granularity = 'annual' AND tr.is_current = true
     ),
     (
       SELECT COUNT(*)::text
       FROM clause_tariff ct
       WHERE ct.project_id IN (SELECT project_id FROM ctx) AND ct.is_current = true AND ct.base_rate IS NOT NULL
     ),
-    'Exactly one current rate period per tariff with base_rate'
+    'Exactly one current annual tariff_rate per tariff with base_rate'
 
   UNION ALL
 
@@ -639,19 +639,26 @@ WHERE p.external_project_id = :'external_project_id'
 ORDER BY cbp.is_primary DESC, bp.code;
 
 SELECT
-  trp.id,
-  trp.clause_tariff_id,
+  tr.id,
+  tr.clause_tariff_id,
   ct.tariff_group_key,
-  trp.contract_year,
-  trp.period_start,
-  trp.period_end,
-  trp.effective_tariff,
-  cur.code AS currency,
-  trp.is_current,
-  trp.calculation_basis
-FROM tariff_annual_rate trp
-JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
+  tr.contract_year,
+  tr.rate_granularity,
+  tr.period_start,
+  tr.period_end,
+  tr.effective_rate_contract_ccy,
+  CASE tr.effective_rate_contract_role::text
+      WHEN 'hard'  THEN hc.code
+      WHEN 'local' THEN lc.code
+      ELSE bc.code END AS currency,
+  tr.is_current,
+  tr.calculation_basis
+FROM tariff_rate tr
+JOIN clause_tariff ct ON ct.id = tr.clause_tariff_id
 JOIN project p ON p.id = ct.project_id
-LEFT JOIN currency cur ON cur.id = trp.currency_id
+LEFT JOIN currency hc ON hc.id = tr.hard_currency_id
+LEFT JOIN currency lc ON lc.id = tr.local_currency_id
+LEFT JOIN currency bc ON bc.id = tr.billing_currency_id
 WHERE p.external_project_id = :'external_project_id'
-ORDER BY ct.tariff_group_key, trp.contract_year;
+  AND tr.rate_granularity = 'annual'
+ORDER BY ct.tariff_group_key, tr.contract_year;

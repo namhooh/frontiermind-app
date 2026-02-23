@@ -1619,3 +1619,68 @@ and token-based external submission collection.
 - Partial unique index `uq_clause_tariff_current_group_validity` does not collide because original has `is_current=false`
 
 ---
+
+### v10.3 - 2026-02-23 (Unified Tariff Rate Table)
+
+**Description:** Merges `tariff_annual_rate` + `tariff_monthly_rate` into a single `tariff_rate` table with four-currency representation, JSONB formula-specific intermediaries, full FX audit trail, and calculation lineage. Old tables are migrated then dropped.
+
+**Migration:** `database/migrations/040_merge_tariff_rate_tables.sql`
+
+**New Enums:**
+- `rate_granularity` ('annual', 'monthly')
+- `calc_status` ('pending', 'computed', 'approved', 'superseded')
+- `contract_ccy_role` ('hard', 'local', 'billing')
+
+**New Table: `tariff_rate`**
+
+| Column Group | Columns |
+|---|---|
+| **Identity** | `clause_tariff_id`, `contract_year`, `rate_granularity`, `billing_month`, `period_start`, `period_end` |
+| **Currency FKs** | `hard_currency_id`, `local_currency_id`, `billing_currency_id` |
+| **FX Audit Trail** | `fx_rate_hard_id`, `fx_rate_local_id` |
+| **Effective Rate** | `effective_rate_contract_ccy`, `effective_rate_hard_ccy`, `effective_rate_local_ccy`, `effective_rate_billing_ccy`, `effective_rate_contract_role` |
+| **Formula Detail** | `calc_detail` (JSONB) |
+| **Determination** | `rate_binding` |
+| **Lineage** | `reference_price_id`, `discount_pct_applied`, `formula_version` |
+| **Status** | `calc_status`, `calculation_basis`, `is_current`, `approved_by`, `approved_at` |
+
+**Key Constraints:**
+- `chk_granularity_annual`: annual rows must have `billing_month IS NULL`
+- `chk_granularity_monthly`: monthly rows must have `billing_month` set, normalized to first-of-month
+- `chk_billing_ccy_is_hard_or_local`: billing currency must equal hard or local
+- `chk_effective_rate_contract_role`: contract_ccy must equal the designated role's column
+- `chk_computed_has_rate`: computed/approved rows must have effective_rate_billing_ccy
+- `chk_period_dates`: `period_end IS NULL OR period_end >= period_start`
+- `chk_rate_binding_values`: `rate_binding IN ('floor', 'ceiling', 'discounted', 'fixed')`
+- Partial unique indexes enforce one current row per granularity per tariff
+
+**Data Migration:**
+- `tariff_annual_rate` rows → `rate_granularity = 'annual'`
+- `tariff_monthly_rate` rows → `rate_granularity = 'monthly'` with reconstructed `calc_detail` and USD values
+- Same-currency backfill: sets `effective_rate_hard_ccy = effective_rate_local_ccy` where `hard_currency_id = local_currency_id`
+
+**Dropped Tables:**
+- `tariff_annual_rate` — replaced by `tariff_rate WHERE rate_granularity = 'annual'`
+- `tariff_monthly_rate` — replaced by `tariff_rate WHERE rate_granularity = 'monthly'`
+
+**Backend Changes:**
+- `python-backend/services/tariff/rebased_market_price_engine.py`: Writes exclusively to `tariff_rate` — computes all four currency columns, builds `calc_detail` JSONB with floor/ceiling/discounted_base in four-currency format, sets `reference_price_id`, `discount_pct_applied`, `formula_version='rebased_v1'`, `effective_rate_contract_role='local'`. Monthly rows link to monthly `reference_price` when available (fallback to annual).
+- `python-backend/services/tariff/rate_period_generator.py`: Writes exclusively to `tariff_rate` — same-currency columns, `calc_detail` with `escalation_value`/`years_elapsed`, `formula_version='deterministic_v1'`, `rate_binding='fixed'`
+- `python-backend/api/entities.py`: All three CTEs (`rate_periods_data`, `monthly_rates_data`, `tariff_rates_data`) query `tariff_rate` directly in main CTE. PATCH endpoint targets `tariff_rate`. `RatePeriodPatch` field renamed `effective_tariff` → `effective_rate_contract_ccy`.
+- `python-backend/api/billing.py`: Reads `tariff_rate` exclusively (month-exact matching); uses `effective_rate_billing_ccy` directly; no old-table fallback.
+- `python-backend/api/spreadsheet.py`: Only `tariff_rate` in `_PROJECT_SCOPED_TABLES` (removed `tariff_annual_rate`, `tariff_monthly_rate`). Removed old-table scoping, UPDATE, and DELETE handlers.
+- `database/scripts/project-onboarding/onboard_project.sql`: Removed section 4.11 (`tariff_annual_rate` INSERT) and its assertion. Only inserts Year 1 into `tariff_rate`.
+- `database/scripts/project-onboarding/validate_onboarding_project.sql`: Replaced `tariff_annual_rate` checks with `tariff_rate WHERE rate_granularity = 'annual'`.
+
+**Frontend Changes:**
+- `lib/api/adminClient.ts`: Added `tariff_rates` to `ProjectDashboardResponse` interface
+- `app/projects/components/PricingTariffsTab.tsx`: Monthly rate linking uses `clause_tariff_id + contract_year` (was `tariff_annual_rate_id`). Rate field renamed `effective_tariff` → `effective_rate_contract_ccy`.
+- `app/projects/components/spreadsheet/univerDataConverter.ts`: Removed `tariff_annual_rate_id` from `PROTECTED_COLUMNS`.
+
+**Design Notes:**
+- `billing_currency_id` = `clause_tariff.currency_id` (per onboarding — this is the billing currency, not hard/contract currency)
+- `effective_rate_contract_role` is nullable with no default — engine must set it explicitly
+- `calc_detail` JSONB is escalation-type-specific (REBASED_MARKET_PRICE stores floor/ceiling/discounted_base; deterministic stores escalation_value/years_elapsed)
+- RLS policies use `DROP POLICY IF EXISTS` for idempotent re-runs
+
+---

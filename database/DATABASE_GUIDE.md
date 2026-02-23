@@ -3,7 +3,7 @@
 
 Quick links: [Directory Structure](#directory-structure) | [Workflows](#common-workflows) | [Scripts](#scripts-reference) | [Troubleshooting](#troubleshooting)
 
-Last updated: 2026-02-17
+Last updated: 2026-02-23
 
 ---
 
@@ -80,6 +80,7 @@ database/
 │   ├── 037_grp_ingestion.sql                          # Phase 9.3: GRP ingestion — monthly observations, file upload, submission_token extensions
 │   ├── 038_moh01_amendment_version_history.sql         # Phase 10.2: Amendment version chain for MOH01 (original tariff row + supersedes linkage)
 │   ├── 039_pipeline_integrity_fixes.sql               # Phase 10.1: Annual ref_price partial unique index, asset_type seeds, metering_type CHECK, idempotent GRP seed
+│   ├── 040_merge_tariff_rate_tables.sql               # Phase 10.3: Unified tariff_rate table (merges + drops tariff_annual_rate + tariff_monthly_rate), four-currency, JSONB calc_detail, FX audit trail, integrity constraints
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -1065,6 +1066,17 @@ database/
 - PPA extraction prompt expanded to capture structured `default_rate` object
 - Onboarding service auto-inserts PAYMENT_TERMS clause when default rate data is available
 - Frontend displays default rate in Billing Information section of Pricing & Tariffs tab
+
+**v10.3 (Unified Tariff Rate Table)** - Complete
+- Migration: `040_merge_tariff_rate_tables.sql`
+- New table: `tariff_rate` — merges `tariff_annual_rate` + `tariff_monthly_rate`
+- Dropped tables: `tariff_annual_rate`, `tariff_monthly_rate`
+- New enums: `rate_granularity` (annual/monthly), `calc_status` (pending/computed/approved/superseded), `contract_ccy_role` (hard/local/billing)
+- Four-currency effective rate: `effective_rate_contract_ccy`, `_hard_ccy`, `_local_ccy`, `_billing_ccy` with `contract_role` role designator
+- JSONB `calc_detail` for formula-specific intermediaries (floor/ceiling/discounted_base for REBASED_MARKET_PRICE; escalation_value/years_elapsed for deterministic)
+- FX audit trail: `fx_rate_hard_id`, `fx_rate_local_id` (NULL when currency=USD)
+- Calculation lineage: `reference_price_id`, `discount_pct_applied`, `formula_version`
+- All engines and APIs write/read exclusively from `tariff_rate`
 
 ---
 

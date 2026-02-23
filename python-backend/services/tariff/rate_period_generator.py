@@ -3,12 +3,13 @@ Tariff Rate Period Generator.
 
 Computes effective rates for Years 2..N for deterministic escalation types
 (NONE, FIXED_INCREASE, FIXED_DECREASE, PERCENTAGE) and batch-inserts them
-into tariff_annual_rate.
+into tariff_rate.
 
 Non-deterministic types (US_CPI, REBASED_MARKET_PRICE) are skipped — they
 require external data feeds.
 """
 
+import json
 import logging
 from datetime import date, timedelta
 from decimal import Decimal, ROUND_HALF_UP
@@ -22,7 +23,7 @@ DETERMINISTIC_CODES = frozenset({"NONE", "FIXED_INCREASE", "FIXED_DECREASE", "PE
 
 
 class RatePeriodGenerator:
-    """Generate tariff_annual_rate rows for deterministic escalation types."""
+    """Generate tariff_rate rows for deterministic escalation types."""
 
     def generate(self, project_id: int) -> Dict[str, int]:
         """
@@ -138,52 +139,97 @@ class RatePeriodGenerator:
         year1_end = period_rows[0][2] if period_rows else None
         year1_is_current = (current_year == 1)
 
-        # Clear is_current on all existing rows for this tariff first
-        # (required by the unique partial index on is_current)
+        # For deterministic tariffs: same-currency, all 3 FKs = currency_id,
+        # all 4 effective_rate columns = same value.
+
+        # Build calc_detail for deterministic types
+        calc_detail_base = {
+            "escalation_value": float(escalation_value),
+        }
+
+        # Clear is_current on existing annual tariff_rate rows
         cur.execute(
-            "UPDATE tariff_annual_rate SET is_current = false WHERE clause_tariff_id = %s AND is_current = true",
+            """
+            UPDATE tariff_rate SET is_current = false
+            WHERE clause_tariff_id = %s AND rate_granularity = 'annual' AND is_current = true
+            """,
             (ct_id,),
         )
 
-        # Update Year 1's period_end and final_effective_tariff
+        # Update Year 1 in tariff_rate
+        year1_rate = period_rows[0][3] if period_rows else base_rate
+        year1_basis = period_rows[0][4] if period_rows else "Year 1: original contractual base rate"
         cur.execute(
             """
-            UPDATE tariff_annual_rate
+            UPDATE tariff_rate
             SET period_end = %s, is_current = %s,
-                final_effective_tariff = effective_tariff,
-                final_effective_tariff_source = 'annual'
-            WHERE clause_tariff_id = %s AND contract_year = 1
+                effective_rate_contract_ccy = %s,
+                effective_rate_hard_ccy = %s,
+                effective_rate_local_ccy = %s,
+                effective_rate_billing_ccy = %s,
+                calc_status = 'computed',
+                updated_at = NOW()
+            WHERE clause_tariff_id = %s AND contract_year = 1 AND rate_granularity = 'annual'
             """,
-            (year1_end, year1_is_current, ct_id),
+            (year1_end, year1_is_current,
+             year1_rate, year1_rate, year1_rate, year1_rate,
+             ct_id),
         )
 
-        # --- Insert Years 2..N ---
+        # Insert Years 2..N into tariff_rate
         inserted = 0
         for year, p_start, p_end, rate, basis in period_rows:
             if year == 1:
-                continue  # Already exists
+                continue
             is_current = (year == current_year)
+            calc_detail = json.dumps({
+                **calc_detail_base,
+                "years_elapsed": year - 1,
+            })
             cur.execute(
                 """
-                INSERT INTO tariff_annual_rate
-                    (clause_tariff_id, contract_year, period_start, period_end,
-                     effective_tariff, currency_id, calculation_basis, is_current,
-                     final_effective_tariff, final_effective_tariff_source)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'annual')
-                ON CONFLICT (clause_tariff_id, contract_year) DO NOTHING
+                INSERT INTO tariff_rate (
+                    clause_tariff_id, contract_year, rate_granularity,
+                    period_start, period_end,
+                    hard_currency_id, local_currency_id, billing_currency_id,
+                    effective_rate_contract_ccy, effective_rate_hard_ccy,
+                    effective_rate_local_ccy, effective_rate_billing_ccy,
+                    effective_rate_contract_role,
+                    calc_detail,
+                    rate_binding, formula_version,
+                    calc_status, calculation_basis, is_current
+                ) VALUES (
+                    %s, %s, 'annual',
+                    %s, %s,
+                    %s, %s, %s,
+                    %s, %s, %s, %s,
+                    'hard',
+                    %s::jsonb,
+                    'fixed', 'deterministic_v1',
+                    'computed', %s, %s
+                )
+                ON CONFLICT (clause_tariff_id, contract_year)
+                    WHERE rate_granularity = 'annual'
+                DO NOTHING
                 """,
-                (ct_id, year, p_start, p_end, rate, currency_id, basis, is_current, rate),
+                (
+                    ct_id, year,
+                    p_start, p_end,
+                    currency_id, currency_id, currency_id,  # same-currency: all 3 = same
+                    rate, rate, rate, rate,                  # all 4 columns = same value
+                    calc_detail,
+                    basis, is_current,
+                ),
             )
             inserted += cur.rowcount
 
-        # Set the correct is_current row (in case ON CONFLICT skipped inserts
-        # but the current year changed)
+        # Set correct is_current in tariff_rate
         if current_year and current_year > 1:
             cur.execute(
                 """
-                UPDATE tariff_annual_rate
+                UPDATE tariff_rate
                 SET is_current = true
-                WHERE clause_tariff_id = %s AND contract_year = %s
+                WHERE clause_tariff_id = %s AND contract_year = %s AND rate_granularity = 'annual'
                 """,
                 (ct_id, current_year),
             )

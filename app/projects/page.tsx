@@ -12,6 +12,8 @@ import { ProjectTableTab, type Column } from './components/ProjectTableTab'
 import { PricingTariffsTab } from './components/PricingTariffsTab'
 import { TechnicalTab } from './components/TechnicalTab'
 import { ForecastsGuaranteesTab } from './components/ForecastsGuaranteesTab'
+import { MonthlyBillingTab } from './components/MonthlyBillingTab'
+// import { SpreadsheetTab } from './components/SpreadsheetTab'
 
 export default function ProjectsPage() {
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null)
@@ -103,6 +105,7 @@ export default function ProjectsPage() {
     { key: 'forecast_poa_irradiance', label: 'POA Irradiance', editable: true, type: 'number', format: fmtNum2 },
     { key: 'forecast_pr', label: 'PR (%)', editable: true, type: 'number', format: fmtPR },
     { key: 'forecast_source', label: 'Source', editable: true, type: 'text' },
+    { key: 'degradation_factor', label: 'Degr. Factor', editable: false, type: 'number', format: (v) => v == null ? '—' : Number(v).toFixed(5) },
   ]
 
   const guaranteeColumns: Column[] = [
@@ -110,9 +113,7 @@ export default function ProjectsPage() {
     { key: 'year_start_date', label: 'Start', editable: true, type: 'date' },
     { key: 'year_end_date', label: 'End', editable: true, type: 'date' },
     { key: 'p50_annual_kwh', label: 'P50 (kWh)', editable: true, type: 'number', format: (v) => v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
-    { key: 'guarantee_pct_of_p50', label: 'Guarantee %', editable: true, type: 'number', format: (v) => v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
     { key: 'guaranteed_kwh', label: 'Guaranteed (kWh)', editable: true, type: 'number', format: (v) => v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
-    { key: 'shortfall_cap_usd', label: 'Shortfall Cap ($)', editable: true, type: 'number', format: (v) => v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
   ]
 
   const contactColumns: Column[] = [
@@ -160,7 +161,7 @@ export default function ProjectsPage() {
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">Project Dashboard</h1>
+            <h1 className="text-2xl font-bold text-slate-900">CrossBoundary Energy Project Dashboard</h1>
             <p className="text-sm text-slate-500 mt-1">
               View and edit onboarded project data, contracts, and technical details
             </p>
@@ -226,7 +227,9 @@ export default function ProjectsPage() {
                   <TabsTrigger value="pricing-tariffs">Pricing & Tariffs</TabsTrigger>
                   <TabsTrigger value="technical">Technical</TabsTrigger>
                   <TabsTrigger value="forecasts-guarantees">Forecasts & Guarantees</TabsTrigger>
+                  <TabsTrigger value="monthly-billing">Monthly Billing</TabsTrigger>
                   <TabsTrigger value="contacts">Contacts</TabsTrigger>
+                  {/* <TabsTrigger value="spreadsheet">Spreadsheet</TabsTrigger> */}
                 </TabsList>
 
                 <div className="mt-4 bg-white rounded-lg border border-slate-200 p-6">
@@ -255,6 +258,7 @@ export default function ProjectsPage() {
                       contracts={dashboard.contracts}
                       assets={dashboard.assets}
                       meters={dashboard.meters}
+                      tariffs={dashboard.tariffs}
                       assetColumns={assetColumns}
                       meterColumns={meterColumns}
                       projectId={projectId}
@@ -269,12 +273,17 @@ export default function ProjectsPage() {
                       guarantees={dashboard.guarantees}
                       forecastColumns={forecastColumns}
                       guaranteeColumns={guaranteeColumns}
+                      tariffs={dashboard.tariffs}
                       projectId={projectId}
                       onSaved={refreshDashboard}
                       editMode={editMode}
                     />
                   </TabsContent>
 
+
+                  <TabsContent value="monthly-billing">
+                    <MonthlyBillingTab projectId={projectId} editMode={editMode} />
+                  </TabsContent>
 
                   <TabsContent value="contacts">
                     <ProjectTableTab
@@ -290,6 +299,9 @@ export default function ProjectsPage() {
                     />
                   </TabsContent>
 
+                  {/* <TabsContent value="spreadsheet">
+                    <SpreadsheetTab projectId={projectId} editMode={editMode} />
+                  </TabsContent> */}
 
                 </div>
               </Tabs>

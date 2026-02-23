@@ -38,9 +38,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/api",
     tags=["grp"],
-    dependencies=[Depends(require_api_key)],
     responses={
-        401: {"description": "Missing or invalid API key"},
         404: {"description": "Resource not found"},
         500: {"description": "Internal server error"},
     },

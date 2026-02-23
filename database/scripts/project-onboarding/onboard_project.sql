@@ -580,34 +580,63 @@ JOIN LATERAL (
 ON CONFLICT (contract_id, billing_product_id) DO UPDATE SET
   is_primary = EXCLUDED.is_primary;
 
--- 4.11 Tariff Annual Rate (Year 1 = base_rate)
--- Creates the initial tariff_annual_rate row for each clause_tariff.
--- effective_tariff = base_rate for Year 1. Future escalation inserts new rows.
-INSERT INTO tariff_annual_rate (
-  clause_tariff_id, contract_year, period_start, period_end,
-  effective_tariff, currency_id, calculation_basis, is_current,
-  final_effective_tariff, final_effective_tariff_source
+-- 4.11 Tariff Rate (Year 1 = base_rate)
+-- For deterministic tariffs: all 4 effective_rate columns = base_rate, calc_status = 'computed'
+-- For REBASED_MARKET_PRICE: calc_status = 'pending', effective_rate columns = NULL (engine UPSERTs)
+INSERT INTO tariff_rate (
+  clause_tariff_id, contract_year, rate_granularity,
+  period_start, period_end,
+  hard_currency_id, local_currency_id, billing_currency_id,
+  effective_rate_contract_ccy, effective_rate_hard_ccy,
+  effective_rate_local_ccy, effective_rate_billing_ccy,
+  effective_rate_contract_role,
+  rate_binding, formula_version,
+  calc_status, calculation_basis, is_current
 )
 SELECT
   ct.id,
   1,
+  'annual'::rate_granularity,
   ct.valid_from,
   ct.valid_to,
-  ct.base_rate,
-  ct.currency_id,
-  'Year 1: original contractual base rate',
-  true,
-  ct.base_rate,
-  'annual'
+  -- hard_currency_id: for REBASED = USD; for deterministic = clause_tariff.currency_id
+  CASE WHEN esc.code = 'REBASED_MARKET_PRICE'
+       THEN (SELECT id FROM currency WHERE code = 'USD')
+       ELSE ct.currency_id END,
+  -- local_currency_id: for REBASED = market_ref (e.g. GHS); for deterministic = clause_tariff.currency_id
+  CASE WHEN esc.code = 'REBASED_MARKET_PRICE' AND ct.market_ref_currency_id IS NOT NULL
+       THEN ct.market_ref_currency_id
+       ELSE ct.currency_id END,
+  -- billing_currency_id: for REBASED = market_ref (GHS, billing in local); else = clause_tariff.currency_id
+  CASE WHEN esc.code = 'REBASED_MARKET_PRICE' AND ct.market_ref_currency_id IS NOT NULL
+       THEN ct.market_ref_currency_id
+       ELSE ct.currency_id END,
+  -- effective_rate columns: NULL for REBASED_MARKET_PRICE (pending engine run)
+  CASE WHEN esc.code != 'REBASED_MARKET_PRICE' THEN ct.base_rate ELSE NULL END,
+  CASE WHEN esc.code != 'REBASED_MARKET_PRICE' THEN ct.base_rate ELSE NULL END,
+  CASE WHEN esc.code != 'REBASED_MARKET_PRICE' THEN ct.base_rate ELSE NULL END,
+  CASE WHEN esc.code != 'REBASED_MARKET_PRICE' THEN ct.base_rate ELSE NULL END,
+  CASE WHEN esc.code = 'REBASED_MARKET_PRICE' THEN 'local'::contract_ccy_role
+       ELSE 'hard'::contract_ccy_role END,
+  'fixed',
+  CASE WHEN esc.code = 'REBASED_MARKET_PRICE' THEN 'rebased_v1'
+       ELSE 'deterministic_v1' END,
+  CASE WHEN esc.code = 'REBASED_MARKET_PRICE' THEN 'pending'::calc_status
+       ELSE 'computed'::calc_status END,
+  CASE WHEN esc.code != 'REBASED_MARKET_PRICE'
+       THEN 'Year 1: original contractual base rate'
+       ELSE 'Pending: awaiting GRP data' END,
+  true
 FROM clause_tariff ct
 JOIN contract c ON ct.contract_id = c.id
+JOIN escalation_type esc ON esc.id = ct.escalation_type_id
 JOIN stg_project_core spc ON c.project_id = (
   SELECT p.id FROM project p
   WHERE p.organization_id = spc.organization_id AND p.external_project_id = spc.external_project_id
 )
 WHERE ct.is_current = true
   AND ct.base_rate IS NOT NULL
-ON CONFLICT (clause_tariff_id, contract_year) DO NOTHING;
+ON CONFLICT (clause_tariff_id, contract_year) WHERE rate_granularity = 'annual' DO NOTHING;
 
 -- =============================================================================
 -- Step 5: Post-Load Assertions (fail → ROLLBACK)
@@ -692,21 +721,20 @@ BEGIN
     END IF;
   END;
 
-  -- Verify tariff rate period Year 1 was created for each tariff with base_rate
-  DECLARE v_tariff_count INTEGER; v_trp_count INTEGER;
+  -- Verify tariff_rate annual rows were created for each tariff with base_rate
+  DECLARE v_tr_tariff_count INTEGER; v_tr_count INTEGER;
   BEGIN
-    SELECT COUNT(*) INTO v_tariff_count
+    SELECT COUNT(*) INTO v_tr_tariff_count
       FROM clause_tariff ct
       JOIN contract c ON ct.contract_id = c.id
       WHERE c.project_id = v_project_id AND ct.is_current = true AND ct.base_rate IS NOT NULL;
-    IF v_tariff_count > 0 THEN
-      SELECT COUNT(*) INTO v_trp_count
-        FROM tariff_annual_rate trp
-        JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
-        JOIN contract c ON ct.contract_id = c.id
-        WHERE c.project_id = v_project_id AND trp.is_current = true;
-      IF v_trp_count < v_tariff_count THEN
-        RAISE EXCEPTION 'Expected at least % current tariff_annual_rate rows (one per tariff), found %', v_tariff_count, v_trp_count;
+    IF v_tr_tariff_count > 0 THEN
+      SELECT COUNT(*) INTO v_tr_count
+        FROM tariff_rate tr
+        JOIN clause_tariff ct ON ct.id = tr.clause_tariff_id
+        WHERE ct.project_id = v_project_id AND tr.rate_granularity = 'annual';
+      IF v_tr_count < v_tr_tariff_count THEN
+        RAISE EXCEPTION 'Expected at least % tariff_rate annual rows, found %', v_tr_tariff_count, v_tr_count;
       END IF;
     END IF;
   END;

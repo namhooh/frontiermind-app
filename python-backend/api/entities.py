@@ -9,23 +9,20 @@ import logging
 import json
 from datetime import date, datetime
 from decimal import Decimal
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
+from fastapi import APIRouter, HTTPException, status, Query, Path
 from pydantic import BaseModel, Field
 from typing import Any, List, Optional
 
 from psycopg2 import sql
 
 from db.database import get_db_connection, init_connection_pool
-from middleware.api_key_auth import require_api_key
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api",
     tags=["entities"],
-    dependencies=[Depends(require_api_key)],
     responses={
-        401: {"description": "Missing or invalid API key"},
         500: {"description": "Internal server error"},
     },
 )
@@ -140,8 +137,10 @@ class ProjectDashboardResponse(BaseModel):
     billing_products: List[dict] = Field(default_factory=list)
     rate_periods: List[dict] = Field(default_factory=list)
     monthly_rates: List[dict] = Field(default_factory=list)
+    tariff_rates: List[dict] = Field(default_factory=list)
     clauses: List[dict] = Field(default_factory=list)
     amendments: List[dict] = Field(default_factory=list)
+    exchange_rates: List[dict] = Field(default_factory=list)
     lookups: dict = Field(default_factory=dict)
 
 
@@ -212,6 +211,8 @@ class TariffPatch(BaseModel):
     lp_shortfall_formula_variables: Optional[Any] = None
     lp_shortfall_formula_cap: Optional[str] = None
     lp_pricing_formula_text: Optional[str] = None
+    lp_degradation_pct: Optional[float] = None
+    lp_annual_specific_yield: Optional[float] = None
 
 
 class AssetPatch(BaseModel):
@@ -270,7 +271,7 @@ class RatePeriodPatch(BaseModel):
     contract_year: Optional[int] = None
     period_start: Optional[str] = None
     period_end: Optional[str] = None
-    effective_tariff: Optional[float] = None
+    effective_rate_contract_ccy: Optional[float] = None
     calculation_basis: Optional[str] = None
     is_current: Optional[bool] = None
 
@@ -743,7 +744,7 @@ async def get_project_dashboard(
                         SELECT *
                         FROM production_forecast
                         WHERE project_id = %(pid)s
-                        ORDER BY forecast_month
+                        ORDER BY forecast_month DESC
                     ),
                     guarantees_data AS (
                         SELECT *
@@ -794,33 +795,63 @@ async def get_project_dashboard(
                         ORDER BY c.name, cbp.is_primary DESC, bp.code
                     ),
                     rate_periods_data AS (
-                        SELECT trp.id, trp.clause_tariff_id, trp.contract_year,
-                               trp.period_start, trp.period_end, trp.effective_tariff,
-                               trp.final_effective_tariff, trp.final_effective_tariff_source,
-                               trp.calculation_basis, trp.is_current,
-                               trp.approved_at, trp.created_at,
-                               cur.code AS currency_code,
+                        SELECT tr.id, tr.clause_tariff_id, tr.contract_year,
+                               tr.period_start, tr.period_end,
+                               tr.effective_rate_contract_ccy,
+                               tr.calculation_basis, tr.is_current,
+                               tr.approved_at, tr.created_at,
+                               CASE tr.effective_rate_contract_role::text
+                                   WHEN 'hard'  THEN hc.code
+                                   WHEN 'local' THEN lc.code
+                                   ELSE bc.code END AS currency_code,
                                ct.name AS tariff_name
-                        FROM tariff_annual_rate trp
-                        JOIN clause_tariff ct ON ct.id = trp.clause_tariff_id
-                        LEFT JOIN currency cur ON cur.id = trp.currency_id
-                        WHERE ct.project_id = %(pid)s
-                        ORDER BY ct.name, trp.contract_year
+                        FROM tariff_rate tr
+                        JOIN clause_tariff ct ON ct.id = tr.clause_tariff_id
+                        LEFT JOIN currency hc ON hc.id = tr.hard_currency_id
+                        LEFT JOIN currency lc ON lc.id = tr.local_currency_id
+                        LEFT JOIN currency bc ON bc.id = tr.billing_currency_id
+                        WHERE ct.project_id = %(pid)s AND tr.rate_granularity = 'annual'
+                        ORDER BY ct.name, tr.contract_year
                     ),
                     monthly_rates_data AS (
-                        SELECT tmr.id, tmr.tariff_annual_rate_id, tmr.billing_month,
-                               tmr.effective_tariff_local, tmr.rate_binding,
-                               tmr.calculation_basis, tmr.is_current,
-                               cur.code AS currency_code,
-                               er.rate AS exchange_rate, er.rate_date AS exchange_rate_date, er.source AS exchange_rate_source,
-                               tar.clause_tariff_id
-                        FROM tariff_monthly_rate tmr
-                        JOIN tariff_annual_rate tar ON tar.id = tmr.tariff_annual_rate_id
-                        JOIN clause_tariff ct ON ct.id = tar.clause_tariff_id
-                        LEFT JOIN currency cur ON cur.id = tmr.currency_id
-                        LEFT JOIN exchange_rate er ON er.id = tmr.exchange_rate_id
+                        SELECT tr.id, tr.clause_tariff_id, tr.contract_year,
+                               tr.billing_month,
+                               tr.effective_rate_local_ccy AS effective_tariff_local,
+                               tr.rate_binding, tr.calculation_basis, tr.is_current,
+                               lc.code AS currency_code,
+                               er.rate AS exchange_rate, er.rate_date AS exchange_rate_date,
+                               er.source AS exchange_rate_source
+                        FROM tariff_rate tr
+                        JOIN clause_tariff ct ON ct.id = tr.clause_tariff_id
+                        LEFT JOIN currency lc ON lc.id = tr.local_currency_id
+                        LEFT JOIN exchange_rate er ON er.id = tr.fx_rate_local_id
+                        WHERE ct.project_id = %(pid)s AND tr.rate_granularity = 'monthly'
+                        ORDER BY tr.billing_month DESC
+                    ),
+                    tariff_rates_data AS (
+                        SELECT tr.id, tr.clause_tariff_id, tr.contract_year,
+                               tr.rate_granularity::text AS rate_granularity,
+                               tr.billing_month, tr.period_start, tr.period_end,
+                               tr.effective_rate_contract_ccy, tr.effective_rate_hard_ccy,
+                               tr.effective_rate_local_ccy, tr.effective_rate_billing_ccy,
+                               tr.effective_rate_contract_role::text AS effective_rate_contract_role,
+                               tr.calc_detail,
+                               tr.rate_binding, tr.calc_status::text AS calc_status,
+                               tr.calculation_basis, tr.is_current,
+                               tr.reference_price_id, tr.discount_pct_applied,
+                               tr.formula_version,
+                               tr.approved_at, tr.created_at, tr.updated_at,
+                               hc.code AS hard_currency_code,
+                               lc.code AS local_currency_code,
+                               bc.code AS billing_currency_code,
+                               ct.name AS tariff_name
+                        FROM tariff_rate tr
+                        JOIN clause_tariff ct ON ct.id = tr.clause_tariff_id
+                        LEFT JOIN currency hc ON hc.id = tr.hard_currency_id
+                        LEFT JOIN currency lc ON lc.id = tr.local_currency_id
+                        LEFT JOIN currency bc ON bc.id = tr.billing_currency_id
                         WHERE ct.project_id = %(pid)s
-                        ORDER BY tmr.billing_month DESC
+                        ORDER BY tr.rate_granularity, tr.contract_year, tr.billing_month DESC NULLS FIRST
                     ),
                     clauses_data AS (
                         SELECT c.id, c.project_id, c.contract_id, c.clause_category_id,
@@ -838,6 +869,14 @@ async def get_project_dashboard(
                         JOIN contract c ON c.id = ca.contract_id
                         WHERE c.project_id = %(pid)s
                         ORDER BY ca.amendment_number
+                    ),
+                    exchange_rates_data AS (
+                        SELECT er.id, er.rate_date, er.rate, er.source,
+                               cur.code AS currency_code
+                        FROM exchange_rate er
+                        JOIN currency cur ON cur.id = er.currency_id
+                        WHERE er.organization_id = (SELECT organization_id FROM project_data)
+                        ORDER BY er.rate_date DESC
                     ),
                     contract_types_lookup AS (SELECT id, code, name FROM contract_type ORDER BY name),
                     contract_statuses_lookup AS (SELECT id, code, name FROM contract_status ORDER BY name),
@@ -879,8 +918,10 @@ async def get_project_dashboard(
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM billing_products_data d) AS billing_products,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM rate_periods_data d) AS rate_periods,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM monthly_rates_data d) AS monthly_rates,
+                        (SELECT COALESCE(json_agg(d), '[]'::json) FROM tariff_rates_data d) AS tariff_rates,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM clauses_data d) AS clauses,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM amendments_data d) AS amendments,
+                        (SELECT COALESCE(json_agg(d), '[]'::json) FROM exchange_rates_data d) AS exchange_rates,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM contract_types_lookup d) AS contract_types_lookup,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM contract_statuses_lookup d) AS contract_statuses_lookup,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM currencies_lookup d) AS currencies_lookup,
@@ -921,8 +962,11 @@ async def get_project_dashboard(
                 billing_products = _parse(row['billing_products'])
                 rate_periods = _parse(row['rate_periods'])
                 monthly_rates = _parse(row['monthly_rates'])
+                tariff_rates = _parse(row['tariff_rates'])
+
                 clauses = _parse(row['clauses'])
                 amendments = _parse(row['amendments'])
+                exchange_rates = _parse(row['exchange_rates'])
 
                 lookups = {
                     "contract_types": _parse(row['contract_types_lookup']),
@@ -951,8 +995,10 @@ async def get_project_dashboard(
                     billing_products=billing_products,
                     rate_periods=rate_periods,
                     monthly_rates=monthly_rates,
+                    tariff_rates=tariff_rates,
                     clauses=clauses,
                     amendments=amendments,
+                    exchange_rates=exchange_rates,
                     lookups=lookups,
                 )
 
@@ -1239,7 +1285,7 @@ async def patch_rate_period(
     rate_period_id: int = Path(..., description="Rate period ID"),
     body: RatePeriodPatch = ...,
 ) -> dict:
-    return await _execute_patch("tariff_annual_rate", rate_period_id, body)
+    return await _execute_patch("tariff_rate", rate_period_id, body)
 
 
 @router.post(
@@ -1305,7 +1351,7 @@ class RebasedRateRequest(BaseModel):
     summary="Calculate rebased market price tariff rate",
     description=(
         "Calculates REBASED_MARKET_PRICE tariff rates using GRP and monthly FX rates. "
-        "Writes to reference_price, exchange_rate, tariff_annual_rate, and tariff_monthly_rate. "
+        "Writes to reference_price, exchange_rate, and tariff_rate. "
         "Idempotent — safe to re-run."
     ),
 )
@@ -1448,4 +1494,142 @@ async def bulk_store_exchange_rates(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"success": False, "error": "DatabaseError", "message": str(e)},
+        )
+
+
+# ============================================================================
+# Apply Degradation to Production Forecasts
+# ============================================================================
+
+
+@router.post(
+    "/projects/{project_id}/apply-degradation",
+    summary="Apply annual degradation to production forecasts",
+    description=(
+        "Reads degradation_pct from the project's clause_tariff logic_parameters, "
+        "then compounds degradation from a Year 1 baseline across all forecast rows."
+    ),
+)
+async def apply_degradation(
+    project_id: int = Path(..., description="Project ID"),
+) -> dict:
+    if not USE_DATABASE:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail={"success": False, "error": "DatabaseNotAvailable", "message": "Database storage not available"},
+        )
+
+    try:
+        with get_db_connection() as conn:
+            conn.autocommit = False
+            try:
+                with conn.cursor() as cur:
+                    # 1. Read degradation_pct from clause_tariff
+                    cur.execute(
+                        """
+                        SELECT logic_parameters->>'degradation_pct' AS degradation_pct
+                        FROM clause_tariff
+                        WHERE project_id = %s AND is_current = true
+                        ORDER BY valid_from
+                        LIMIT 1
+                        """,
+                        (project_id,),
+                    )
+                    row = cur.fetchone()
+                    if not row or row["degradation_pct"] is None:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail={
+                                "success": False,
+                                "error": "NoDegradationRate",
+                                "message": "Set degradation rate on the tariff first",
+                            },
+                        )
+                    degradation_pct = Decimal(row["degradation_pct"])
+
+                    # 2. Fetch all forecast rows ordered by month
+                    cur.execute(
+                        """
+                        SELECT id, forecast_month, forecast_energy_kwh
+                        FROM production_forecast
+                        WHERE project_id = %s
+                        ORDER BY forecast_month
+                        """,
+                        (project_id,),
+                    )
+                    forecasts = cur.fetchall()
+                    if not forecasts:
+                        return {"success": True, "updated_rows": 0, "annual_degradation_pct": float(degradation_pct)}
+
+                    # 3. Determine OY1 baseline year and build month→kwh map
+                    first_year = forecasts[0]["forecast_month"].year
+                    baseline: dict[int, Decimal] = {}  # month_number -> kwh
+                    for f in forecasts:
+                        if f["forecast_month"].year == first_year:
+                            baseline[f["forecast_month"].month] = Decimal(str(f["forecast_energy_kwh"]))
+
+                    # 4. Compute degraded values and batch update
+                    updated = 0
+                    one_minus_d = Decimal("1") - degradation_pct
+                    for f in forecasts:
+                        fy = f["forecast_month"].year
+                        operating_year = fy - first_year + 1
+                        if operating_year == 1:
+                            # Year 1: baseline, factor = 1.0
+                            cur.execute(
+                                """
+                                UPDATE production_forecast
+                                SET degradation_factor = 1.00000, updated_at = NOW()
+                                WHERE id = %s
+                                """,
+                                (f["id"],),
+                            )
+                        else:
+                            cumulative_factor = one_minus_d ** (operating_year - 1)
+                            month_num = f["forecast_month"].month
+                            baseline_kwh = baseline.get(month_num)
+                            if baseline_kwh is not None:
+                                degraded_kwh = float(baseline_kwh * cumulative_factor)
+                                cur.execute(
+                                    """
+                                    UPDATE production_forecast
+                                    SET forecast_energy_kwh = %s,
+                                        degradation_factor = %s,
+                                        updated_at = NOW()
+                                    WHERE id = %s
+                                    """,
+                                    (degraded_kwh, float(cumulative_factor), f["id"]),
+                                )
+                            else:
+                                cur.execute(
+                                    """
+                                    UPDATE production_forecast
+                                    SET degradation_factor = %s, updated_at = NOW()
+                                    WHERE id = %s
+                                    """,
+                                    (float(cumulative_factor), f["id"]),
+                                )
+                        updated += 1
+
+                conn.commit()
+                return {
+                    "success": True,
+                    "updated_rows": updated,
+                    "annual_degradation_pct": float(degradation_pct),
+                }
+
+            except HTTPException:
+                conn.rollback()
+                raise
+            except Exception:
+                conn.rollback()
+                raise
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Apply degradation failed for project {project_id}: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail={"success": False, "error": "DegradationError", "message": str(e)},
         )

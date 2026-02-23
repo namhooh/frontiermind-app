@@ -22,6 +22,8 @@
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.87.1",
     "@types/pg": "^8.16.0",
+    "@univerjs/preset-sheets-core": "^0.15.5",
+    "@univerjs/presets": "^0.15.5",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.562.0",
@@ -31,7 +33,8 @@
     "react-dom": "19.2.1",
     "recharts": "^3.6.0",
     "sonner": "^2.0.7",
-    "tailwind-merge": "^3.4.0"
+    "tailwind-merge": "^3.4.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

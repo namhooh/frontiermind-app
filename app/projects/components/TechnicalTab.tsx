@@ -8,6 +8,7 @@ interface TechnicalTabProps {
   contracts: Record<string, unknown>[]
   assets: Record<string, unknown>[]
   meters: Record<string, unknown>[]
+  tariffs: Record<string, unknown>[]
   assetColumns: Column[]
   meterColumns: Column[]
   projectId?: number
@@ -31,7 +32,7 @@ function getLocationUrl(raw: unknown): string | null {
   return `https://www.google.com/maps?q=${encodeURIComponent(coords)}`
 }
 
-export function TechnicalTab({ project, contracts, assets, meters, assetColumns, meterColumns, projectId, onSaved, editMode }: TechnicalTabProps) {
+export function TechnicalTab({ project, contracts, assets, meters, tariffs, assetColumns, meterColumns, projectId, onSaved, editMode }: TechnicalTabProps) {
   // Derive summary values from project + assets + contracts
   const pvModules = assets.filter((a) => {
     const code = (a.asset_type_code as string) ?? ''
@@ -51,6 +52,10 @@ export function TechnicalTab({ project, contracts, assets, meters, assetColumns,
   const pvModels = pvModules.map((a) => a.model as string).filter(Boolean).join(', ') || '—'
   const invQty = inverters.reduce((sum, a) => sum + (Number(a.quantity) || 0), 0)
   const invModels = inverters.map((a) => a.model as string).filter(Boolean).join(', ') || '—'
+
+  // Annual Specific Yield from first tariff's logic_parameters
+  const lp = (tariffs[0]?.logic_parameters as Record<string, unknown>) ?? {}
+  const annualSpecificYield = typeof lp.annual_specific_yield === 'number' ? lp.annual_specific_yield : null
 
   // Interconnection voltage from first contract that has it
   const interconnectionVoltage = contracts.find((c) => c.interconnection_voltage_kv != null)?.interconnection_voltage_kv
@@ -99,6 +104,11 @@ export function TechnicalTab({ project, contracts, assets, meters, assetColumns,
       detail: 'Comma separated',
       value: invModels,
       indent: true,
+    },
+    {
+      label: 'Annual Specific Yield',
+      detail: 'Contract Year 1 yield per kWp',
+      value: annualSpecificYield != null ? `${formatNumber(annualSpecificYield)} kWh/kWp` : '—',
     },
     {
       label: 'Installation location',
