@@ -726,21 +726,22 @@ function GRPSection({
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      // Refresh stale annual observations before fetching
-      await adminClient.refreshGRP(pid, orgId).catch(() => {})
-      const [monthlyRes, annualRes, baselineRes, tokensRes] = await Promise.all([
+      // Run refresh + all observation fetches in parallel (refresh only
+      // touches annual rows, so monthly/baseline data is independent).
+      // Combine the old monthly + baseline calls into one — split client-side.
+      const [, monthlyRes, annualRes, tokensRes] = await Promise.all([
+        adminClient.refreshGRP(pid, orgId).catch(() => {}),
         adminClient.listGRPObservations(pid, orgId, { observation_type: 'monthly' })
           .catch(() => ({ observations: [] as GRPObservation[], total: 0 })),
         adminClient.listGRPObservations(pid, orgId, { observation_type: 'annual' })
           .catch(() => ({ observations: [] as GRPObservation[], total: 0 })),
-        adminClient.listGRPObservations(pid, orgId, { observation_type: 'monthly', operating_year: 0 })
-          .catch(() => ({ observations: [] as GRPObservation[], total: 0 })),
         adminClient.listTokens(orgId, { project_id: pid, submission_type: 'grp_upload', include_expired: true })
           .catch(() => ({ tokens: [] as SubmissionTokenItem[] })),
       ])
+      // Split monthly observations: baseline (operating_year=0) vs post-COD
       setMonthlyObs(monthlyRes.observations.filter(o => o.operating_year !== 0))
+      setBaselineObs(monthlyRes.observations.filter(o => o.operating_year === 0))
       setAnnualObs(annualRes.observations)
-      setBaselineObs(baselineRes.observations)
       setExistingTokens(tokensRes.tokens)
     } catch {
       // silently ignore — GRP data may not exist yet

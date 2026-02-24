@@ -12,7 +12,7 @@ import { ProjectOverviewTab } from './components/ProjectOverviewTab'
 import { ProjectTableTab, type Column } from './components/ProjectTableTab'
 import { PricingTariffsTab } from './components/PricingTariffsTab'
 import { TechnicalTab } from './components/TechnicalTab'
-import { ForecastsGuaranteesTab } from './components/ForecastsGuaranteesTab'
+// ForecastsGuaranteesTab — content moved into TechnicalTab
 import { MonthlyBillingTab } from './components/MonthlyBillingTab'
 import { PlantPerformanceTab } from './components/PlantPerformanceTab'
 // import { SpreadsheetTab } from './components/SpreadsheetTab'
@@ -230,11 +230,8 @@ export default function ProjectsPage() {
                   <TabsTrigger value="overview">Overview</TabsTrigger>
                   <TabsTrigger value="pricing-tariffs">Pricing & Tariffs</TabsTrigger>
                   <TabsTrigger value="technical">Technical</TabsTrigger>
-                  <TabsTrigger value="forecasts-guarantees">Forecasts & Guarantees</TabsTrigger>
-                  <TabsTrigger value="monthly-billing">Monthly Billing</TabsTrigger>
                   <TabsTrigger value="performance">Performance</TabsTrigger>
-                  <TabsTrigger value="contacts">Contacts</TabsTrigger>
-                  {/* <TabsTrigger value="spreadsheet">Spreadsheet</TabsTrigger> */}
+                  <TabsTrigger value="monthly-billing">Monthly Billing</TabsTrigger>
                 </TabsList>
 
                 <div className="mt-4 bg-white rounded-lg border border-slate-200 p-6">
@@ -245,6 +242,10 @@ export default function ProjectsPage() {
                       projectId={projectId}
                       onSaved={refreshDashboard}
                       editMode={editMode}
+                      contacts={dashboard.contacts}
+                      contactColumns={contactColumns}
+                      onAddContact={handleAddContact}
+                      onRemoveContact={handleRemoveContact}
                     />
                   </TabsContent>
 
@@ -264,53 +265,25 @@ export default function ProjectsPage() {
                       assets={dashboard.assets}
                       meters={dashboard.meters}
                       tariffs={dashboard.tariffs}
-                      assetColumns={assetColumns}
-                      meterColumns={meterColumns}
-                      projectId={projectId}
-                      onSaved={refreshDashboard}
-                      editMode={editMode}
-                    />
-                  </TabsContent>
-
-                  <TabsContent value="forecasts-guarantees">
-                    <ForecastsGuaranteesTab
                       forecasts={dashboard.forecasts}
                       guarantees={dashboard.guarantees}
+                      assetColumns={assetColumns}
+                      meterColumns={meterColumns}
                       forecastColumns={forecastColumns}
                       guaranteeColumns={guaranteeColumns}
-                      tariffs={dashboard.tariffs}
                       projectId={projectId}
                       onSaved={refreshDashboard}
                       editMode={editMode}
                     />
-                  </TabsContent>
-
-
-                  <TabsContent value="monthly-billing">
-                    <MonthlyBillingTab projectId={projectId} editMode={editMode} />
                   </TabsContent>
 
                   <TabsContent value="performance">
                     <PlantPerformanceTab projectId={projectId} editMode={editMode} />
                   </TabsContent>
 
-                  <TabsContent value="contacts">
-                    <ProjectTableTab
-                      data={dashboard.contacts}
-                      columns={contactColumns}
-                      emptyMessage="No contacts found"
-                      entity="contacts"
-                      onSaved={refreshDashboard}
-                      editMode={editMode}
-                      onAdd={handleAddContact}
-                      onRemove={handleRemoveContact}
-                      addLabel="Add Contact"
-                    />
+                  <TabsContent value="monthly-billing">
+                    <MonthlyBillingTab projectId={projectId} editMode={editMode} />
                   </TabsContent>
-
-                  {/* <TabsContent value="spreadsheet">
-                    <SpreadsheetTab projectId={projectId} editMode={editMode} />
-                  </TabsContent> */}
 
                 </div>
               </Tabs>

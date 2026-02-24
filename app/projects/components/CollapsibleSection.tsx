@@ -5,11 +5,12 @@ import { ChevronDown, ChevronRight } from 'lucide-react'
 
 interface CollapsibleSectionProps {
   title: string
+  subtitle?: React.ReactNode
   defaultOpen?: boolean
   children: React.ReactNode
 }
 
-export function CollapsibleSection({ title, defaultOpen = true, children }: CollapsibleSectionProps) {
+export function CollapsibleSection({ title, subtitle, defaultOpen = true, children }: CollapsibleSectionProps) {
   const [open, setOpen] = useState(defaultOpen)
 
   return (
@@ -26,7 +27,12 @@ export function CollapsibleSection({ title, defaultOpen = true, children }: Coll
         )}
         <span className="text-sm font-semibold text-slate-900">{title}</span>
       </button>
-      {open && <div className="p-4">{children}</div>}
+      {open && (
+        <div className="p-4">
+          {subtitle}
+          {children}
+        </div>
+      )}
     </div>
   )
 }

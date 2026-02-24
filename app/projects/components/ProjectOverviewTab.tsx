@@ -11,9 +11,13 @@ interface ProjectOverviewTabProps {
   projectId?: number
   onSaved?: () => void
   editMode?: boolean
+  contacts?: Record<string, unknown>[]
+  contactColumns?: Column[]
+  onAddContact?: (row: Record<string, unknown>) => Promise<void>
+  onRemoveContact?: (id: number) => Promise<void>
 }
 
-export function ProjectOverviewTab({ data, contractColumns, projectId, onSaved, editMode }: ProjectOverviewTabProps) {
+export function ProjectOverviewTab({ data, contractColumns, projectId, onSaved, editMode, contacts, contactColumns, onAddContact, onRemoveContact }: ProjectOverviewTabProps) {
   const { project, contracts, clauses, lookups } = data
   const pid = project.id as number
 
@@ -192,6 +196,22 @@ export function ProjectOverviewTab({ data, contractColumns, projectId, onSaved, 
           editMode={editMode}
         />
       </CollapsibleSection>
+
+      {contacts && contactColumns && (
+        <CollapsibleSection title="Contacts">
+          <ProjectTableTab
+            data={contacts}
+            columns={contactColumns}
+            emptyMessage="No contacts found"
+            entity="contacts"
+            onSaved={onSaved}
+            editMode={editMode}
+            onAdd={onAddContact}
+            onRemove={onRemoveContact}
+            addLabel="Add Contact"
+          />
+        </CollapsibleSection>
+      )}
 
     </div>
   )
