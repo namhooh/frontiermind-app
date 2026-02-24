@@ -18,8 +18,8 @@ from pydantic import BaseModel, Field
 
 class OnboardingOverrides(BaseModel):
     """Identifiers that may be absent from source files. Override > Excel auto-extract."""
-    external_project_id: Optional[str] = Field(None, description="e.g. GH-MOH01")
-    external_contract_id: Optional[str] = Field(None, description="e.g. GH-MOH01-PPA-001")
+    external_project_id: Optional[str] = Field(None, description="e.g. MOH01")
+    external_contract_id: Optional[str] = Field(None, description="CBE contract management ID, e.g. CONGHA00-2025-00005")
 
 
 # =============================================================================

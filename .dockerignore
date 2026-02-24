@@ -1,0 +1,34 @@
+# Node / Next.js (not needed in Python backend image)
+node_modules/
+.next/
+out/
+
+# Git
+.git/
+
+# Large data files
+CBE_data_extracts/
+contract-digitization/
+figma_dashboard_design/
+
+# IDE
+.vscode/
+.idea/
+.claude/
+
+# Python venvs
+python-backend/venv/
+python-backend/.venv/
+python-backend/__pycache__/
+python-backend/tests/
+python-backend/test_data/
+python-backend/exports/
+python-backend/.env
+python-backend/.env.*
+python-backend/*.md
+python-backend/docs/
+
+# Misc
+*.pdf
+.DS_Store
+Supabase*.sql

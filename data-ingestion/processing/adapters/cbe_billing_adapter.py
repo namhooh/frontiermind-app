@@ -43,6 +43,9 @@ class CBEBillingAdapter:
         'METER_READING_UNIQUE_ID': 'external_reading_id',
     }
 
+    # Energy categories derived from METERED_AVAILABLE field
+    AVAILABLE_CATEGORIES = {'available', 'n/a', 'N/A'}
+
     # CBE-specific required fields (accept both SCREAMING_SNAKE and snake_case)
     REQUIRED_FIELDS = {'BILL_DATE', 'bill_date'}
 
@@ -165,17 +168,26 @@ class CBEBillingAdapter:
                 if val is not None and val != '':
                     source_metadata[field] = val
 
+            # Determine energy category from METERED_AVAILABLE field
+            metered_available = (mapped.get('metered_available') or '').strip().lower()
+            is_available = metered_available in self.AVAILABLE_CATEGORIES
+
+            # Route energy to the correct field based on category
+            energy_kwh = None if is_available else total_production
+            available_energy_kwh = total_production if is_available else None
+            energy_category = 'available' if is_available else 'metered'
+
             # Build canonical record
             canonical = {
                 'organization_id': organization_id,
-                'project_id': None,
                 'meter_id': None,
                 'period_type': 'monthly',
                 'period_start': period_start,
                 'period_end': period_end,
-                'energy_kwh': total_production,
-                'energy_wh': total_production * 1000 if total_production else None,
+                'energy_kwh': energy_kwh,
+                'energy_wh': (energy_kwh * 1000) if energy_kwh else None,
                 'total_production': total_production,
+                'available_energy_kwh': available_energy_kwh,
                 'opening_reading': opening,
                 'closing_reading': closing,
                 'utilized_reading': utilized,
@@ -184,8 +196,11 @@ class CBEBillingAdapter:
                 'source_system': 'snowflake',
                 'source_metadata': source_metadata if source_metadata else None,
                 'aggregated_at': now,
+                'energy_category': energy_category,
                 # Fields for FK resolution (consumed by resolver, not inserted directly)
                 'tariff_group_key': mapped.get('contract_line_unique_id'),
+                'contract_line_number': mapped.get('contract_line'),
+                'contract_number': mapped.get('contract_number'),
                 'bill_date': bill_date,
             }
 
@@ -193,7 +208,7 @@ class CBEBillingAdapter:
 
         # Resolve FKs in bulk
         if resolver:
-            canonical_records = resolver.resolve_batch(
+            canonical_records, _unresolved = resolver.resolve_batch(
                 canonical_records, organization_id
             )
 

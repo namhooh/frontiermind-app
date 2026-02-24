@@ -528,12 +528,12 @@ class IngestService:
                 )
 
             # Load to meter_aggregate
-            rows_loaded, data_start, data_end = self.aggregate_loader.load(
+            rows_loaded, rows_dropped, data_start, data_end = self.aggregate_loader.load(
                 canonical_records
             )
 
             # Complete log
-            rows_rejected = len(records) - len(canonical_records)
+            rows_rejected = (len(records) - len(canonical_records)) + rows_dropped
             self.repository.complete_ingestion_log(
                 log_id=log_id,
                 status="success",

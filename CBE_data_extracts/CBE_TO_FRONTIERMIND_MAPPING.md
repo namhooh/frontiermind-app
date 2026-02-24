@@ -4,7 +4,7 @@ This document maps CBE's data architecture to FrontierMind's canonical schema an
 
 **Sources:** AM Onboarding Template (Excel), PPA Contract PDFs, Utility Invoices (GRP — Grid Reference Price), Snowflake data warehouse, Operations Plant Performance Workbook, Operating Revenue Masterfile.
 
-**Schema version:** v10.0 (migration 037)
+**Schema version:** v10.4 (migration 041)
 
 **Companion documentation:**
 - [`contract-digitization/docs/IMPLEMENTATION_GUIDE.md`](../contract-digitization/docs/IMPLEMENTATION_GUIDE.md) — Full contract digitization pipeline (OCR, PII, clause extraction, ontology)
@@ -39,10 +39,11 @@ Client Data Warehouse (e.g. CBE Snowflake)
 |    (FrontierMind defines the domain vocabulary)       |
 |                                                       |
 |  Core Tables                                          |
-|    contract, clause_tariff, meter_aggregate,          |
+|    contract, clause_tariff, contract_line,            |
+|    meter_aggregate, tariff_rate,                      |
 |    exchange_rate, invoice tables, price_index,        |
 |    production_forecast, production_guarantee,         |
-|    customer_contact                                   |
+|    plant_performance, customer_contact                |
 |    (generic — no client-specific columns)             |
 |                                                       |
 |  Engines                                              |
@@ -228,7 +229,11 @@ Pipeline: Validate → Hash → S3 → OCR (LlamaParse) → Claude structured ex
 
 ### 3.4 Plant Performance Workbook
 
-Operational data — see [Section 6.2 (Meter Readings)](#2-cbe-meter-readings--meter_aggregate) for `meter_aggregate` mapping.
+Operational data — see [Section 6.2 (Meter Readings)](#2-cbe-meter-readings--meter_aggregate) for `meter_aggregate` mapping and [Section 6.2b (Plant Performance)](#2b-plant-performance--plant_performance) for `plant_performance` mapping.
+
+**Import endpoint:** `POST /api/projects/{project_id}/plant-performance/import` — parses the Operations workbook Excel format, populates per-meter `meter_aggregate` rows (energy_kwh, available_energy_kwh, opening/closing readings, ghi/poa irradiance) and derived `plant_performance` rows (actual_pr, comparisons).
+
+**Manual entry:** `POST /api/projects/{project_id}/plant-performance/manual` — single-month per-meter entry with automatic performance metric computation.
 
 ### 3.5 Operating Revenue Masterfile
 
@@ -395,7 +400,7 @@ OnboardingCommitResponse {success, project_id, contract_id, warnings, counts}
 | 4.8 | `production_guarantee` | `(project_id, operating_year)` | UPDATE year dates, guaranteed_kwh, pct_of_p50, p50_annual_kwh, shortfall_cap, fx_rule |
 | 4.9 | `meter` | `(project_id, serial_number)` | UPDATE location_description, metering_type |
 | 4.10 | `contract_billing_product` | `(contract_id, billing_product_id)` | UPDATE is_primary. Uses `LATERAL` subquery: `ORDER BY organization_id NULLS LAST LIMIT 1` (prefers org-scoped over canonical) |
-| 4.11 | `tariff_annual_rate` | `(clause_tariff_id, contract_year)` | `DO NOTHING`. Creates Year 1 where `effective_tariff = base_rate` |
+| 4.11 | `tariff_rate` | `(clause_tariff_id, contract_year) WHERE rate_granularity = 'annual'` | `DO NOTHING`. Creates Year 1 where `effective_rate_billing_ccy = base_rate` |
 
 **Step 4.5 detail:** `logic_parameters` JSONB is built from `discount_pct`, `floor_rate`, `ceiling_rate`, `escalation_value`, `grp_method` merged with `logic_parameters_extra`.
 
@@ -411,7 +416,7 @@ OnboardingCommitResponse {success, project_id, contract_id, warnings, counts}
 | Meter row count ≥ staging count | EXCEPTION |
 | Contract exists for the project | EXCEPTION |
 | Billing product count ≥ staging count AND exactly 1 primary per contract | EXCEPTION |
-| Tariff annual rate count ≥ number of active tariffs with base_rate | EXCEPTION |
+| Tariff rate (annual) count ≥ number of active tariffs with base_rate | EXCEPTION |
 | Data quality: `guaranteed_kwh > 0`, guarantee monotonically declining (WARNING only), `discount_pct ∈ [0,1]`, `floor_rate ≤ ceiling_rate` | EXCEPTION (except declining = WARNING) |
 
 The entire script runs inside `BEGIN` ... `COMMIT` — any exception triggers full rollback.
@@ -420,7 +425,7 @@ The entire script runs inside `BEGIN` ... `COMMIT` — any exception triggers fu
 
 **File:** `python-backend/services/tariff/rate_period_generator.py`
 
-Creates `tariff_annual_rate` rows for Years 1..N based on escalation type:
+Creates `tariff_rate` rows (rate_granularity='annual') for Years 1..N based on escalation type:
 
 | Escalation Type | Formula | Example |
 |----------------|---------|---------|
@@ -433,7 +438,7 @@ Creates `tariff_annual_rate` rows for Years 1..N based on escalation type:
 
 **Period calculation:** Year 1 starts at `valid_from`. Year 2 can start at `escalation_start_date` (from `logic_parameters`) if provided. `is_current = true` set on period containing today's date (enforced by unique partial index).
 
-**Database behavior:** Year 1 row updated (set `period_end`, `is_current`, `final_effective_tariff`). Years 2..N inserted with `ON CONFLICT DO NOTHING` (idempotent). `final_effective_tariff_source = 'annual'` for deterministic types.
+**Database behavior:** Year 1 row updated (set `period_end`, `is_current`, `effective_rate_billing_ccy`). Years 2..N inserted with `ON CONFLICT DO NOTHING` (idempotent). `calc_status = 'computed'` for deterministic types.
 
 ### 5.8 Per-Project Audit Format
 
@@ -597,15 +602,33 @@ CBE provides monthly meter readings from two sources:
 
 #### Performance Fields (from Plant Performance Workbook / vCOM)
 
-These fields are stored in `meter_aggregate.source_metadata` JSONB, not as standalone columns. The only performance column on the table itself is `availability_percent` (migration 007).
+Migration 041 added dedicated columns for performance data on `meter_aggregate` and a new `plant_performance` table for derived metrics.
 
-| Workbook Column | Storage | Key / Column | Notes |
+**Per-meter performance data** (on `meter_aggregate`, migration 041):
+
+| Workbook Column | Storage | Column | Notes |
 |---|---|---|---|
-| Col AA "Actual GHI Irradiance" | `source_metadata` | `actual_ghi_irradiance` | kWh/m2, from vCOM/AMMP/SMA |
-| (if available) | `source_metadata` | `actual_poa_irradiance` | kWh/m2, from vCOM |
-| Col AB "Actual PR" | `source_metadata` | `actual_pr` | Calculated: `(total_energy * 1000) / (GHI * capacity)` |
+| Per-meter available energy | Column | `available_energy_kwh` | Available Energy per meter per month (kWh). Total Available = SUM across all meters. |
+| Col AA "Actual GHI Irradiance" | Column | `ghi_irradiance_wm2` | Monthly GHI irradiance (Wh/m2) for pyranometer/irradiance meters |
+| (if available) | Column | `poa_irradiance_wm2` | Monthly POA irradiance (Wh/m2) — plane-of-array irradiance |
+| Contract line link | Column | `contract_line_id` | FK to `contract_line` — links aggregate to billable contract line |
 | Col AC "Availability %" | Column | `availability_percent` | System availability from monitoring (migration 007) |
-| Col AD "Capacity Factor" | `source_metadata` | `capacity_factor` | `total_energy / (capacity * days * 24)` |
+| Capacity factor | `source_metadata` | `capacity_factor` | `total_energy / (capacity * days * 24)` |
+
+**Project-level derived metrics** (on `plant_performance`, migration 041):
+
+| Workbook Column | Storage | Column | Notes |
+|---|---|---|---|
+| Col AB "Actual PR" | Column | `actual_pr` | DECIMAL(5,4). Formula: `total_energy × 1000 / (actual_ghi × capacity_kwp)` |
+| Col AC "Availability %" | Column | `actual_availability_pct` | DECIMAL(5,2). System availability percentage |
+| Energy comparison | Column | `energy_comparison` | Ratio: total actual energy / forecast energy |
+| Irradiance comparison | Column | `irr_comparison` | Ratio: actual GHI / forecast GHI |
+| PR comparison | Column | `pr_comparison` | Ratio: actual PR / forecast PR |
+| Operating year | Column | `operating_year` | INTEGER. `INT((date - COD) / 365 + 1)` |
+| (FK) | Column | `production_forecast_id` | Links to forecast for this month |
+| (FK) | Column | `billing_period_id` | Links to billing_period for this month |
+
+Raw energy totals (total_metered_kwh, total_available_kwh, total_energy_kwh, actual_ghi_irradiance) are computed on-the-fly from `meter_aggregate` rows, not stored in `plant_performance`.
 
 **Billable quantity calculation:**
 ```
@@ -625,6 +648,76 @@ Each month's `opening_reading` must equal the previous month's `closing_reading`
 | Available Energy | vCOM (majority), manual calculation (some), N/A (Garden City, Miro, Baidoa) |
 | Irradiance | vCOM (majority), AMMP (Garden City, Miro), SMA Sunny Portal (XFlora) |
 | Availability | vCOM (majority), Not Available (Garden City, Miro) |
+
+---
+
+### 2b. Contract Lines → `contract_line`
+
+Migration 041. Bridge between CBE Snowflake contract line data and the FrontierMind billing engine. Links contracts to specific meters and energy product categories.
+
+| CBE Field | FrontierMind Column | Notes |
+|-----------|-------------------|-------|
+| `CONTRACT_NUMBER` | `contract_id` (FK) | Resolved via contract lookup |
+| `LINE_NUMBER` | `contract_line_number` | CBE line code: 1000, 4000, 5000, etc. |
+| `CONTRACT_LINE_UNIQUE_ID` | `external_line_id` | CBE unique identifier |
+| `METER_ID` | `meter_id` (FK) | Physical meter reference (NULL for project-level lines) |
+| `PRODUCT_CODE` | `billing_product_id` (FK) | Resolved via billing_product lookup |
+| `DESCRIPTION` | `product_desc` | e.g. "Metered Energy (EMetered) - PPL1" |
+| `METERED_AVAILABLE` | `energy_category` | Enum: `metered`, `available`, `test` |
+| — | `organization_id` (FK) | NOT NULL, for RLS |
+| — | `is_active` | BOOLEAN, defaults true |
+
+**Unique constraint:** `(contract_id, contract_line_number)`
+
+**Energy routing:** The CBE billing adapter uses `energy_category` to route readings:
+- `metered` → `meter_aggregate.energy_kwh`
+- `available` → `meter_aggregate.available_energy_kwh`
+
+**MOH01 seed data** (contract_id=7, 8 lines): 5 metered lines (PPL1, PPL2, Bottles, BBM1, BBM2 at line codes 4000-8000) + 3 available energy lines (PPL1, PPL2, BBM1 at line codes 4001, 5001, 7001).
+
+---
+
+### 2c. Plant Performance → `plant_performance`
+
+Migration 041. Monthly project-level performance analysis. Raw data lives in `meter_aggregate` (per-meter energy + actual irradiance) and `production_forecast` (forecast energy/irradiance/PR). This table stores only derived performance metrics and comparisons.
+
+| Source | FrontierMind Column | Notes |
+|--------|-------------------|-------|
+| Computed from meter_aggregate | `actual_pr` | DECIMAL(5,4). `total_energy × 1000 / (actual_ghi × capacity_kwp)` |
+| From monitoring | `actual_availability_pct` | DECIMAL(5,2). System availability % |
+| Computed | `energy_comparison` | `total actual energy / forecast energy` |
+| Computed | `irr_comparison` | `actual GHI / forecast GHI` |
+| Computed | `pr_comparison` | `actual PR / forecast PR` |
+| From COD date | `operating_year` | INTEGER, 1-based |
+| (FK) | `project_id` | NOT NULL |
+| (FK) | `organization_id` | NOT NULL |
+| (FK) | `production_forecast_id` | Links to forecast for comparison |
+| (FK) | `billing_period_id` | Resolved from billing_month |
+| First of month | `billing_month` | DATE, part of UNIQUE(project_id, billing_month) |
+
+**Performance formulas (from Operations Workbook):**
+
+| Metric | Formula |
+|--------|---------|
+| Total Available Energy | `SUM(available_energy_kwh)` across all meters |
+| Total Energy (kWh) | `SUM(metered per meter) + total_available` |
+| Actual PR (%) | `total_energy × 1000 / (actual_ghi × capacity_kwp)` |
+| Energy Comparison | `total_energy / forecast_energy` |
+| Irr Comparison | `actual_ghi / forecast_ghi` |
+| PR Comparison | `actual_pr / forecast_pr` |
+
+**Available Energy calculation** (`python-backend/services/available_energy_calculator.py`):
+
+Contractual formula per 15-minute interval during System Event or Curtailed Operation:
+```
+E_Available(x) = (E_hist / Irr_hist) × (1 / Intervals) × Irr(x)
+```
+Manual/import values take precedence over auto-calculation. Stored in `meter_aggregate.available_energy_kwh`.
+
+**API endpoints:**
+- `GET /api/projects/{id}/plant-performance` — returns monthly performance with raw data computed on-the-fly from meter_aggregate + production_forecast
+- `POST /api/projects/{id}/plant-performance/manual` — per-month manual entry
+- `POST /api/projects/{id}/plant-performance/import` — Operations workbook Excel import
 
 ---
 
@@ -917,33 +1010,41 @@ Org-scoped ERP product codes. Migration 034.
 
 ---
 
-### 15. Rate Versioning → `tariff_annual_rate` + `tariff_monthly_rate`
+### 15. Rate Versioning → `tariff_rate`
 
-Migration 034 (annual), migration 036 (monthly + rename).
+Migration 040 merged `tariff_annual_rate` + `tariff_monthly_rate` into a unified `tariff_rate` table with four-currency representation.
 
-**`tariff_annual_rate`:**
+**`tariff_rate`** (unified):
 
 | Field | Notes |
 |-------|-------|
 | `clause_tariff_id` (FK) | Parent tariff |
 | `contract_year` | INTEGER, 1-based from COD |
-| `period_start`, `period_end` | DATE range for this year |
-| `effective_tariff` | Base escalated rate (before FX/bounds) |
-| `final_effective_tariff` | After bounds/FX adjustment (if applicable) |
-| `final_effective_tariff_source` | `'annual'` (deterministic) or `'monthly'` (rebased — latest month) |
-| `is_current` | BOOLEAN, unique partial index enforces one per clause_tariff |
-| `source` | `'onboarding'`, `'rate_generator'`, `'rebased_market_price_engine'` |
+| `rate_granularity` | Enum: `'annual'` or `'monthly'` |
+| `billing_month` | DATE (first of month) for monthly rows; NULL for annual |
+| `period_start`, `period_end` | DATE range for this period |
+| `hard_currency_id` (FK) | International reference currency (USD, EUR) |
+| `local_currency_id` (FK) | Local market currency where project operates |
+| `billing_currency_id` (FK) | Currency on invoices (must equal hard or local) |
+| `fx_rate_hard_id` (FK) | FK to `exchange_rate` for hard currency |
+| `fx_rate_local_id` (FK) | FK to `exchange_rate` for local currency |
+| `effective_rate_contract_ccy` | Effective rate in the contractual source-of-truth currency |
+| `effective_rate_hard_ccy` | Effective rate in hard/international currency |
+| `effective_rate_local_ccy` | Effective rate in local market currency |
+| `effective_rate_billing_ccy` | Effective rate in billing/invoice currency |
+| `effective_rate_contract_role` | Enum: `'hard'`, `'local'`, or `'billing'` — which is source of truth |
+| `calc_detail` | JSONB with escalation-type-specific intermediary variables in four-currency format |
+| `rate_binding` | `'floor'`, `'ceiling'`, `'discounted'`, or `'fixed'` |
+| `reference_price_id` (FK) | Links to GRP observation (NULL for deterministic tariffs) |
+| `discount_pct_applied` | Discount percentage applied (e.g. 0.2200) |
+| `formula_version` | Engine version identifier (e.g. `rebased_v1`) |
+| `calc_status` | Enum: `'pending'` → `'computed'` → `'approved'` → `'superseded'` |
+| `is_current` | BOOLEAN, separate unique index per granularity (annual/monthly) |
 
-**`tariff_monthly_rate`:**
-
-| Field | Notes |
-|-------|-------|
-| `tariff_annual_rate_id` (FK) | Parent annual rate |
-| `billing_month` | DATE (first of month) |
-| `floor_local`, `ceiling_local` | Floor/ceiling converted to local currency via that month's FX |
-| `effective_tariff_local` | After bounds: `MAX(floor_local, MIN(GRP * (1-discount), ceiling_local))` |
-| `rate_binding` | `'floor'`, `'ceiling'`, or `'discounted'` |
-| `exchange_rate_id` (FK) | Links to `exchange_rate` used for conversion |
+**Key constraints:**
+- Annual rows: one per `(clause_tariff_id, contract_year)`, `billing_month` must be NULL
+- Monthly rows: one per `(clause_tariff_id, billing_month)`, `period_start = billing_month`
+- `billing_currency_id` must equal `hard_currency_id` or `local_currency_id`
 
 ---
 
@@ -1047,8 +1148,8 @@ effective = MAX(floor_local, MIN(GRP × (1 - discount), ceiling_local))
 **Database writes (single transaction):**
 - `exchange_rate`: 1 row per month (upsert on org+currency+date)
 - `reference_price`: Annual GRP observation (upsert on project+type+period)
-- `tariff_annual_rate`: Annual anchor row, `final_effective_tariff` = latest month's effective rate
-- `tariff_monthly_rate`: Up to 12 rows, one per billing month
+- `tariff_rate` (annual): Annual anchor row, `effective_rate_billing_ccy` = latest month's effective rate
+- `tariff_rate` (monthly): Up to 12 rows, one per billing month with four-currency representation
 
 ---
 
@@ -1081,7 +1182,7 @@ GET /api/projects/{projectId}/dashboard (adminClient.getProjectDashboard)
     }
 ```
 
-**Frontend:** `app/projects/page.tsx` — 5-tab Radix UI layout with global edit mode.
+**Frontend:** `app/projects/page.tsx` — 7-tab Radix UI layout with global edit mode (Overview, Pricing & Tariffs, Technical, Forecasts & Guarantees, Monthly Billing, Performance, Contacts).
 
 ### 9.2 Overview Tab
 
@@ -1130,7 +1231,38 @@ GET /api/projects/{projectId}/dashboard (adminClient.getProjectDashboard)
 | Production Forecasts | `forecasts[]` (monthly: energy kWh, GHI/POA irradiance, PR, source; annual sum/avg footer) |
 | Production Guarantees | `guarantees[]` (operating year, P50, guarantee %, guaranteed kWh, shortfall cap, FX rule) |
 
-### 9.6 Contacts Tab
+### 9.6 Monthly Billing Tab
+
+**Component:** `app/projects/components/MonthlyBillingTab.tsx`
+
+| Section | Data Source |
+|---------|------------|
+| Summary view | `adminClient.getMonthlyBilling()` — aggregate monthly totals (energy kWh, rate, amount, currency) |
+| Meter Breakdown view | `adminClient.getMeterBilling()` — per-meter detail per month |
+| Per-meter detail (expandable) | `meter_id`, `meter_name`, `opening_reading`, `closing_reading`, `metered_kwh`, `available_kwh`, `rate`, `amount` |
+| Import | Excel import of billing data |
+| Manual entry | Single-month manual row |
+| Export | Download billing data |
+
+**Toggle:** Summary vs Meter Breakdown view. Meter Breakdown shows expandable rows per month with per-meter detail on expand.
+
+**Total Available Energy** = SUM(available_energy_kwh) across all meters (shown as separate line in breakdown).
+
+### 9.7 Performance Tab
+
+**Component:** `app/projects/components/PlantPerformanceTab.tsx`
+
+| Section | Data Source |
+|---------|------------|
+| Summary cards | `project` (installed capacity, degradation rate) + latest `plant_performance` row (PR, availability) |
+| Performance table | `adminClient.getPlantPerformance()` — monthly rows: month, OY, total energy, forecast, GHI, PR, availability, energy/irr/PR comparisons |
+| Charts | Recharts bar chart (energy actual vs forecast) + line chart (PR trend) |
+| Import | Operations workbook Excel upload (`adminClient.importPlantPerformance()`) |
+| Manual entry | Single-month row with per-meter readings (`adminClient.addPlantPerformanceEntry()`) |
+
+**Table/Chart toggle:** Switch between tabular and chart visualization.
+
+### 9.8 Contacts Tab
 
 **Component:** Generic `ProjectTableTab` in `app/projects/page.tsx`
 
@@ -1193,7 +1325,7 @@ GET /api/projects/{projectId}/dashboard (adminClient.getProjectDashboard)
          │
          ▼
     Dashboard
-    (5-tab display)
+    (7-tab display)
 ```
 
 ### GRP Pipeline
@@ -1242,12 +1374,11 @@ GET /api/projects/{projectId}/dashboard (adminClient.getProjectDashboard)
                            Rebased Market
                            Price Engine
                                   │
-                    ┌─────────────┴─────────────┐
-                    │                           │
-              tariff_annual_rate         tariff_monthly_rate
-              (anchor row)               (12 rows/year)
-                    │                           │
-                    └─────────┬─────────────────┘
+                              │
+                        tariff_rate
+                     (annual anchor row +
+                      12 monthly rows/year,
+                      four-currency repr.)
                               │
                         Dashboard
                         (Pricing & Tariffs tab)
@@ -1275,14 +1406,17 @@ GET /api/projects/{projectId}/dashboard (adminClient.getProjectDashboard)
         |
         v   vCOM extract on WD1 (monthly)
 +-----------------------------------------------------------------------+
-| 2. meter_aggregate                                                    |
+| 2. meter_aggregate (per meter per month)                              |
 |    clause_tariff_id -> tariff line                                     |
+|    contract_line_id -> contract_line (migration 041)                  |
 |    opening_reading = 11333714.94                                      |
 |    closing_reading = 12117657.60                                      |
 |    utilized_reading = 783942.656                                      |
 |    total_production = 783942.656 (final billable)                     |
-|    actual_ghi_irradiance = 158200 Wh/m2                               |
-|    actual_pr = 0.798                                                  |
+|    energy_kwh = metered energy (for metered lines)                    |
+|    available_energy_kwh = available energy (for available lines)      |
+|    ghi_irradiance_wm2 = 158200 Wh/m2 (pyranometer meter)             |
+|    poa_irradiance_wm2 = POA irradiance if available                  |
 |    availability_pct = 0.985                                           |
 |    source_system = 'snowflake'                                        |
 +-----------------------------------------------------------------------+
@@ -1515,10 +1649,16 @@ Tracks which tables/views referenced in this mapping doc have concrete migration
 | `contract_amendment` | 033 | Implemented |
 | `onboarding_preview` | 033 | Implemented |
 | `billing_product` + `contract_billing_product` | 034 | Implemented |
-| `tariff_annual_rate` (renamed from `tariff_rate_period`) | 034 + 036 | Implemented |
-| `tariff_monthly_rate` | 036 | Implemented (child of `tariff_annual_rate`, FX-adjusted monthly rates) |
+| `tariff_rate` (unified from `tariff_annual_rate` + `tariff_monthly_rate`) | 040 | Implemented (four-currency repr., calc_detail JSONB, FX audit trail, calc_status enum) |
 | `submission_token.project_id`, `submission_type` | 037 | Implemented |
 | `reference_price.observation_type`, `source_document_path/hash`, `submission_response_id` | 037 | Implemented |
+| `clause_tariff` amendment version history (MOH01 supersedes chain) | 038 | Implemented (pre-amendment original row, supersedes linkage) |
+| Pipeline integrity fixes (annual ref_price unique index, asset_type seeds, metering_type CHECK) | 039 | Implemented |
+| `meter.name` | 041 | Implemented (VARCHAR(100), human-readable meter names) |
+| `contract_line` | 041 | Implemented (links contract to meters + energy categories, `energy_category` enum) |
+| `meter_aggregate.available_energy_kwh`, `contract_line_id`, `ghi_irradiance_wm2`, `poa_irradiance_wm2` | 041 | Implemented |
+| `plant_performance` | 041 | Implemented (derived monthly performance metrics, FKs to production_forecast + billing_period) |
+| `energy_category` enum (`metered`, `available`, `test`) | 041 | Implemented |
 | `price_index` | — | **Pending** — needed for CPI escalation |
 | `loan_schedule` / `loan_payment` | — | **Pending** — needed for loan repayment tracking |
 

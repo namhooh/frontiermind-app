@@ -28,7 +28,7 @@ TEMPLATE_PATH = Path(__file__).resolve().parent.parent.parent / "CBE_data_extrac
 
 ORGANIZATION_ID = 1
 EXTERNAL_PROJECT_ID = "MOH01"
-EXTERNAL_CONTRACT_ID = "GH-MOH01-PPA-001"
+EXTERNAL_CONTRACT_ID = "CONGHA00-2025-00005"
 
 
 def parse_only():

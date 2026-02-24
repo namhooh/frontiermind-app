@@ -218,8 +218,7 @@ export function TechnicalTab({ project, contracts, assets, meters, tariffs, fore
   return (
     <div className="space-y-8">
       {/* Technical Summary */}
-      <div>
-        <h3 className="text-sm font-medium text-slate-700 mb-3">Technical Summary</h3>
+      <CollapsibleSection title="Technical Summary">
         <div className="border border-slate-200 rounded-lg overflow-hidden">
           <table className="w-full text-sm">
             <thead>
@@ -242,11 +241,10 @@ export function TechnicalTab({ project, contracts, assets, meters, tariffs, fore
             </tbody>
           </table>
         </div>
-      </div>
+      </CollapsibleSection>
 
       {/* Assets Table */}
-      <div>
-        <h3 className="text-sm font-medium text-slate-700 mb-3">Assets</h3>
+      <CollapsibleSection title="Assets">
         <ProjectTableTab
           data={assets}
           columns={assetColumns}
@@ -256,11 +254,10 @@ export function TechnicalTab({ project, contracts, assets, meters, tariffs, fore
           onSaved={onSaved}
           editMode={editMode}
         />
-      </div>
+      </CollapsibleSection>
 
       {/* Meters Table */}
-      <div>
-        <h3 className="text-sm font-medium text-slate-700 mb-3">Meters</h3>
+      <CollapsibleSection title="Meters">
         <ProjectTableTab
           data={meters}
           columns={meterColumns}
@@ -270,7 +267,7 @@ export function TechnicalTab({ project, contracts, assets, meters, tariffs, fore
           onSaved={onSaved}
           editMode={editMode}
         />
-      </div>
+      </CollapsibleSection>
 
       {/* Production Forecasts */}
       <CollapsibleSection

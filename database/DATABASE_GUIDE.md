@@ -3,7 +3,7 @@
 
 Quick links: [Directory Structure](#directory-structure) | [Workflows](#common-workflows) | [Scripts](#scripts-reference) | [Troubleshooting](#troubleshooting)
 
-Last updated: 2026-02-23
+Last updated: 2026-02-24
 
 ---
 
@@ -81,6 +81,8 @@ database/
 │   ├── 038_moh01_amendment_version_history.sql         # Phase 10.2: Amendment version chain for MOH01 (original tariff row + supersedes linkage)
 │   ├── 039_pipeline_integrity_fixes.sql               # Phase 10.1: Annual ref_price partial unique index, asset_type seeds, metering_type CHECK, idempotent GRP seed
 │   ├── 040_merge_tariff_rate_tables.sql               # Phase 10.3: Unified tariff_rate table (merges + drops tariff_annual_rate + tariff_monthly_rate), four-currency, JSONB calc_detail, FX audit trail, integrity constraints
+│   ├── 041_multi_meter_billing_and_performance.sql    # Phase 10.4: contract_line, plant_performance, meter_aggregate enhancements, meter names, dedup index fix, external_line_id unique index
+│   ├── 042_invoice_generation_prerequisites.sql       # Phase 10.5: clean dedup index, billing_tax_rule (GiST), invoice header versioning, line item audit/sign, new line item types
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -106,6 +108,8 @@ database/
 │   ├── apply_schema.sh                    # Apply all migrations
 │   ├── create-phase-snapshot.sh           # Create schema snapshot
 │   ├── load_test_data.sh                  # Load seed data
+│   ├── fixtures/                          # Project-specific fixture data
+│   │   └── moh01_dec2025.sql             # MOH01 Dec 2025 golden test data
 │   └── project-onboarding/               # Project onboarding scripts
 │       ├── onboard_project.sql           # Staged ETL for COD project onboarding
 │       ├── validate_onboarding_project.sql # Validation query pack
@@ -1077,6 +1081,31 @@ database/
 - FX audit trail: `fx_rate_hard_id`, `fx_rate_local_id` (NULL when currency=USD)
 - Calculation lineage: `reference_price_id`, `discount_pct_applied`, `formula_version`
 - All engines and APIs write/read exclusively from `tariff_rate`
+
+**v10.4 (Multi-Meter Billing & Plant Performance)** - Complete
+- Migration: `041_multi_meter_billing_and_performance.sql`
+- Modified table: `meter` — added `name` column
+- New table: `contract_line` — links contracts to meters and billing products
+- Modified table: `meter_aggregate` — added `available_energy_kwh`, `contract_line_id`, `ghi_irradiance_wm2`, `poa_irradiance_wm2`
+- New table: `plant_performance` — monthly project-level performance metrics (includes `billing_period_id` FK for consistency with other monthly-scoped tables)
+- New enum: `energy_category` (metered/available/test)
+- New API: `GET /projects/{id}/meter-billing`, `GET /projects/{id}/plant-performance` with manual entry and import
+- New frontend: Performance tab with table/chart views, MonthlyBillingTab meter breakdown toggle
+- Seed data: MOH01 meter names and contract_line rows
+
+**v10.5 (Invoice Generation & Tax Engine)** - Complete
+- Migration: `042_invoice_generation_prerequisites.sql`
+- New table: `billing_tax_rule` — org/country tax rules with GiST overlap prevention (`btree_gist` extension)
+- Modified table: `contract_line` — added `clause_tariff_id` FK
+- Modified table: `expected_invoice_header` — versioning (`version_no`, `is_current`), idempotency, `source_metadata`
+- Modified table: `expected_invoice_line_item` — audit fields (`component_code`, `basis_amount`, `rate_pct`, `amount_sign`, `sort_order`, `contract_line_id`)
+- New line item types: `AVAILABLE_ENERGY`, `LEVY`, `WITHHOLDING`
+- New API: `POST /projects/{id}/billing/generate-expected-invoice` — full tax chain (levies, VAT, withholdings)
+- Ingestion fix: billing_resolver returns `(resolved, unresolved)` tuple; loader drops unresolved rows with diagnostic logging
+- Clean dedup index: `idx_meter_aggregate_billing_dedup` excludes NULL FKs (replaces COALESCE hack)
+- Performance API: per-meter detail + GHI unit normalization (Wh/m² → kWh/m²)
+- Frontend: workbook-style performance table, generic invoice view from persisted line items
+- Fixtures: `database/scripts/fixtures/moh01_dec2025.sql`
 
 ---
 

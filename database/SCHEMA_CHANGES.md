@@ -1677,10 +1677,174 @@ and token-based external submission collection.
 - `app/projects/components/PricingTariffsTab.tsx`: Monthly rate linking uses `clause_tariff_id + contract_year` (was `tariff_annual_rate_id`). Rate field renamed `effective_tariff` → `effective_rate_contract_ccy`.
 - `app/projects/components/spreadsheet/univerDataConverter.ts`: Removed `tariff_annual_rate_id` from `PROTECTED_COLUMNS`.
 
+---
+
+### v10.4 - 2026-02-24 (Multi-Meter Billing & Plant Performance)
+
+**Description:** Adds per-meter billing breakdown, Available Energy tracking, and plant performance analysis. Models the real-world scenario where projects have multiple physical meters (e.g. PPL1, PPL2, BBM1) each generating separate invoice line items. Includes dedup index fix, contract_line FK resolution, and irradiance unit handling.
+
+**Migration:** `database/migrations/041_multi_meter_billing_and_performance.sql`
+
+**New Enum:**
+- `energy_category` ('metered', 'available', 'test')
+
+**Modified Table: `meter`**
+- Added `name VARCHAR(100)` — human-readable meter name
+
+**New Table: `contract_line`**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `contract_id` | BIGINT FK | Links to contract |
+| `billing_product_id` | BIGINT FK | Links to billing_product |
+| `meter_id` | BIGINT FK | Links to meter (NULL for project-level lines) |
+| `contract_line_number` | INTEGER | CBE line code (1000, 4000, etc.) |
+| `product_desc` | VARCHAR(255) | Description (e.g. "Metered Energy - PPL1") |
+| `energy_category` | energy_category | metered, available, or test |
+| `external_line_id` | VARCHAR(100) | CBE CONTRACT_LINE_UNIQUE_ID |
+
+**Modified Table: `meter_aggregate`**
+- Added `available_energy_kwh DECIMAL` — Available Energy per meter per month
+- Added `contract_line_id BIGINT FK → contract_line(id)` — links to billable contract line
+- Added `ghi_irradiance_wm2 DECIMAL` — monthly GHI irradiance in Wh/m² (divide by 1000 for kWh/m² forecast comparison)
+- Added `poa_irradiance_wm2 DECIMAL` — monthly POA irradiance in Wh/m² (divide by 1000 for kWh/m² forecast comparison)
+
+**Replaced Index: idx_meter_aggregate_billing_dedup**
+- Old key (migration 026): `(organization_id, COALESCE(billing_period_id, -1), COALESCE(clause_tariff_id, -1))`
+- New key: `(organization_id, COALESCE(meter_id, -1), COALESCE(billing_period_id, -1), COALESCE(clause_tariff_id, -1), COALESCE(contract_line_id, -1))`
+- Still partial: `WHERE period_type = 'monthly'`
+- Prevents multi-meter rows from colliding on same tariff+period
+
+**New Unique Index: uq_contract_line_external_line_id**
+- Columns: `(organization_id, external_line_id) WHERE external_line_id IS NOT NULL`
+- Enables bulk FK lookup by CBE `CONTRACT_LINE_UNIQUE_ID` during ingestion
+
+**New Table: `plant_performance`**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `project_id` | BIGINT FK | Links to project |
+| `billing_period_id` | BIGINT FK | Links to billing_period (nullable, resolved on insert) |
+| `production_forecast_id` | BIGINT FK | Links to forecast for this month |
+| `billing_month` | DATE | Unique per project |
+| `operating_year` | INTEGER | Operating year number |
+| `actual_pr` | DECIMAL(5,4) | Performance Ratio |
+| `actual_availability_pct` | DECIMAL(5,2) | System availability % |
+| `energy_comparison` | DECIMAL(6,4) | actual / forecast energy ratio |
+| `irr_comparison` | DECIMAL(6,4) | actual / forecast GHI ratio |
+| `pr_comparison` | DECIMAL(6,4) | actual / forecast PR ratio |
+
+**Seed Data:**
+- MOH01 meter names: PPL1, PPL2, Bottles, BBM1, BBM2 (meter ids 2-6)
+- MOH01 contract_line rows: 8 lines mapping meters to billing products (contract_id=7)
+- MOH01 external_line_ids: `CONZIM00-2025-00002-{contract_line_number}` backfilled on contract_line rows
+
+**Backend Changes:**
+
+**python-backend/api/billing.py:**
+- New `GET /projects/{id}/meter-billing` endpoint for per-meter breakdown
+- `get_meter_billing`: Resolves rate per-meter via `contract_line.external_line_id` → `clause_tariff` linkage; falls back to project-level tariff for old data
+- `ManualEntryRequest`: Added optional `meter_id` field
+- `add_manual_entry`: Uses provided `meter_id` or falls back to first project meter
+- `import_monthly_billing`: Parses `meter_id` column from CSV if present
+
+**python-backend/api/performance.py:**
+- New file — `GET /projects/{id}/plant-performance`, `POST .../manual`, `POST .../import`
+- `irr_comparison`: Converts `actual_ghi` from Wh/m² to kWh/m² (÷1000) before dividing by `forecast_ghi` (kWh/m²)
+
+**python-backend/services/available_energy_calculator.py:** New file — contractual Available Energy formula implementation
+
+**python-backend/main.py:** Registered performance router
+
+**data-ingestion/processing/meter_aggregate_loader.py:**
+- Added `contract_line_id`, `available_energy_kwh`, `ghi_irradiance_wm2`, `poa_irradiance_wm2` to COLUMNS
+- Changed `ON CONFLICT DO NOTHING` to explicit upsert on new dedup key columns
+
+**data-ingestion/processing/billing_resolver.py:**
+- Added `_bulk_resolve_contract_lines(external_line_ids, org_id)` method
+- Extended `resolve_batch()` to resolve `contract_line_id` and `meter_id` from `contract_line.external_line_id`
+- CBE `CONTRACT_LINE_UNIQUE_ID` = `tariff_group_key` on `clause_tariff` AND `external_line_id` on `contract_line`
+
+**data-ingestion/processing/adapters/cbe_billing_adapter.py:**
+- Populates `available_energy_kwh`, `energy_category`, `contract_line_number`
+
+**Frontend Changes:**
+- `lib/api/adminClient.ts`: Added `MeterBillingResponse`, `PlantPerformanceResponse` types and API methods
+- `app/projects/components/MonthlyBillingTab.tsx`: Summary/Meter Breakdown toggle with expandable per-meter detail
+- `app/projects/components/PlantPerformanceTab.tsx`: New file — performance table, charts (energy bar, PR line), summary cards
+- `app/projects/page.tsx`: Added "Performance" tab between Monthly Billing and Contacts
+
 **Design Notes:**
 - `billing_currency_id` = `clause_tariff.currency_id` (per onboarding — this is the billing currency, not hard/contract currency)
 - `effective_rate_contract_role` is nullable with no default — engine must set it explicitly
 - `calc_detail` JSONB is escalation-type-specific (REBASED_MARKET_PRICE stores floor/ceiling/discounted_base; deterministic stores escalation_value/years_elapsed)
 - RLS policies use `DROP POLICY IF EXISTS` for idempotent re-runs
+
+**Design Notes:**
+- Per-contract-line billing math in monthly billing summary deferred (requires frontend changes)
+- Available energy calculator (`available_energy_calculator.py`) not wired into API yet (standalone feature)
+- Full contract_line date-window CHECK constraints deferred (unique indexes are the critical fix)
+
+---
+
+### v10.5 - 2026-02-24 (Phase 10.5 - Invoice Generation & Tax Engine)
+
+**Description:** Invoice generation prerequisites, billing tax rules, expected invoice versioning,
+per-meter performance detail, and restructured frontend tabs.
+
+**Migrations:**
+- `database/migrations/042_invoice_generation_prerequisites.sql`
+
+**Fixtures:**
+- `database/scripts/fixtures/moh01_dec2025.sql` — Dec 2025 golden test data
+
+**New Tables:**
+| Table | Description |
+|-------|-------------|
+| `billing_tax_rule` | Organization/country tax rules with GiST overlap prevention |
+
+**New `invoice_line_item_type` Entries:**
+- `AVAILABLE_ENERGY` — Available energy charge
+- `LEVY` — Government levy
+- `WITHHOLDING` — Withholding tax or VAT deduction
+
+**Modified Tables:**
+
+| Table | Changes |
+|-------|---------|
+| `contract_line` | Added `clause_tariff_id` FK for per-line tariff resolution |
+| `expected_invoice_header` | Added `version_no`, `is_current`, `generated_at`, `idempotency_key`, `source_metadata` |
+| `expected_invoice_line_item` | Added `component_code`, `basis_amount`, `rate_pct`, `amount_sign`, `sort_order`, `contract_line_id` |
+
+**New Indexes:**
+- `idx_meter_aggregate_billing_dedup` — Replaced COALESCE-based index with clean resolved-only unique index
+- `idx_expected_invoice_current` — One current invoice per (project, period, direction)
+- `idx_expected_invoice_version` — Version history uniqueness
+- `idx_expected_invoice_idempotency` — Idempotency key uniqueness
+- `idx_billing_tax_rule_lookup` — Tax rule resolution lookup
+
+**New Constraints:**
+- `chk_line_amount_sign` — Sign enforcement on `expected_invoice_line_item`
+- `billing_tax_rule_no_overlap` — GiST exclusion to prevent overlapping active date ranges
+
+**Extensions:**
+- `btree_gist` — Required for GiST exclusion constraint on `billing_tax_rule`
+
+**Backend Changes:**
+- `python-backend/api/billing.py`: New `POST /projects/{pid}/billing/generate-expected-invoice` endpoint; `GET /meter-billing` reads from `expected_invoice_*` tables
+- `python-backend/api/performance.py`: Added `MeterPerformanceDetail`, per-meter detail in `PerformanceMonth`, GHI unit normalization (Wh/m² → kWh/m²)
+- `data-ingestion/processing/billing_resolver.py`: `resolve_batch()` returns `(resolved, unresolved)` tuple instead of patching NULLs
+- `data-ingestion/processing/meter_aggregate_loader.py`: Split insert path — resolved → upsert, unresolved → logged and dropped
+
+**Frontend Changes:**
+- `lib/api/adminClient.ts`: Added `ExpectedInvoiceLineItem`, `ExpectedInvoiceSummary`, `MeterPerformanceDetail` types; `meters` on `PlantPerformanceResponse`; `expected_invoice` on `MeterBillingMonth`; `generateExpectedInvoice()` method
+- `app/projects/utils/formatters.ts`: New shared formatting utilities (formatMonth, fmtNum, fmtCurrency, fmtPct, fmtRatio, compClass, varianceClass)
+- `app/projects/components/PlantPerformanceTab.tsx`: Grouped-header workbook table with per-meter columns, sticky month column
+- `app/projects/components/MonthlyBillingTab.tsx`: Generic invoice view from persisted line items, grouped by type with section subtotals
+
+**Tax Configuration:**
+- Resolution hierarchy: `clause_tariff.logic_parameters.billing_taxes` → `billing_tax_rule` → explicit failure
+- Deterministic rounding: line-level rounding, exact subtotals, stored full precision in `source_metadata`
+- Configurable `available_energy_line_mode`: `"single"` (aggregate), `"per_meter"`, or `"per_contract_line"`
 
 ---

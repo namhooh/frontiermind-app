@@ -1,11 +1,15 @@
 """
 Billing Resolver — FK resolution for billing aggregate ingestion.
 
-Resolves tariff_group_key → clause_tariff_id and bill_date → billing_period_id.
+Resolves:
+  - tariff_group_key → clause_tariff_id
+  - bill_date → billing_period_id
+  - tariff_group_key → contract_line_id + meter_id (via external_line_id)
 
-Strategy: Load with NULLs + warn.
-Unresolved FKs are set to NULL and a warning is logged.
-Rows load successfully regardless and can be reconciled later.
+Strategy: Quarantine + fail visibly.
+Rows with unresolved FKs are separated into an unresolved list with diagnostic
+info. Only fully resolved rows proceed to meter_aggregate; unresolved rows go
+to meter_aggregate_staging for manual reconciliation.
 """
 
 import logging
@@ -15,6 +19,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from db.database import get_db_connection
 
 logger = logging.getLogger(__name__)
+
+# Required FKs that must be non-NULL for a row to be considered resolved
+REQUIRED_FKS = {'meter_id', 'billing_period_id', 'contract_line_id'}
 
 
 class BillingResolver:
@@ -98,16 +105,13 @@ class BillingResolver:
         self,
         records: List[Dict[str, Any]],
         organization_id: int,
-    ) -> List[Dict[str, Any]]:
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         """Bulk resolve FKs for a batch of canonical billing records.
 
-        Collects unique (tariff_group_key, bill_date) pairs and bill_dates,
-        runs bulk queries, then populates resolved IDs on each record.
-        NULLs where unresolved.
-
-        Records are expected to have 'tariff_group_key' and 'bill_date' fields.
-        Tariff resolution uses valid_from/valid_to date filtering when bill_date
-        is available.
+        Returns:
+            Tuple of (resolved, unresolved) record lists.
+            Resolved records have all required FKs populated.
+            Unresolved records include '_unresolved_fks' diagnostic info.
         """
         # Collect unique (tariff_group_key, bill_date) pairs for date-aware resolution
         tariff_date_pairs: set = set()
@@ -135,13 +139,31 @@ class BillingResolver:
         if bill_dates:
             period_map = self._bulk_resolve_periods(list(bill_dates))
 
-        # Apply to records
+        # Bulk resolve contract lines (external_line_id = tariff_group_key)
+        external_line_ids = {
+            r["tariff_group_key"]
+            for r in records
+            if r.get("tariff_group_key")
+        }
+        contract_line_map: Dict[str, dict] = {}
+        if external_line_ids:
+            contract_line_map = self._bulk_resolve_contract_lines(
+                list(external_line_ids), organization_id
+            )
+
+        # Apply to records and separate resolved/unresolved
+        resolved: List[Dict[str, Any]] = []
+        unresolved: List[Dict[str, Any]] = []
         tariff_resolved = 0
         period_resolved = 0
+        line_resolved = 0
+
         for record in records:
             tgk = record.get("tariff_group_key")
             bd = record.get("bill_date")
             lookup_key = (tgk, str(bd) if bd else None) if tgk else None
+            unresolved_fks: List[str] = []
+
             if lookup_key and lookup_key in tariff_map:
                 record["clause_tariff_id"] = tariff_map[lookup_key]
                 tariff_resolved += 1
@@ -153,14 +175,41 @@ class BillingResolver:
                 period_resolved += 1
             else:
                 record["billing_period_id"] = None
+                unresolved_fks.append(f"billing_period_id (bill_date={bd})")
+
+            # Resolve contract_line_id and meter_id from external_line_id
+            if tgk and tgk in contract_line_map:
+                cl = contract_line_map[tgk]
+                record["contract_line_id"] = cl["id"]
+                # Populate meter_id from contract_line if not already set
+                if record.get("meter_id") is None and cl.get("meter_id"):
+                    record["meter_id"] = cl["meter_id"]
+                line_resolved += 1
+            else:
+                if record.get("contract_line_id") is None:
+                    record["contract_line_id"] = None
+                    unresolved_fks.append(f"contract_line_id (external_line_id={tgk})")
+
+            # Check meter_id
+            if record.get("meter_id") is None:
+                unresolved_fks.append(f"meter_id (tariff_group_key={tgk})")
+
+            # Classify: all required FKs must be non-NULL
+            missing = [fk for fk in REQUIRED_FKS if record.get(fk) is None]
+            if missing:
+                record["_unresolved_fks"] = unresolved_fks or [f"missing: {', '.join(missing)}"]
+                unresolved.append(record)
+            else:
+                resolved.append(record)
 
         total = len(records)
         logger.info(
-            "FK resolution: tariffs %d/%d, billing periods %d/%d",
-            tariff_resolved, total, period_resolved, total,
+            "FK resolution: tariffs %d/%d, billing periods %d/%d, contract lines %d/%d | resolved %d, unresolved %d",
+            tariff_resolved, total, period_resolved, total, line_resolved, total,
+            len(resolved), len(unresolved),
         )
 
-        return records
+        return resolved, unresolved
 
     def _bulk_resolve_tariffs(
         self,
@@ -236,6 +285,50 @@ class BillingResolver:
                 "Unresolved tariff_group_keys (%d): %s",
                 len(unresolved_keys),
                 list(unresolved_keys)[:5],
+            )
+        return result
+
+    def _bulk_resolve_contract_lines(
+        self,
+        external_line_ids: List[str],
+        organization_id: int,
+    ) -> Dict[str, dict]:
+        """Resolve external_line_ids to contract_line rows.
+
+        CBE CONTRACT_LINE_UNIQUE_ID is stored as external_line_id on contract_line
+        and as tariff_group_key on clause_tariff — same value is used for both lookups.
+
+        Returns dict mapping external_line_id → {id, meter_id, energy_category}.
+        """
+        result: Dict[str, dict] = {}
+        if not external_line_ids:
+            return result
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT external_line_id, id, meter_id, energy_category::text
+                    FROM contract_line
+                    WHERE external_line_id = ANY(%s)
+                      AND organization_id = %s
+                      AND is_active = true
+                    """,
+                    (external_line_ids, organization_id),
+                )
+                for row in cur.fetchall():
+                    result[row[0]] = {
+                        "id": row[1],
+                        "meter_id": row[2],
+                        "energy_category": row[3],
+                    }
+
+        unresolved = set(external_line_ids) - set(result.keys())
+        if unresolved:
+            logger.warning(
+                "Unresolved contract_line external_line_ids (%d): %s",
+                len(unresolved),
+                list(unresolved)[:5],
             )
         return result
 
