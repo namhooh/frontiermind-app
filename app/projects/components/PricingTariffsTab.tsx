@@ -984,6 +984,21 @@ function GRPSection({
         </div>
       )}
 
+      {/* Actions Bar — always visible, buttons just open dialogs */}
+      {!IS_DEMO && (
+        <div className="flex items-center gap-3">
+          <Button variant="outline" size="sm" onClick={() => { setTokenResult(null); setShowTokenDialog(true) }}>
+            <Link2 className="h-4 w-4" /> Generate Token
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setShowUploadDialog(true)}>
+            <Upload className="h-4 w-4" /> Upload Invoice
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => setShowAggregateDialog(true)}>
+            <Calculator className="h-4 w-4" /> Aggregate Year
+          </Button>
+        </div>
+      )}
+
       {/* GRP Observations */}
       {loading ? (
         <div className="flex items-center justify-center h-24">
@@ -1098,21 +1113,6 @@ function GRPSection({
             </div>
             )
           })()}
-
-          {/* Actions Bar */}
-          {!IS_DEMO && (
-            <div className="flex items-center gap-3">
-              <Button variant="outline" size="sm" onClick={() => { setTokenResult(null); setShowTokenDialog(true) }}>
-                <Link2 className="h-4 w-4" /> Generate Token
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setShowUploadDialog(true)}>
-                <Upload className="h-4 w-4" /> Upload Invoice
-              </Button>
-              <Button variant="outline" size="sm" onClick={() => setShowAggregateDialog(true)}>
-                <Calculator className="h-4 w-4" /> Aggregate Year
-              </Button>
-            </div>
-          )}
 
           {/* Collection Links */}
           {existingTokens.length > 0 && (
