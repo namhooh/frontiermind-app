@@ -11,41 +11,7 @@ import {
   type PlantPerformanceResponse,
   type PerformanceMonth,
 } from '@/lib/api/adminClient'
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function formatMonth(v: string | null | undefined): string {
-  if (!v) return '—'
-  const d = new Date(v)
-  if (isNaN(d.getTime())) return String(v)
-  return d.toLocaleDateString('en-GB', { month: 'short', year: 'numeric', timeZone: 'UTC' })
-}
-
-function fmtNum(v: number | null | undefined, decimals = 0): string {
-  if (v == null) return '—'
-  return v.toLocaleString('en-US', {
-    minimumFractionDigits: decimals,
-    maximumFractionDigits: decimals,
-  })
-}
-
-function fmtPct(v: number | null | undefined, decimals = 1): string {
-  if (v == null) return '—'
-  return `${(v * 100).toFixed(decimals)}%`
-}
-
-function fmtRatio(v: number | null | undefined): string {
-  if (v == null) return '—'
-  return (v * 100).toFixed(1) + '%'
-}
-
-function compClass(v: number | null | undefined): string {
-  if (v == null) return ''
-  if (v >= 1) return 'text-emerald-600'
-  return 'text-amber-600'
-}
+import { formatMonth, fmtNum, fmtPct, fmtRatio, compClass } from '@/app/projects/utils/formatters'
 
 // ---------------------------------------------------------------------------
 // Props
@@ -123,6 +89,7 @@ export function PlantPerformanceTab({ projectId }: PlantPerformanceTabProps) {
   }
 
   const months = data?.months ?? []
+  const meters = data?.meters ?? []
   const capacity = data?.installed_capacity_kwp
   const degradation = data?.annual_degradation_pct
 
@@ -187,7 +154,7 @@ export function PlantPerformanceTab({ projectId }: PlantPerformanceTabProps) {
 
       {/* Content */}
       {view === 'table' ? (
-        <PerformanceTable months={months} />
+        <PerformanceWorkbook months={months} meters={meters} />
       ) : (
         <PerformanceCharts months={months} />
       )}
@@ -209,10 +176,16 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
 }
 
 // ---------------------------------------------------------------------------
-// Table View
+// Workbook Table — grouped header with per-meter columns
 // ---------------------------------------------------------------------------
 
-function PerformanceTable({ months }: { months: PerformanceMonth[] }) {
+function PerformanceWorkbook({
+  months,
+  meters,
+}: {
+  months: PerformanceMonth[]
+  meters: { meter_id: number; meter_name: string; energy_category: string }[]
+}) {
   if (months.length === 0) {
     return (
       <div className="flex items-center justify-center h-32 text-sm text-slate-400">
@@ -221,42 +194,108 @@ function PerformanceTable({ months }: { months: PerformanceMonth[] }) {
     )
   }
 
+  const hasMeters = meters.length > 0
+
   return (
     <div className="overflow-x-auto border border-slate-200 rounded-lg">
       <table className="w-full text-sm">
         <thead>
+          {/* Group header row */}
+          <tr className="border-b border-slate-200">
+            {/* Reference group */}
+            <th colSpan={2} className="px-3 py-1.5 text-xs font-semibold text-blue-700 bg-blue-50 border-r-2 border-blue-200 text-center">
+              Reference
+            </th>
+            {/* Forecast group */}
+            <th colSpan={3} className="px-3 py-1.5 text-xs font-semibold text-green-700 bg-green-50 border-r-2 border-green-200 text-center">
+              Forecast
+            </th>
+            {/* Per-meter group */}
+            {hasMeters && (
+              <th colSpan={meters.length * 2} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 border-r-2 border-slate-300 text-center">
+                Per-Meter kWh
+              </th>
+            )}
+            {/* Available Energy (standalone) */}
+            <th colSpan={1} className="px-3 py-1.5 text-xs font-semibold text-purple-700 bg-purple-50 border-r-2 border-purple-200 text-center">
+              Available
+            </th>
+            {/* Aggregated group */}
+            <th colSpan={4} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 border-r-2 border-slate-300 text-center">
+              Aggregated
+            </th>
+            {/* Comparison group */}
+            <th colSpan={3} className="px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 text-center">
+              Comparison
+            </th>
+          </tr>
+          {/* Column header row */}
           <tr className="bg-slate-50 border-b border-slate-200">
-            <th className="text-left px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Month</th>
-            <th className="text-center px-3 py-2 font-medium text-slate-600 whitespace-nowrap">OY</th>
-            <th className="text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Total Energy (kWh)</th>
-            <th className="text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Forecast (kWh)</th>
-            <th className="text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap">GHI Irrad.</th>
-            <th className="text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap">PR</th>
-            <th className="text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Availability</th>
-            <th className="text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Energy Comp</th>
-            <th className="text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Irr Comp</th>
-            <th className="text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap">PR Comp</th>
+            {/* Reference */}
+            <th className="text-left px-3 py-2 font-medium text-slate-600 whitespace-nowrap sticky left-0 bg-slate-50 z-10 border-r border-slate-200">Mon</th>
+            <th className="text-center px-2 py-2 font-medium text-slate-600 whitespace-nowrap border-r-2 border-blue-200">OY</th>
+            {/* Forecast */}
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">E (kWh)</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">GHI</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap border-r-2 border-green-200">PR</th>
+            {/* Per-meter: M (metered) and A (available) for each */}
+            {hasMeters && meters.map((m, i) => (
+              <th key={`hdr-${m.meter_id}`} colSpan={2} className={`text-center px-1 py-2 font-medium text-slate-600 whitespace-nowrap text-xs ${i === meters.length - 1 ? 'border-r-2 border-slate-300' : 'border-r border-slate-100'}`}>
+                {m.meter_name || `M${m.meter_id}`}
+              </th>
+            ))}
+            {/* Available Energy (standalone) */}
+            <th className="text-right px-2 py-2 font-medium text-purple-600 whitespace-nowrap border-r-2 border-purple-200">Avail</th>
+            {/* Aggregated */}
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">Total E</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">GHI</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">PR</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap border-r-2 border-slate-300">A%</th>
+            {/* Comparison */}
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">E</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">I</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">P</th>
           </tr>
         </thead>
         <tbody>
           {months.map((m) => (
             <tr key={m.billing_month} className="border-b border-slate-100 hover:bg-slate-50/50">
-              <td className="px-3 py-2 text-slate-700 whitespace-nowrap">{formatMonth(m.billing_month)}</td>
-              <td className="px-3 py-2 text-center text-slate-500 tabular-nums">{m.operating_year ?? '—'}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmtNum(m.total_energy_kwh)}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-slate-500">{fmtNum(m.forecast_energy_kwh)}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-slate-600">{fmtNum(m.actual_ghi_irradiance, 1)}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-slate-700 font-medium">{fmtPct(m.actual_pr)}</td>
-              <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+              {/* Reference */}
+              <td className="px-3 py-2 text-slate-700 whitespace-nowrap sticky left-0 bg-white z-10 border-r border-slate-200">{formatMonth(m.billing_month)}</td>
+              <td className="px-2 py-2 text-center text-slate-500 tabular-nums border-r-2 border-blue-100">{m.operating_year ?? '—'}</td>
+              {/* Forecast */}
+              <td className="px-2 py-2 text-right tabular-nums text-slate-500">{fmtNum(m.forecast_energy_kwh)}</td>
+              <td className="px-2 py-2 text-right tabular-nums text-slate-500">{fmtNum(m.forecast_ghi_irradiance, 1)}</td>
+              <td className="px-2 py-2 text-right tabular-nums text-slate-500 border-r-2 border-green-100">{fmtPct(m.forecast_pr)}</td>
+              {/* Per-meter M|A */}
+              {hasMeters && meters.map((meter, i) => {
+                const md = m.meter_details?.find(d => d.meter_id === meter.meter_id)
+                return (
+                  <td key={`${m.billing_month}-${meter.meter_id}`} colSpan={2} className={`px-1 py-2 text-right tabular-nums text-xs text-slate-600 ${i === meters.length - 1 ? 'border-r-2 border-slate-200' : 'border-r border-slate-50'}`}>
+                    {md?.metered_kwh != null ? fmtNum(md.metered_kwh) : '—'}
+                    {md?.available_kwh != null && md.available_kwh > 0 && (
+                      <span className="text-slate-400 ml-0.5">/{fmtNum(md.available_kwh)}</span>
+                    )}
+                  </td>
+                )
+              })}
+              {/* Available Energy (standalone) */}
+              <td className="px-2 py-2 text-right tabular-nums text-slate-600 border-r-2 border-purple-100">{fmtNum(m.total_available_kwh)}</td>
+              {/* Aggregated */}
+              <td className="px-2 py-2 text-right tabular-nums text-slate-700 font-medium">{fmtNum(m.total_energy_kwh)}</td>
+              <td className="px-2 py-2 text-right tabular-nums text-slate-600">{fmtNum(m.actual_ghi_irradiance, 1)}</td>
+              <td className="px-2 py-2 text-right tabular-nums text-slate-700 font-medium">{fmtPct(m.actual_pr)}</td>
+              <td className="px-2 py-2 text-right tabular-nums text-slate-600 border-r-2 border-slate-200">
                 {m.actual_availability_pct != null ? `${m.actual_availability_pct.toFixed(1)}%` : '—'}
               </td>
-              <td className={`px-3 py-2 text-right tabular-nums ${compClass(m.energy_comparison)}`}>
+              {/* Comparison */}
+              <td className={`px-2 py-2 text-right tabular-nums ${compClass(m.energy_comparison)}`}>
                 {fmtRatio(m.energy_comparison)}
               </td>
-              <td className={`px-3 py-2 text-right tabular-nums ${compClass(m.irr_comparison)}`}>
+              <td className={`px-2 py-2 text-right tabular-nums ${compClass(m.irr_comparison)}`}>
                 {fmtRatio(m.irr_comparison)}
               </td>
-              <td className={`px-3 py-2 text-right tabular-nums ${compClass(m.pr_comparison)}`}>
+              <td className={`px-2 py-2 text-right tabular-nums ${compClass(m.pr_comparison)}`}>
                 {fmtRatio(m.pr_comparison)}
               </td>
             </tr>
