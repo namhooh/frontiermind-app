@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { IS_DEMO } from '@/lib/demoMode'
 import { ProjectTableTab, type Column } from './ProjectTableTab'
 import { adminClient } from '@/lib/api/adminClient'
 
@@ -107,7 +108,7 @@ export function ForecastsGuaranteesTab({ forecasts: rawForecasts, guarantees, fo
     <div className="space-y-8">
       <CollapsibleSection
         title="Production Forecasts"
-        subtitle={editMode && degradationPct != null ? (
+        subtitle={editMode && !IS_DEMO && degradationPct != null ? (
           <div className="mb-3 ml-5.5">
             <button
               type="button"

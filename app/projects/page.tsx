@@ -3,6 +3,7 @@
 import { useState, useCallback, useMemo } from 'react'
 import Link from 'next/link'
 import { ArrowLeft, Loader2, Pencil, PencilOff } from 'lucide-react'
+import { IS_DEMO } from '@/lib/demoMode'
 import { toast } from 'sonner'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/app/components/ui/tabs'
 import { adminClient, type ProjectDashboardResponse } from '@/lib/api/adminClient'
@@ -13,6 +14,7 @@ import { PricingTariffsTab } from './components/PricingTariffsTab'
 import { TechnicalTab } from './components/TechnicalTab'
 import { ForecastsGuaranteesTab } from './components/ForecastsGuaranteesTab'
 import { MonthlyBillingTab } from './components/MonthlyBillingTab'
+import { PlantPerformanceTab } from './components/PlantPerformanceTab'
 // import { SpreadsheetTab } from './components/SpreadsheetTab'
 
 export default function ProjectsPage() {
@@ -178,13 +180,15 @@ export default function ProjectsPage() {
               {editMode ? <PencilOff className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
               {editMode ? 'Finish Editing' : 'Edit'}
             </button>
-            <Link
-              href="/"
-              className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
-            >
-              <ArrowLeft className="h-4 w-4" />
-              Back to Home
-            </Link>
+            {!IS_DEMO && (
+              <Link
+                href="/"
+                className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back to Home
+              </Link>
+            )}
           </div>
         </div>
 
@@ -228,6 +232,7 @@ export default function ProjectsPage() {
                   <TabsTrigger value="technical">Technical</TabsTrigger>
                   <TabsTrigger value="forecasts-guarantees">Forecasts & Guarantees</TabsTrigger>
                   <TabsTrigger value="monthly-billing">Monthly Billing</TabsTrigger>
+                  <TabsTrigger value="performance">Performance</TabsTrigger>
                   <TabsTrigger value="contacts">Contacts</TabsTrigger>
                   {/* <TabsTrigger value="spreadsheet">Spreadsheet</TabsTrigger> */}
                 </TabsList>
@@ -283,6 +288,10 @@ export default function ProjectsPage() {
 
                   <TabsContent value="monthly-billing">
                     <MonthlyBillingTab projectId={projectId} editMode={editMode} />
+                  </TabsContent>
+
+                  <TabsContent value="performance">
+                    <PlantPerformanceTab projectId={projectId} editMode={editMode} />
                   </TabsContent>
 
                   <TabsContent value="contacts">

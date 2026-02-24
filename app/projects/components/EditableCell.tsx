@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Loader2 } from 'lucide-react'
 import { toast } from 'sonner'
+import { IS_DEMO } from '@/lib/demoMode'
 import { adminClient, type PatchEntity } from '@/lib/api/adminClient'
 
 export interface EditableCellProps {
@@ -77,6 +78,13 @@ export function EditableCell({
     }
     // Skip save if unchanged
     if (saveValue === value || (saveValue === '' && value == null)) {
+      setEditing(false)
+      return
+    }
+
+    // Demo mode: show toast but don't persist
+    if (IS_DEMO) {
+      toast('Demo mode — changes are not saved', { duration: 3000 })
       setEditing(false)
       return
     }

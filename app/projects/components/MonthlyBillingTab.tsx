@@ -1,13 +1,16 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Upload, Download, Plus, Loader2, Check, X } from 'lucide-react'
+import { Upload, Download, Plus, Loader2, Check, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { IS_DEMO } from '@/lib/demoMode'
 import { toast } from 'sonner'
 import {
   adminClient,
   type MonthlyBillingResponse,
   type MonthlyBillingRow,
   type MonthlyBillingProductColumn,
+  type MeterBillingResponse,
+  type MeterBillingMonth,
 } from '@/lib/api/adminClient'
 
 // ---------------------------------------------------------------------------
@@ -57,8 +60,10 @@ interface MonthlyBillingTabProps {
 
 export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProps) {
   const [data, setData] = useState<MonthlyBillingResponse | null>(null)
+  const [meterData, setMeterData] = useState<MeterBillingResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [billingView, setBillingView] = useState<'summary' | 'meter'>('summary')
 
   // Import state
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -79,8 +84,12 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
     setLoading(true)
     setError(null)
     try {
-      const resp = await adminClient.getMonthlyBilling(projectId)
+      const [resp, meterResp] = await Promise.all([
+        adminClient.getMonthlyBilling(projectId),
+        adminClient.getMeterBilling(projectId).catch(() => null),
+      ])
       setData(resp)
+      setMeterData(meterResp)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load billing data')
     } finally {
@@ -185,20 +194,47 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
     <div className="space-y-4">
       {/* Toolbar */}
       <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-slate-700">
-          Monthly Billing
-          {currency && <span className="ml-2 text-xs font-normal text-slate-400">({currency})</span>}
-          {data?.degradation_pct != null && (
-            <>
-              <span className="mx-1.5 text-slate-300">|</span>
-              <span className="text-xs font-normal text-slate-400">
-                Degradation: {(data.degradation_pct * 100).toFixed(2)}%/yr
-              </span>
-            </>
+        <div className="flex items-center gap-3">
+          <h3 className="text-sm font-semibold text-slate-700">
+            Monthly Billing
+            {currency && <span className="ml-2 text-xs font-normal text-slate-400">({currency})</span>}
+            {data?.degradation_pct != null && (
+              <>
+                <span className="mx-1.5 text-slate-300">|</span>
+                <span className="text-xs font-normal text-slate-400">
+                  Degradation: {(data.degradation_pct * 100).toFixed(2)}%/yr
+                </span>
+              </>
+            )}
+          </h3>
+          {/* View toggle */}
+          {meterData && meterData.meters.length > 0 && (
+            <div className="flex items-center border border-slate-200 rounded overflow-hidden">
+              <button
+                onClick={() => setBillingView('summary')}
+                className={`text-xs px-2.5 py-1 ${
+                  billingView === 'summary'
+                    ? 'bg-slate-100 text-slate-700'
+                    : 'bg-white text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                Summary
+              </button>
+              <button
+                onClick={() => setBillingView('meter')}
+                className={`text-xs px-2.5 py-1 border-l border-slate-200 ${
+                  billingView === 'meter'
+                    ? 'bg-slate-100 text-slate-700'
+                    : 'bg-white text-slate-500 hover:bg-slate-50'
+                }`}
+              >
+                Meter Breakdown
+              </button>
+            </div>
           )}
-        </h3>
+        </div>
         <div className="flex items-center gap-2">
-          {editMode && (
+          {editMode && !IS_DEMO && (
             <button
               onClick={() => {
                 setShowAddRow(true)
@@ -209,18 +245,20 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
               <Plus className="h-3 w-3" /> Add Month
             </button>
           )}
-          <label className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer">
-            {importing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
-            Import
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".csv,.xlsx"
-              className="hidden"
-              onChange={handleImport}
-              disabled={importing}
-            />
-          </label>
+          {!IS_DEMO && (
+            <label className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer">
+              {importing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
+              Import
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".csv,.xlsx"
+                className="hidden"
+                onChange={handleImport}
+                disabled={importing}
+              />
+            </label>
+          )}
           <button
             onClick={handleExport}
             disabled={rows.length === 0}
@@ -231,8 +269,19 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
         </div>
       </div>
 
-      {/* Table */}
-      {rows.length === 0 && !showAddRow ? (
+      {/* Meter Breakdown View */}
+      {billingView === 'meter' && meterData && (
+        meterData.months.length > 0 ? (
+          <MeterBreakdownTable months={meterData.months} currency={meterData.currency_code} />
+        ) : (
+          <div className="flex items-center justify-center h-32 text-sm text-slate-400">
+            No per-meter billing data available.
+          </div>
+        )
+      )}
+
+      {/* Summary Table */}
+      {billingView === 'summary' && (rows.length === 0 && !showAddRow ? (
         <div className="flex items-center justify-center h-32 text-sm text-slate-400">
           No billing data available. Import a file or add months manually.
         </div>
@@ -333,7 +382,7 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
             )}
           </table>
         </div>
-      )}
+      ))}
     </div>
   )
 }
@@ -374,5 +423,131 @@ function BillingRow({
         {fmtCurrency(row.total_billing_amount, currency)}
       </td>
     </tr>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// MeterBreakdownTable — expandable per-month, per-meter detail
+// ---------------------------------------------------------------------------
+
+function MeterBreakdownTable({
+  months,
+  currency,
+}: {
+  months: MeterBillingMonth[]
+  currency?: string | null
+}) {
+  const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  const toggle = (month: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev)
+      if (next.has(month)) next.delete(month)
+      else next.add(month)
+      return next
+    })
+  }
+
+  return (
+    <div className="overflow-x-auto border border-slate-200 rounded-lg">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-slate-50 border-b border-slate-200">
+            <th className="text-left px-3 py-2 font-medium text-slate-600 whitespace-nowrap w-8" />
+            <th className="text-left px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Month / Meter</th>
+            <th className="text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Opening</th>
+            <th className="text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Closing</th>
+            <th className="text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Metered (kWh)</th>
+            <th className="text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Available (kWh)</th>
+            <th className="text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Rate</th>
+            <th className="text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap">Amount</th>
+          </tr>
+        </thead>
+        <tbody>
+          {months.map((m) => {
+            const isOpen = expanded.has(m.billing_month)
+            return (
+              <MeterMonthRows
+                key={m.billing_month}
+                month={m}
+                isOpen={isOpen}
+                onToggle={() => toggle(m.billing_month)}
+                currency={currency}
+              />
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function MeterMonthRows({
+  month,
+  isOpen,
+  onToggle,
+  currency,
+}: {
+  month: MeterBillingMonth
+  isOpen: boolean
+  onToggle: () => void
+  currency?: string | null
+}) {
+  return (
+    <>
+      {/* Summary row (clickable) */}
+      <tr
+        className="border-b border-slate-100 hover:bg-slate-50/50 cursor-pointer"
+        onClick={onToggle}
+      >
+        <td className="px-3 py-2 text-slate-400">
+          {isOpen ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
+        </td>
+        <td className="px-3 py-2 font-medium text-slate-700 whitespace-nowrap">
+          {formatBillingMonth(month.billing_month)}
+          <span className="ml-2 text-xs text-slate-400">({month.meter_readings.length} meters)</span>
+        </td>
+        <td className="px-3 py-2" />
+        <td className="px-3 py-2" />
+        <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-700">
+          {fmtNum(month.total_metered_kwh, 2)}
+        </td>
+        <td className="px-3 py-2 text-right tabular-nums text-slate-600">
+          {month.total_available_kwh ? fmtNum(month.total_available_kwh, 2) : '—'}
+        </td>
+        <td className="px-3 py-2" />
+        <td className="px-3 py-2 text-right tabular-nums font-medium text-slate-700">
+          {fmtCurrency(month.total_amount, currency)}
+        </td>
+      </tr>
+
+      {/* Per-meter detail rows */}
+      {isOpen && month.meter_readings.map((r) => (
+        <tr key={`${month.billing_month}-${r.meter_id}`} className="border-b border-slate-50 bg-slate-25">
+          <td className="px-3 py-1.5" />
+          <td className="px-3 py-1.5 pl-8 text-slate-600 text-xs whitespace-nowrap">
+            {r.meter_name || `Meter ${r.meter_id}`}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-xs text-slate-500">
+            {r.opening_reading != null ? fmtNum(r.opening_reading, 3) : '—'}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-xs text-slate-500">
+            {r.closing_reading != null ? fmtNum(r.closing_reading, 3) : '—'}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-xs text-slate-600">
+            {fmtNum(r.metered_kwh, 2)}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-xs text-slate-500">
+            {r.available_kwh != null ? fmtNum(r.available_kwh, 2) : '—'}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-xs text-slate-500">
+            {r.rate != null ? fmtNum(r.rate, 4) : '—'}
+          </td>
+          <td className="px-3 py-1.5 text-right tabular-nums text-xs text-slate-600">
+            {fmtCurrency(r.amount, currency)}
+          </td>
+        </tr>
+      ))}
+    </>
   )
 }

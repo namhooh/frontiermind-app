@@ -330,6 +330,81 @@ export interface MonthlyBillingImportResponse {
 }
 
 // ============================================================================
+// Meter Billing Types
+// ============================================================================
+
+export interface MeterInfo {
+  meter_id: number
+  meter_name: string | null
+  contract_line_number: number | null
+  energy_category: string | null
+  product_desc: string | null
+}
+
+export interface MeterReadingDetail {
+  meter_id: number
+  meter_name: string | null
+  opening_reading: number | null
+  closing_reading: number | null
+  metered_kwh: number | null
+  available_kwh: number | null
+  rate: number | null
+  amount: number | null
+}
+
+export interface MeterBillingMonth {
+  billing_month: string
+  meter_readings: MeterReadingDetail[]
+  total_metered_kwh: number | null
+  total_available_kwh: number | null
+  total_energy_kwh: number | null
+  total_amount: number | null
+}
+
+export interface MeterBillingResponse {
+  success: boolean
+  meters: MeterInfo[]
+  months: MeterBillingMonth[]
+  currency_code: string | null
+}
+
+// ============================================================================
+// Plant Performance Types
+// ============================================================================
+
+export interface PerformanceMonth {
+  billing_month: string
+  operating_year: number | null
+  total_metered_kwh: number | null
+  total_available_kwh: number | null
+  total_energy_kwh: number | null
+  actual_ghi_irradiance: number | null
+  actual_poa_irradiance: number | null
+  forecast_energy_kwh: number | null
+  forecast_ghi_irradiance: number | null
+  forecast_poa_irradiance: number | null
+  forecast_pr: number | null
+  actual_pr: number | null
+  actual_availability_pct: number | null
+  energy_comparison: number | null
+  irr_comparison: number | null
+  pr_comparison: number | null
+  comments: string | null
+}
+
+export interface PlantPerformanceResponse {
+  success: boolean
+  installed_capacity_kwp: number | null
+  annual_degradation_pct: number | null
+  months: PerformanceMonth[]
+  summary: {
+    total_metered_kwh: number
+    total_available_kwh: number
+    total_energy_kwh: number
+  }
+}
+
+// ============================================================================
 // Error Class
 // ============================================================================
 
@@ -816,6 +891,65 @@ export class AdminClient {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       }
+    )
+    return this.handleResponse<MonthlyBillingImportResponse>(response)
+  }
+
+  // =========================================================================
+  // Meter Billing
+  // =========================================================================
+
+  async getMeterBilling(projectId: number): Promise<MeterBillingResponse> {
+    this.log('Fetching meter billing', { projectId })
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/meter-billing`
+    )
+    return this.handleResponse<MeterBillingResponse>(response)
+  }
+
+  // =========================================================================
+  // Plant Performance
+  // =========================================================================
+
+  async getPlantPerformance(projectId: number): Promise<PlantPerformanceResponse> {
+    this.log('Fetching plant performance', { projectId })
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/plant-performance`
+    )
+    return this.handleResponse<PlantPerformanceResponse>(response)
+  }
+
+  async addPlantPerformanceEntry(
+    projectId: number,
+    body: {
+      billing_month: string
+      operating_year?: number
+      meter_readings?: { meter_id: number; energy_kwh?: number; available_energy_kwh?: number; opening_reading?: number; closing_reading?: number }[]
+      ghi_irradiance_wm2?: number
+      poa_irradiance_wm2?: number
+      actual_availability_pct?: number
+      comments?: string
+    }
+  ): Promise<MonthlyBillingImportResponse> {
+    this.log('Adding plant performance entry', { projectId, body })
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/plant-performance/manual`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }
+    )
+    return this.handleResponse<MonthlyBillingImportResponse>(response)
+  }
+
+  async importPlantPerformance(projectId: number, file: File): Promise<MonthlyBillingImportResponse> {
+    this.log('Importing plant performance', { projectId, filename: file.name })
+    const formData = new FormData()
+    formData.append('file', file)
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/plant-performance/import`,
+      { method: 'POST', body: formData }
     )
     return this.handleResponse<MonthlyBillingImportResponse>(response)
   }

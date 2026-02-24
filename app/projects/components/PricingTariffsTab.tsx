@@ -15,6 +15,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from '@/app/components/ui/dialog'
+import { IS_DEMO } from '@/lib/demoMode'
 import type { ProjectDashboardResponse, GRPObservation, SubmissionTokenItem } from '@/lib/api/adminClient'
 import { adminClient } from '@/lib/api/adminClient'
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from 'recharts'
@@ -494,7 +495,7 @@ function BillingProductCard({ pw, pid, rate_periods, monthly_rates, onSaved, edi
           )}
           <span className="ml-auto text-xs text-slate-400">{pw.tariffs.length} tariff{pw.tariffs.length !== 1 ? 's' : ''}</span>
         </div>
-        {editMode && onRemove && (
+        {editMode && onRemove && !IS_DEMO && (
           <button
             type="button"
             onClick={(e) => { e.stopPropagation(); onRemove() }}
@@ -1098,17 +1099,19 @@ function GRPSection({
           })()}
 
           {/* Actions Bar */}
-          <div className="flex items-center gap-3">
-            <Button variant="outline" size="sm" onClick={() => { setTokenResult(null); setShowTokenDialog(true) }}>
-              <Link2 className="h-4 w-4" /> Generate Token
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowUploadDialog(true)}>
-              <Upload className="h-4 w-4" /> Upload Invoice
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setShowAggregateDialog(true)}>
-              <Calculator className="h-4 w-4" /> Aggregate Year
-            </Button>
-          </div>
+          {!IS_DEMO && (
+            <div className="flex items-center gap-3">
+              <Button variant="outline" size="sm" onClick={() => { setTokenResult(null); setShowTokenDialog(true) }}>
+                <Link2 className="h-4 w-4" /> Generate Token
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setShowUploadDialog(true)}>
+                <Upload className="h-4 w-4" /> Upload Invoice
+              </Button>
+              <Button variant="outline" size="sm" onClick={() => setShowAggregateDialog(true)}>
+                <Calculator className="h-4 w-4" /> Aggregate Year
+              </Button>
+            </div>
+          )}
 
           {/* Collection Links */}
           {existingTokens.length > 0 && (
@@ -1145,7 +1148,7 @@ function GRPSection({
                             <Copy className="h-3.5 w-3.5" /> Copy URL
                           </Button>
                         )}
-                        {isActive && (
+                        {isActive && !IS_DEMO && (
                           <Button
                             variant="ghost"
                             size="sm"
@@ -1225,7 +1228,7 @@ function GRPSection({
                           <Badge variant={grpStatusBadge(obs.verification_status)}>{grpStatusLabel(obs.verification_status)}</Badge>
                         </td>
                         <td className="px-4 py-2.5 text-right">
-                          {obs.verification_status === 'pending' && (
+                          {obs.verification_status === 'pending' && !IS_DEMO && (
                             <div className="flex items-center justify-end gap-1">
                               <Button variant="ghost" size="sm" className="h-7 text-xs text-green-700 hover:text-green-800" onClick={() => handleVerify(obs.id, 'jointly_verified')}>
                                 <CheckCircle2 className="h-3.5 w-3.5" /> Verify
@@ -1734,7 +1737,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
                   ))}
 
                   {/* Add Product (edit mode only) */}
-                  {editMode && (
+                  {editMode && !IS_DEMO && (
                     <AddProductRow
                       contractId={cid}
                       existingProductIds={new Set(matched.map((pw) => pw.product.billing_product_id as number))}

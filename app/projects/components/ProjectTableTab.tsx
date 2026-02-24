@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { Plus, Trash2, Loader2, Check, X } from 'lucide-react'
+import { IS_DEMO } from '@/lib/demoMode'
 import type { PatchEntity } from '@/lib/api/adminClient'
 import { EditableCell } from './EditableCell'
 
@@ -118,7 +119,7 @@ export function ProjectTableTab({
     }
   }
 
-  const showActions = editMode && onRemove
+  const showActions = editMode && onRemove && !IS_DEMO
   const hasData = data.length > 0 || showAddRow
 
   return (
@@ -279,7 +280,7 @@ export function ProjectTableTab({
         </div>
       )}
 
-      {editMode && onAdd && !showAddRow && (
+      {editMode && onAdd && !showAddRow && !IS_DEMO && (
         <button
           onClick={handleOpenAddRow}
           className="mt-3 flex items-center gap-1.5 rounded-md border border-dashed border-slate-300 px-3 py-2 text-sm text-slate-500 hover:border-blue-300 hover:text-blue-600 hover:bg-blue-50 transition-colors"
