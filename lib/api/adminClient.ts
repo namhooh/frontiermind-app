@@ -308,7 +308,10 @@ export interface MonthlyBillingRow {
   variance_pct: number | null
   product_amounts: Record<string, number | null>
   product_rates: Record<string, number | null>
+  product_amounts_hard_ccy: Record<string, number | null>
+  product_rates_hard_ccy: Record<string, number | null>
   total_billing_amount: number | null
+  total_billing_amount_hard_ccy: number | null
 }
 
 export interface MonthlyBillingResponse {
@@ -316,11 +319,13 @@ export interface MonthlyBillingResponse {
   rows: MonthlyBillingRow[]
   products: MonthlyBillingProductColumn[]
   currency_code: string | null
+  hard_currency_code: string | null
   degradation_pct: number | null
   summary: {
     actual_kwh: number
     forecast_kwh: number
     total_billing: number
+    total_billing_hard: number
   }
 }
 
@@ -351,6 +356,39 @@ export interface MeterReadingDetail {
   available_kwh: number | null
   rate: number | null
   amount: number | null
+  rate_hard_ccy: number | null
+  amount_hard_ccy: number | null
+}
+
+// ---------------------------------------------------------------------------
+// Expected Invoice Types
+// ---------------------------------------------------------------------------
+
+export interface ExpectedInvoiceLineItem {
+  line_item_type_code: string  // ENERGY, AVAILABLE_ENERGY, LEVY, TAX, WITHHOLDING
+  component_code: string | null
+  description: string
+  quantity: number | null       // energy lines
+  unit_price: number | null     // energy lines
+  basis_amount: number | null   // tax lines
+  rate_pct: number | null       // tax lines
+  line_total_amount: number
+  amount_sign: number           // 1 or -1
+  sort_order: number
+  meter_name: string | null
+}
+
+export interface ExpectedInvoiceSummary {
+  header_id: number
+  version_no: number
+  energy_subtotal: number
+  levies_total: number
+  subtotal_after_levies: number
+  vat_amount: number
+  invoice_total: number
+  withholdings_total: number
+  net_due: number
+  line_items: ExpectedInvoiceLineItem[]
 }
 
 export interface MeterBillingMonth {
@@ -360,6 +398,7 @@ export interface MeterBillingMonth {
   total_available_kwh: number | null
   total_energy_kwh: number | null
   total_amount: number | null
+  expected_invoice: ExpectedInvoiceSummary | null
 }
 
 export interface MeterBillingResponse {
@@ -367,11 +406,19 @@ export interface MeterBillingResponse {
   meters: MeterInfo[]
   months: MeterBillingMonth[]
   currency_code: string | null
+  hard_currency_code: string | null
 }
 
 // ============================================================================
 // Plant Performance Types
 // ============================================================================
+
+export interface MeterPerformanceDetail {
+  meter_id: number
+  meter_name: string | null
+  metered_kwh: number | null
+  available_kwh: number | null
+}
 
 export interface PerformanceMonth {
   billing_month: string
@@ -391,6 +438,7 @@ export interface PerformanceMonth {
   irr_comparison: number | null
   pr_comparison: number | null
   comments: string | null
+  meter_details: MeterPerformanceDetail[]
 }
 
 export interface PlantPerformanceResponse {
@@ -403,6 +451,7 @@ export interface PlantPerformanceResponse {
     total_available_kwh: number
     total_energy_kwh: number
   }
+  meters: { meter_id: number; meter_name: string; energy_category: string }[]
 }
 
 // ============================================================================
@@ -906,6 +955,22 @@ export class AdminClient {
       `${this.baseUrl}/api/projects/${projectId}/meter-billing`
     )
     return this.handleResponse<MeterBillingResponse>(response)
+  }
+
+  async generateExpectedInvoice(
+    projectId: number,
+    body: { billing_month: string; idempotency_key?: string }
+  ): Promise<Record<string, unknown>> {
+    this.log('Generating expected invoice', { projectId, body })
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/billing/generate-expected-invoice`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      }
+    )
+    return this.handleResponse<Record<string, unknown>>(response)
   }
 
   // =========================================================================
