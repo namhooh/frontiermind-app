@@ -698,8 +698,8 @@ function MeterDetailRows({
         <div className="bg-slate-50/80 border-t border-slate-100">
           <table className="w-full text-xs">
             <tbody>
-              {readings.map((r) => (
-                <tr key={r.meter_id} className="border-b border-slate-100/50">
+              {readings.map((r, idx) => (
+                <tr key={`${r.meter_id}-${idx}`} className="border-b border-slate-100/50">
                   {/* Indent + meter name */}
                   <td className="w-6 px-1 py-1.5" />
                   <td className="px-3 py-1.5 text-slate-500 whitespace-nowrap">
