@@ -18,7 +18,6 @@ import {
 import { IS_DEMO } from '@/lib/demoMode'
 import type { ProjectDashboardResponse, GRPObservation, SubmissionTokenItem } from '@/lib/api/adminClient'
 import { adminClient } from '@/lib/api/adminClient'
-import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine } from 'recharts'
 import { CollapsibleSection } from './CollapsibleSection'
 import { EditableCell } from './EditableCell'
 import { FieldGrid, type FieldDef } from './shared/FieldGrid'
@@ -687,6 +686,7 @@ function GRPSection({
   codDate,
   firstTariff,
   firstLp,
+  baselineGrp,
   onSaved,
   editMode,
 }: {
@@ -695,17 +695,16 @@ function GRPSection({
   codDate?: string | null
   firstTariff: R | undefined
   firstLp: R
+  baselineGrp: R[]
   onSaved?: () => void
   editMode?: boolean
 }) {
   const pid = projectId
   const [monthlyObs, setMonthlyObs] = useState<GRPObservation[]>([])
   const [annualObs, setAnnualObs] = useState<GRPObservation[]>([])
-  const [baselineObs, setBaselineObs] = useState<GRPObservation[]>([])
   const [existingTokens, setExistingTokens] = useState<SubmissionTokenItem[]>([])
   const [loading, setLoading] = useState(true)
 
-  const [expandedBaseline, setExpandedBaseline] = useState(false)
   const [showTokenDialog, setShowTokenDialog] = useState(false)
   const [showUploadDialog, setShowUploadDialog] = useState(false)
   const [showAggregateDialog, setShowAggregateDialog] = useState(false)
@@ -726,9 +725,8 @@ function GRPSection({
   const fetchData = useCallback(async () => {
     setLoading(true)
     try {
-      // Run refresh + all observation fetches in parallel (refresh only
-      // touches annual rows, so monthly/baseline data is independent).
-      // Combine the old monthly + baseline calls into one — split client-side.
+      // Baseline GRP now comes from dashboard props — only fetch post-COD data here.
+      // Run refresh + observation fetches in parallel.
       const [, monthlyRes, annualRes, tokensRes] = await Promise.all([
         adminClient.refreshGRP(pid, orgId).catch(() => {}),
         adminClient.listGRPObservations(pid, orgId, { observation_type: 'monthly' })
@@ -738,9 +736,7 @@ function GRPSection({
         adminClient.listTokens(orgId, { project_id: pid, submission_type: 'grp_upload', include_expired: true })
           .catch(() => ({ tokens: [] as SubmissionTokenItem[] })),
       ])
-      // Split monthly observations: baseline (operating_year=0) vs post-COD
       setMonthlyObs(monthlyRes.observations.filter(o => o.operating_year !== 0))
-      setBaselineObs(monthlyRes.observations.filter(o => o.operating_year === 0))
       setAnnualObs(annualRes.observations)
       setExistingTokens(tokensRes.tokens)
     } catch {
@@ -752,56 +748,23 @@ function GRPSection({
 
   useEffect(() => { fetchData() }, [fetchData])
 
+  // Baseline GRP: derive sorted observations + component keys from dashboard prop
   const baselineData = useMemo(() => {
-    if (baselineObs.length === 0) return null
+    if (baselineGrp.length === 0) return null
 
-    const sorted = [...baselineObs].sort(
-      (a, b) => new Date(a.period_start).getTime() - new Date(b.period_start).getTime()
+    const sorted = [...baselineGrp].sort(
+      (a, b) => new Date(String(a.period_start)).getTime() - new Date(String(b.period_start)).getTime()
     )
 
-    // Extract component keys from source_metadata.tariff_components
     const componentKeysSet = new Set<string>()
     for (const obs of sorted) {
-      const tc = obs.source_metadata?.tariff_components as Record<string, unknown> | undefined
+      const tc = (obs.source_metadata as R | undefined)?.tariff_components as R | undefined
       if (tc) Object.keys(tc).forEach(k => componentKeysSet.add(k))
     }
     const componentKeys = [...componentKeysSet].sort()
 
-    const chartPoints = sorted.map(obs => {
-      const tc = obs.source_metadata?.tariff_components as Record<string, number> | undefined
-      const point: Record<string, unknown> = {
-        period: grpFormatPeriod(obs.period_start),
-        grp: obs.calculated_grp_per_kwh,
-      }
-      for (const key of componentKeys) {
-        point[key] = tc?.[key] ?? null
-      }
-      return point
-    })
-
-    const grpValues = sorted
-      .map(o => o.calculated_grp_per_kwh)
-      .filter((v): v is number => v != null)
-
-    const avg = grpValues.length > 0 ? grpValues.reduce((s, v) => s + v, 0) / grpValues.length : 0
-    const min = grpValues.length > 0 ? Math.min(...grpValues) : 0
-    const max = grpValues.length > 0 ? Math.max(...grpValues) : 0
-    const latestObs = sorted[sorted.length - 1]
-    const latest = latestObs?.calculated_grp_per_kwh ?? null
-    const latestPeriod = latestObs ? grpFormatPeriod(latestObs.period_start) : null
-
-    return {
-      chartPoints,
-      avg,
-      min,
-      max,
-      latest,
-      latestPeriod,
-      totalMonths: sorted.length,
-      componentKeys,
-      observations: sorted,
-    }
-  }, [baselineObs])
+    return { observations: sorted, componentKeys }
+  }, [baselineGrp])
 
   async function handleGenerateToken() {
     setTokenLoading(true)
@@ -999,121 +962,55 @@ function GRPSection({
         </div>
       )}
 
-      {/* GRP Observations */}
+      {/* Baseline GRP (OY=0) — table only, loaded from dashboard data (no spinner) */}
+      {baselineData && (
+        <div className="space-y-2">
+          <h4 className="text-xs font-medium text-slate-400 uppercase">Baseline Grid Reference Price (Pre-COD)</h4>
+          <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-600">
+                <tr>
+                  <th className="text-left px-4 py-2.5 font-medium">Period</th>
+                  <th className="text-right px-4 py-2.5 font-medium">GRP/kWh</th>
+                  {baselineData.componentKeys.map(key => (
+                    <th key={key} className="text-right px-4 py-2.5 font-medium capitalize">
+                      {key.replace(/_/g, ' ')}
+                    </th>
+                  ))}
+                  <th className="text-center px-4 py-2.5 font-medium">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {baselineData.observations.map(obs => (
+                  <tr key={obs.id as number} className="hover:bg-slate-50">
+                    <td className="px-4 py-2.5">{grpFormatPeriod(String(obs.period_start))}</td>
+                    <td className="px-4 py-2.5 text-right font-mono font-medium">{grpFormatGRP(obs.calculated_grp_per_kwh as number | null)}</td>
+                    {baselineData.componentKeys.map(key => {
+                      const tc = (obs.source_metadata as R | undefined)?.tariff_components as Record<string, number> | undefined
+                      return (
+                        <td key={key} className="px-4 py-2.5 text-right font-mono tabular-nums">
+                          {tc?.[key] != null ? grpFormatGRP(tc[key]) : '-'}
+                        </td>
+                      )
+                    })}
+                    <td className="px-4 py-2.5 text-center">
+                      <Badge variant={grpStatusBadge(String(obs.verification_status))}>{grpStatusLabel(String(obs.verification_status))}</Badge>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Post-COD GRP Observations */}
       {loading ? (
         <div className="flex items-center justify-center h-24">
           <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
         </div>
       ) : (
         <>
-          {/* Baseline GRP (OY=0) */}
-          {baselineData && (() => {
-            const [baselineOpen, setBaselineOpen] = [expandedBaseline, setExpandedBaseline]
-            return (
-            <div className="space-y-4">
-              <button
-                type="button"
-                onClick={() => setBaselineOpen((v) => !v)}
-                className="flex items-center gap-1.5 text-xs font-medium text-slate-400 uppercase hover:text-slate-600 transition-colors"
-              >
-                <ChevronRight className={`h-3.5 w-3.5 transition-transform ${baselineOpen ? 'rotate-90' : ''}`} />
-                Baseline Grid Reference Price (Pre-COD)
-              </button>
-
-              {baselineOpen && (<>
-              {/* Summary Stats */}
-              <div className="grid grid-cols-4 gap-4">
-                <div className="rounded-lg border border-blue-200 bg-blue-50/50 px-4 py-3">
-                  <div className="text-xs text-blue-500 font-medium">Latest GRP</div>
-                  <div className="text-lg font-mono font-semibold text-slate-900 mt-0.5">{grpFormatGRP(baselineData.latest)}</div>
-                  <div className="text-[10px] text-blue-400 mt-0.5">{baselineData.latestPeriod ?? 'GHS/kWh'}</div>
-                </div>
-                <div className="rounded-lg border border-slate-200 px-4 py-3">
-                  <div className="text-xs text-slate-400">Average ({baselineData.totalMonths}mo)</div>
-                  <div className="text-lg font-mono font-semibold text-slate-800 mt-0.5">{grpFormatGRP(baselineData.avg)}</div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">GHS/kWh</div>
-                </div>
-                <div className="rounded-lg border border-slate-200 px-4 py-3">
-                  <div className="text-xs text-slate-400">Minimum</div>
-                  <div className="text-lg font-mono font-semibold text-slate-800 mt-0.5">{grpFormatGRP(baselineData.min)}</div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">GHS/kWh</div>
-                </div>
-                <div className="rounded-lg border border-slate-200 px-4 py-3">
-                  <div className="text-xs text-slate-400">Maximum</div>
-                  <div className="text-lg font-mono font-semibold text-slate-800 mt-0.5">{grpFormatGRP(baselineData.max)}</div>
-                  <div className="text-[10px] text-slate-400 mt-0.5">GHS/kWh</div>
-                </div>
-              </div>
-
-              {/* Area Chart */}
-              <div className="rounded-lg border border-slate-200 p-4">
-                <ResponsiveContainer width="100%" height={220}>
-                  <AreaChart data={baselineData.chartPoints} margin={{ top: 8, right: 16, left: 0, bottom: 0 }}>
-                    <defs>
-                      <linearGradient id="grpGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="5%" stopColor="#3b82f6" stopOpacity={0.2} />
-                        <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
-                      </linearGradient>
-                    </defs>
-                    <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                    <XAxis dataKey="period" tick={{ fontSize: 11, fill: '#94a3b8' }} />
-                    <YAxis
-                      tick={{ fontSize: 11, fill: '#94a3b8' }}
-                      domain={['auto', 'auto']}
-                      tickFormatter={(v: number) => v.toFixed(2)}
-                    />
-                    <Tooltip
-                      formatter={(value) => [grpFormatGRP(value as number | null), 'GRP/kWh']}
-                      labelStyle={{ fontWeight: 600 }}
-                      contentStyle={{ fontSize: 12, borderRadius: 8, border: '1px solid #e2e8f0' }}
-                    />
-                    <ReferenceLine y={baselineData.avg} stroke="#94a3b8" strokeDasharray="4 4" label={{ value: `Avg ${grpFormatGRP(baselineData.avg)}`, position: 'right', fontSize: 10, fill: '#94a3b8' }} />
-                    <Area type="monotone" dataKey="grp" stroke="#3b82f6" strokeWidth={2} fill="url(#grpGradient)" dot={{ r: 3, fill: '#3b82f6' }} />
-                  </AreaChart>
-                </ResponsiveContainer>
-              </div>
-
-              {/* Component Breakdown Table */}
-              <div className="overflow-x-auto rounded-lg border border-slate-200">
-                <table className="w-full text-sm">
-                  <thead className="bg-slate-50 text-slate-600">
-                    <tr>
-                      <th className="text-left px-4 py-2.5 font-medium">Period</th>
-                      <th className="text-right px-4 py-2.5 font-medium">GRP/kWh</th>
-                      {baselineData.componentKeys.map(key => (
-                        <th key={key} className="text-right px-4 py-2.5 font-medium capitalize">
-                          {key.replace(/_/g, ' ')}
-                        </th>
-                      ))}
-                      <th className="text-center px-4 py-2.5 font-medium">Status</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-slate-100">
-                    {baselineData.observations.map(obs => (
-                      <tr key={obs.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-2.5">{grpFormatPeriod(obs.period_start)}</td>
-                        <td className="px-4 py-2.5 text-right font-mono font-medium">{grpFormatGRP(obs.calculated_grp_per_kwh)}</td>
-                        {baselineData.componentKeys.map(key => {
-                          const tc = obs.source_metadata?.tariff_components as Record<string, number> | undefined
-                          return (
-                            <td key={key} className="px-4 py-2.5 text-right font-mono tabular-nums">
-                              {tc?.[key] != null ? grpFormatGRP(tc[key]) : '-'}
-                            </td>
-                          )
-                        })}
-                        <td className="px-4 py-2.5 text-center">
-                          <Badge variant={grpStatusBadge(obs.verification_status)}>{grpStatusLabel(obs.verification_status)}</Badge>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-              </>)}
-            </div>
-            )
-          })()}
-
           {/* Collection Links */}
           {existingTokens.length > 0 && (
             <div className="space-y-2">
@@ -1812,6 +1709,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
                   codDate={data.project.cod_date as string | null | undefined}
                   firstTariff={firstTariff}
                   firstLp={firstLp}
+                  baselineGrp={data.baseline_grp ?? []}
                   onSaved={onSaved}
                   editMode={editMode}
                 />

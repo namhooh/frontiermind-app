@@ -104,6 +104,7 @@ export interface ProjectDashboardResponse {
   clauses: Record<string, unknown>[]
   amendments: Record<string, unknown>[]
   exchange_rates: Record<string, unknown>[]
+  baseline_grp: Record<string, unknown>[]
   lookups: Record<string, { id: number; code?: string; name: string }[]>
 }
 

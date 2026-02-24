@@ -141,6 +141,7 @@ class ProjectDashboardResponse(BaseModel):
     clauses: List[dict] = Field(default_factory=list)
     amendments: List[dict] = Field(default_factory=list)
     exchange_rates: List[dict] = Field(default_factory=list)
+    baseline_grp: List[dict] = Field(default_factory=list, description="Pre-COD baseline GRP observations (operating_year=0)")
     lookups: dict = Field(default_factory=dict)
 
 
@@ -878,6 +879,18 @@ async def get_project_dashboard(
                         WHERE er.organization_id = (SELECT organization_id FROM project_data)
                         ORDER BY er.rate_date DESC
                     ),
+                    baseline_grp_data AS (
+                        SELECT rp.id, rp.period_start, rp.period_end,
+                               rp.calculated_grp_per_kwh, rp.total_variable_charges,
+                               rp.total_kwh_invoiced, rp.verification_status,
+                               rp.source_metadata
+                        FROM reference_price rp
+                        WHERE rp.project_id = %(pid)s
+                          AND rp.organization_id = (SELECT organization_id FROM project_data)
+                          AND rp.observation_type = 'monthly'
+                          AND rp.operating_year = 0
+                        ORDER BY rp.period_start
+                    ),
                     contract_types_lookup AS (SELECT id, code, name FROM contract_type ORDER BY name),
                     contract_statuses_lookup AS (SELECT id, code, name FROM contract_status ORDER BY name),
                     currencies_lookup AS (SELECT id, code, name FROM currency ORDER BY code),
@@ -922,6 +935,7 @@ async def get_project_dashboard(
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM clauses_data d) AS clauses,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM amendments_data d) AS amendments,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM exchange_rates_data d) AS exchange_rates,
+                        (SELECT COALESCE(json_agg(d), '[]'::json) FROM baseline_grp_data d) AS baseline_grp,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM contract_types_lookup d) AS contract_types_lookup,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM contract_statuses_lookup d) AS contract_statuses_lookup,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM currencies_lookup d) AS currencies_lookup,
@@ -967,6 +981,7 @@ async def get_project_dashboard(
                 clauses = _parse(row['clauses'])
                 amendments = _parse(row['amendments'])
                 exchange_rates = _parse(row['exchange_rates'])
+                baseline_grp = _parse(row['baseline_grp'])
 
                 lookups = {
                     "contract_types": _parse(row['contract_types_lookup']),
@@ -999,6 +1014,7 @@ async def get_project_dashboard(
                     clauses=clauses,
                     amendments=amendments,
                     exchange_rates=exchange_rates,
+                    baseline_grp=baseline_grp,
                     lookups=lookups,
                 )
 
