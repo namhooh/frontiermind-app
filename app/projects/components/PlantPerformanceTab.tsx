@@ -212,7 +212,7 @@ function PerformanceWorkbook({
             </th>
             {/* Per-meter group */}
             {hasMeters && (
-              <th colSpan={meters.length * 2} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 border-r-2 border-slate-300 text-center">
+              <th colSpan={meters.length * 2} className="px-3 py-1.5 text-xs font-semibold text-purple-700 bg-purple-50 border-r-2 border-purple-200 text-center">
                 Per-Meter kWh
               </th>
             )}
@@ -240,12 +240,12 @@ function PerformanceWorkbook({
             <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap border-r-2 border-green-200">PR</th>
             {/* Per-meter: M (metered) and A (available) for each */}
             {hasMeters && meters.map((m, i) => (
-              <th key={`hdr-${m.meter_id}`} colSpan={2} className={`text-center px-1 py-2 font-medium text-slate-600 whitespace-nowrap text-xs ${i === meters.length - 1 ? 'border-r-2 border-slate-300' : 'border-r border-slate-100'}`}>
+              <th key={`hdr-${m.meter_id}`} colSpan={2} className={`text-center px-1 py-2 font-medium text-slate-600 whitespace-nowrap text-xs ${i === meters.length - 1 ? 'border-r-2 border-purple-200' : 'border-r border-slate-100'}`}>
                 {m.meter_name || `M${m.meter_id}`}
               </th>
             ))}
             {/* Available Energy (standalone) */}
-            <th className="text-right px-2 py-2 font-medium text-purple-600 whitespace-nowrap border-r-2 border-purple-200">Avail</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap border-r-2 border-purple-200">Avail</th>
             {/* Aggregated */}
             <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">Total E</th>
             <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">GHI</th>
@@ -271,7 +271,7 @@ function PerformanceWorkbook({
               {hasMeters && meters.map((meter, i) => {
                 const md = m.meter_details?.find(d => d.meter_id === meter.meter_id)
                 return (
-                  <td key={`${m.billing_month}-${meter.meter_id}`} colSpan={2} className={`px-1 py-2 text-right tabular-nums text-xs text-slate-600 ${i === meters.length - 1 ? 'border-r-2 border-slate-200' : 'border-r border-slate-50'}`}>
+                  <td key={`${m.billing_month}-${meter.meter_id}`} colSpan={2} className={`px-1 py-2 text-right tabular-nums text-xs text-slate-600 ${i === meters.length - 1 ? 'border-r-2 border-purple-100' : 'border-r border-slate-50'}`}>
                     {md?.metered_kwh != null ? fmtNum(md.metered_kwh) : '—'}
                     {md?.available_kwh != null && md.available_kwh > 0 && (
                       <span className="text-slate-400 ml-0.5">/{fmtNum(md.available_kwh)}</span>
