@@ -431,7 +431,7 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
           <h3 className="text-sm font-semibold text-slate-700">
-            Monthly Billing
+            Billing
             {currency && <span className="ml-2 text-xs font-normal text-slate-400">({currency})</span>}
             {showHardCcy && <span className="text-xs font-normal text-slate-400"> / {hardCurrency}</span>}
             {data?.degradation_pct != null && (

@@ -254,7 +254,7 @@ export default function ProjectsPage() {
                   <TabsTrigger value="pricing-tariffs">Pricing & Tariffs</TabsTrigger>
                   <TabsTrigger value="technical">Technical</TabsTrigger>
                   <TabsTrigger value="performance">Performance</TabsTrigger>
-                  <TabsTrigger value="monthly-billing">Monthly Billing</TabsTrigger>
+                  <TabsTrigger value="monthly-billing">Billing</TabsTrigger>
                 </TabsList>
 
                 <div className="mt-4 bg-white rounded-lg border border-slate-200 p-6">
