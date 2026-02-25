@@ -1848,3 +1848,32 @@ per-meter performance detail, and restructured frontend tabs.
 - Configurable `available_energy_line_mode`: `"single"` (aggregate), `"per_meter"`, or `"per_contract_line"`
 
 ---
+
+### v10.6 - 2026-02-25 (Billing Engine Gap Analysis Fixes)
+
+**Description:** Correctness fixes from billing engine gap analysis: per-meter available energy, country-scoped tax rules, configurable invoice direction, direction-aware invoice reads, and tighter RLS.
+
+**Migrations:**
+- `database/migrations/043_billing_gap_analysis_fixes.sql` — Org-scoped RLS for `billing_tax_rule`
+
+**RLS Changes:**
+- `billing_tax_rule_org_read` policy replaced: was `USING(true)`, now org-scoped via `role` table lookup + global rules (`organization_id IS NULL`)
+
+**Backend Changes:**
+- `python-backend/api/billing.py`:
+  - **F1:** Implemented `per_meter` available energy mode — creates per-line `AVAILABLE_ENERGY` invoice items
+  - **F2:** Tax rule fallback maps `project.country` to ISO code in Python and filters by `country_code`
+  - **F3:** `GenerateInvoiceRequest.invoice_direction` field (default "payable", supports "receivable")
+  - **F4:** `_read_expected_invoice()` filters by `invoice_direction` (default "payable")
+  - **F12:** `MonthlyBillingResponse.cod_date` and `ProductColumn.energy_category` exposed to frontend
+- `python-backend/api/performance.py`:
+  - **F5:** Per-meter `available_kwh` populated from `meter_aggregate.available_energy_kwh`
+
+**Frontend Changes:**
+- `lib/api/adminClient.ts`: Added `energy_category` to `MonthlyBillingProductColumn`, `cod_date` to `MonthlyBillingResponse`, `invoice_direction` to `generateExpectedInvoice()` params
+- `app/projects/components/MonthlyBillingTab.tsx`:
+  - **F12:** Replaced hardcoded `'2025-09'` COD filter with dynamic `data.cod_date`
+  - **F12:** `productEnergyCategory()` prefers API-driven `energy_category`, falls back to name heuristic
+  - **F13:** Expanded detail rows use persisted invoice line items when available, fall back to `qty * rate`
+
+---

@@ -83,6 +83,7 @@ database/
 │   ├── 040_merge_tariff_rate_tables.sql               # Phase 10.3: Unified tariff_rate table (merges + drops tariff_annual_rate + tariff_monthly_rate), four-currency, JSONB calc_detail, FX audit trail, integrity constraints
 │   ├── 041_multi_meter_billing_and_performance.sql    # Phase 10.4: contract_line, plant_performance, meter_aggregate enhancements, meter names, dedup index fix, external_line_id unique index
 │   ├── 042_invoice_generation_prerequisites.sql       # Phase 10.5: clean dedup index, billing_tax_rule (GiST), invoice header versioning, line item audit/sign, new line item types
+│   ├── 043_billing_gap_analysis_fixes.sql              # Phase 10.6: org-scoped billing_tax_rule RLS
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -1106,6 +1107,12 @@ database/
 - Performance API: per-meter detail + GHI unit normalization (Wh/m² → kWh/m²)
 - Frontend: workbook-style performance table, generic invoice view from persisted line items
 - Fixtures: `database/scripts/fixtures/moh01_dec2025.sql`
+
+**v10.6 (Billing Engine Gap Analysis Fixes)** - Complete
+- Migration: `043_billing_gap_analysis_fixes.sql` — org-scoped RLS for `billing_tax_rule`
+- Billing API: per-meter available energy mode, country-scoped tax rules, configurable invoice direction, direction-aware reads
+- Performance API: per-meter `available_kwh` populated
+- Frontend: dynamic COD filtering, API-driven energy_category, persisted invoice amounts in expanded rows
 
 ---
 

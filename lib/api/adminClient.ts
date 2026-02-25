@@ -299,6 +299,7 @@ export interface MonthlyBillingProductColumn {
   clause_tariff_id: number | null
   tariff_name: string | null
   is_metered: boolean
+  energy_category: string | null
 }
 
 export interface MonthlyBillingRow {
@@ -323,6 +324,7 @@ export interface MonthlyBillingResponse {
   currency_code: string | null
   hard_currency_code: string | null
   degradation_pct: number | null
+  cod_date: string | null
   summary: {
     actual_kwh: number
     forecast_kwh: number
@@ -961,7 +963,7 @@ export class AdminClient {
 
   async generateExpectedInvoice(
     projectId: number,
-    body: { billing_month: string; idempotency_key?: string }
+    body: { billing_month: string; idempotency_key?: string; invoice_direction?: 'payable' | 'receivable' }
   ): Promise<Record<string, unknown>> {
     this.log('Generating expected invoice', { projectId, body })
     const response = await fetch(

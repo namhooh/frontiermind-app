@@ -6,7 +6,7 @@ and per-product billing amounts computed as kWh × effective_rate.
 
 Invoice generation endpoint writes to expected_invoice_* tables with
 full tax/levy/withholding calculations.
-"""
+"""No
 
 import io
 import json
@@ -22,6 +22,21 @@ from pydantic import BaseModel, Field
 from db.database import get_db_connection, init_connection_pool
 
 logger = logging.getLogger(__name__)
+
+# ISO 3166-1 alpha-2 lookup from full country name (case-insensitive)
+_COUNTRY_NAME_TO_CODE: dict[str, str] = {
+    "ghana": "GH",
+    "kenya": "KE",
+    "nigeria": "NG",
+    "south africa": "ZA",
+}
+
+
+def _country_to_code(country_name: str | None) -> str | None:
+    """Map a full country name (e.g. 'Ghana') to its ISO 2-letter code."""
+    if not country_name:
+        return None
+    return _COUNTRY_NAME_TO_CODE.get(country_name.strip().lower())
 
 router = APIRouter(
     prefix="/api",
@@ -48,6 +63,7 @@ class ProductColumn(BaseModel):
     clause_tariff_id: Optional[int] = None
     tariff_name: Optional[str] = None
     is_metered: bool = True  # False for fixed-fee products
+    energy_category: Optional[str] = None  # 'metered', 'available', 'test', etc.
 
 
 class MonthlyBillingRow(BaseModel):
@@ -72,6 +88,7 @@ class MonthlyBillingResponse(BaseModel):
     currency_code: Optional[str] = None
     hard_currency_code: Optional[str] = None
     degradation_pct: Optional[float] = None
+    cod_date: Optional[str] = None  # ISO date string from project.cod_date
     summary: dict[str, Any] = {}
 
 
@@ -166,6 +183,7 @@ class ExpectedInvoiceSummary(BaseModel):
 class GenerateInvoiceRequest(BaseModel):
     billing_month: str = Field(..., description="YYYY-MM format")
     idempotency_key: Optional[str] = None
+    invoice_direction: Optional[str] = Field("payable", description="'payable' or 'receivable'")
 
 
 # Fixed-fee product codes (flat per month, not kWh-based)
@@ -240,7 +258,8 @@ async def generate_expected_invoice(
                 # 1. Resolve project, org, contract, billing_period
                 # ----------------------------------------------------------
                 cur.execute("""
-                    SELECT p.id, p.organization_id, c.id AS contract_id
+                    SELECT p.id, p.organization_id, p.country,
+                           c.id AS contract_id
                     FROM project p
                     JOIN contract c ON c.project_id = p.id
                     WHERE p.id = %(pid)s
@@ -251,6 +270,7 @@ async def generate_expected_invoice(
                     raise HTTPException(status_code=404, detail="Project or contract not found")
                 org_id = proj["organization_id"]
                 contract_id = proj["contract_id"]
+                country_code = _country_to_code(proj.get("country"))
 
                 cur.execute("""
                     SELECT id FROM billing_period
@@ -392,17 +412,20 @@ async def generate_expected_invoice(
 
                 if not tax_config:
                     # Fallback: billing_tax_rule by org + country
-                    cur.execute("""
+                    tax_rule_sql = """
                         SELECT btr.rules
                         FROM billing_tax_rule btr
-                        JOIN organization o ON o.id = btr.organization_id
                         WHERE btr.organization_id = %(oid)s
                           AND btr.is_active = true
                           AND btr.effective_start_date <= %(bm)s
                           AND (btr.effective_end_date IS NULL OR btr.effective_end_date >= %(bm)s)
-                        ORDER BY btr.effective_start_date DESC
-                        LIMIT 1
-                    """, {"oid": org_id, "bm": bm_date})
+                    """
+                    tax_rule_params: dict[str, Any] = {"oid": org_id, "bm": bm_date}
+                    if country_code:
+                        tax_rule_sql += "  AND btr.country_code = %(cc)s\n"
+                        tax_rule_params["cc"] = country_code
+                    tax_rule_sql += "ORDER BY btr.effective_start_date DESC\nLIMIT 1"
+                    cur.execute(tax_rule_sql, tax_rule_params)
                     tax_rule = cur.fetchone()
                     if tax_rule:
                         tax_config = tax_rule["rules"]
@@ -466,6 +489,39 @@ async def generate_expected_invoice(
                         "meter_name": None,
                     })
                     sort_counter += 1
+
+                elif avail_mode == "per_meter":
+                    for cl in contract_lines:
+                        if cl["energy_category"] != 'available':
+                            continue
+                        agg = agg_by_cl.get(cl["id"])
+                        if not agg:
+                            continue
+                        avail_kwh = _to_decimal(agg["available_kwh"])
+                        if avail_kwh <= 0:
+                            continue
+
+                        ct_id = cl.get("clause_tariff_id") or project_tariff["id"]
+                        rate = rate_by_tariff.get(ct_id, Decimal('0'))
+                        line_total = _round_d(avail_kwh * rate, rounding_precision)
+
+                        desc = cl.get("product_desc") or agg.get("meter_name") or f"Meter {cl['meter_id']}"
+                        line_items.append({
+                            "type_code": "AVAILABLE_ENERGY",
+                            "type_id": type_map.get("AVAILABLE_ENERGY"),
+                            "component_code": None,
+                            "description": f"Available - {desc}",
+                            "quantity": avail_kwh,
+                            "unit_price": rate,
+                            "basis_amount": None,
+                            "rate_pct": None,
+                            "line_total_amount": line_total,
+                            "amount_sign": 1,
+                            "sort_order": sort_counter,
+                            "contract_line_id": cl["id"],
+                            "meter_name": agg.get("meter_name"),
+                        })
+                        sort_counter += 1
 
                 # Metered energy lines
                 for cl in contract_lines:
@@ -629,7 +685,9 @@ async def generate_expected_invoice(
                 """, {"cid": contract_id})
                 contract_info = cur.fetchone()
                 counterparty_id = contract_info["counterparty_id"] if contract_info else None
-                invoice_direction = "payable"
+                invoice_direction = body.invoice_direction or "payable"
+                if invoice_direction not in ("payable", "receivable"):
+                    raise HTTPException(status_code=400, detail="invoice_direction must be 'payable' or 'receivable'")
 
                 # ----------------------------------------------------------
                 # 12. Idempotency + versioning
@@ -796,7 +854,12 @@ async def get_monthly_billing(
                         bp.name  AS product_name,
                         ct.id    AS clause_tariff_id,
                         ct.name  AS tariff_name,
-                        ct.base_rate
+                        ct.base_rate,
+                        (SELECT cl2.energy_category::text
+                         FROM contract_line cl2
+                         WHERE cl2.billing_product_id = cbp.billing_product_id
+                           AND cl2.contract_id = c.id AND cl2.is_active = true
+                         LIMIT 1) AS energy_category
                     FROM contract_billing_product cbp
                     JOIN billing_product bp ON bp.id = cbp.billing_product_id
                     JOIN contract c ON c.id = cbp.contract_id
@@ -824,6 +887,7 @@ async def get_monthly_billing(
                         clause_tariff_id=pr["clause_tariff_id"],
                         tariff_name=pr["tariff_name"],
                         is_metered=is_metered,
+                        energy_category=pr.get("energy_category"),
                     ))
 
                 # 2) Get currency from first tariff (billing + hard currency)
@@ -844,6 +908,11 @@ async def get_monthly_billing(
                 currency_code = currency_row["code"] if currency_row else None
                 hard_currency_code = currency_row["hard_currency_code"] if currency_row else None
                 degradation_pct = float(currency_row["degradation_pct"]) if currency_row and currency_row["degradation_pct"] else None
+
+                # 2b) Get project COD date
+                cur.execute("SELECT cod_date FROM project WHERE id = %(pid)s", {"pid": project_id})
+                proj_row = cur.fetchone()
+                cod_date_str = proj_row["cod_date"].isoformat() if proj_row and proj_row["cod_date"] else None
 
                 # 3) Main billing data query
                 cur.execute("""
@@ -1090,6 +1159,7 @@ async def get_monthly_billing(
                     currency_code=currency_code,
                     hard_currency_code=hard_currency_code,
                     degradation_pct=degradation_pct,
+                    cod_date=cod_date_str,
                     summary=totals,
                 )
 
@@ -1355,16 +1425,17 @@ async def export_monthly_billing(
 # GET /projects/{project_id}/meter-billing
 # ============================================================================
 
-def _read_expected_invoice(cur, project_id: int, billing_period_id: int) -> Optional[ExpectedInvoiceSummary]:
+def _read_expected_invoice(cur, project_id: int, billing_period_id: int, invoice_direction: str = "payable") -> Optional[ExpectedInvoiceSummary]:
     """Read persisted expected invoice and derive section totals from line items."""
     cur.execute("""
         SELECT eih.id, eih.version_no, eih.total_amount
         FROM expected_invoice_header eih
         WHERE eih.project_id = %(pid)s
           AND eih.billing_period_id = %(bp)s
+          AND eih.invoice_direction = %(dir)s
           AND eih.is_current = true
         LIMIT 1
-    """, {"pid": project_id, "bp": billing_period_id})
+    """, {"pid": project_id, "bp": billing_period_id, "dir": invoice_direction})
     header = cur.fetchone()
     if not header:
         return None

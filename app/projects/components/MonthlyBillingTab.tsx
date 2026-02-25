@@ -130,11 +130,16 @@ function shortProductLabel(name: string): string {
 
 /** Determine the energy category of a billing product for per-meter mapping */
 function productEnergyCategory(p: MonthlyBillingProductColumn): 'metered' | 'available' | 'test' | null {
+  // Prefer API-driven energy_category when available
+  if (p.energy_category) {
+    const cat = p.energy_category as 'metered' | 'available' | 'test'
+    if (cat === 'metered' || cat === 'available' || cat === 'test') return cat
+  }
+  // Fallback: name/code heuristic
   const name = (p.product_name ?? '').toLowerCase()
-  const code = p.product_code.toUpperCase()
-  if (code === 'ENER003' || name.includes('eavailable') || name.includes('available')) return 'available'
-  if (code === 'ENER001' || name.includes('test') || name.includes('early operating')) return 'test'
-  if (code === 'ENER002' || name.includes('emetered') || (name.includes('metered') && !name.includes('available'))) return 'metered'
+  if (name.includes('eavailable') || name.includes('available')) return 'available'
+  if (name.includes('test') || name.includes('early operating')) return 'test'
+  if (name.includes('emetered') || (name.includes('metered') && !name.includes('available'))) return 'metered'
   return null
 }
 
@@ -355,9 +360,13 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
       }
     }
 
-    // Sort descending and exclude months before Sept 2025 (pre-COD)
+    // Sort descending; exclude months before COD if available
     result.sort((a, b) => b.billing_month.localeCompare(a.billing_month))
-    return result.filter((r) => r.billing_month >= '2025-09')
+    const codMonth = data?.cod_date?.substring(0, 7)  // "YYYY-MM" or undefined
+    if (codMonth) {
+      return result.filter((r) => r.billing_month >= codMonth)
+    }
+    return result
   }, [data, meterData])
 
   // Auto-expand the most recent (top) month on initial load
@@ -811,6 +820,10 @@ function ExpandedDetailRows({
       {/* Meter breakdown rows */}
       {readings.map((r, idx) => {
         const rate = r.rate
+        // Build a lookup of persisted invoice line items for this meter
+        const meterLineItems = expectedInvoice?.line_items.filter(
+          li => li.meter_name === r.meter_name && (li.line_item_type_code === 'ENERGY' || li.line_item_type_code === 'AVAILABLE_ENERGY')
+        ) ?? []
         return (
           <tr key={`meter-${r.meter_id}-${idx}`} className="bg-slate-50/80 border-b border-slate-100/50 text-xs">
             <td className="w-6 px-1 py-1.5" />
@@ -829,14 +842,21 @@ function ExpandedDetailRows({
             {/* Forecast + Var% empty */}
             <td className={sc} />
             <td className={sc} />
-            {/* Product amounts — map each product to the correct per-meter kWh */}
+            {/* Product amounts — prefer persisted invoice line items, fall back to qty * rate */}
             {products.map((p) => {
               const cat = productEnergyCategory(p)
-              // metered → metered_kwh, available → available_kwh, test → no per-meter breakdown
-              const qty = cat === 'available' ? r.available_kwh
-                : cat === 'metered' ? r.metered_kwh
-                : null
-              const amt = qty != null && rate != null ? qty * rate : null
+              const typeCode = cat === 'available' ? 'AVAILABLE_ENERGY' : 'ENERGY'
+              // Try to match a persisted line item for this meter + type
+              const persistedLine = meterLineItems.find(li => li.line_item_type_code === typeCode)
+              let amt: number | null = null
+              if (persistedLine) {
+                amt = persistedLine.line_total_amount
+              } else {
+                const qty = cat === 'available' ? r.available_kwh
+                  : cat === 'metered' ? r.metered_kwh
+                  : null
+                amt = qty != null && rate != null ? qty * rate : null
+              }
               return (
                 <td key={p.product_code} className={`${sc} text-right tabular-nums text-slate-500`}>
                   {amt != null ? fmtCurrency(amt, currency) : <span className="text-slate-300">&mdash;</span>}
