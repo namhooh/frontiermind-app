@@ -885,7 +885,7 @@ function GRPSection({
     }
   }
 
-  const grpActions = !IS_DEMO ? (
+  const grpActions = (
     <div className="flex items-center gap-2">
       <Button variant="outline" size="sm" onClick={() => { setTokenResult(null); setShowTokenDialog(true) }}>
         <Link2 className="h-4 w-4" /> Generate Token
@@ -897,7 +897,7 @@ function GRPSection({
         <Calculator className="h-4 w-4" /> Aggregate Year
       </Button>
     </div>
-  ) : undefined
+  )
 
   return (
     <CollapsibleSection title="Grid Reference Price" actions={grpActions}>
