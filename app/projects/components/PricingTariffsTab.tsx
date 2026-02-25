@@ -885,23 +885,23 @@ function GRPSection({
     }
   }
 
-  return (
-    <div className="space-y-4">
-      {/* Actions Bar — always visible, buttons just open dialogs */}
-      {!IS_DEMO && (
-        <div className="flex items-center gap-3">
-          <Button variant="outline" size="sm" onClick={() => { setTokenResult(null); setShowTokenDialog(true) }}>
-            <Link2 className="h-4 w-4" /> Generate Token
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setShowUploadDialog(true)}>
-            <Upload className="h-4 w-4" /> Upload Invoice
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => setShowAggregateDialog(true)}>
-            <Calculator className="h-4 w-4" /> Aggregate Year
-          </Button>
-        </div>
-      )}
+  const grpActions = !IS_DEMO ? (
+    <div className="flex items-center gap-2">
+      <Button variant="outline" size="sm" onClick={() => { setTokenResult(null); setShowTokenDialog(true) }}>
+        <Link2 className="h-4 w-4" /> Generate Token
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => setShowUploadDialog(true)}>
+        <Upload className="h-4 w-4" /> Upload Invoice
+      </Button>
+      <Button variant="outline" size="sm" onClick={() => setShowAggregateDialog(true)}>
+        <Calculator className="h-4 w-4" /> Aggregate Year
+      </Button>
+    </div>
+  ) : undefined
 
+  return (
+    <CollapsibleSection title="Grid Reference Price" actions={grpActions}>
+    <div className="space-y-4">
       {/* GRP Definition */}
       {firstTariff && (
         <div className="space-y-3">
@@ -1359,6 +1359,7 @@ function GRPSection({
         </DialogContent>
       </Dialog>
     </div>
+    </CollapsibleSection>
   )
 }
 
@@ -1431,21 +1432,19 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
         <EmptyState>No contracts found</EmptyState>
 
         {/* GRP section renders even without contracts */}
-        <CollapsibleSection title="Grid Reference Price">
-          <GRPSection
-            projectId={pid}
-            orgId={data.project.organization_id as number}
-            codDate={data.project.cod_date as string | null | undefined}
-            firstTariff={grpFirstTariff}
-            firstLp={grpFirstLp}
-            baselineGrp={data.baseline_grp ?? []}
-            initialMonthly={grpMonthly}
-            initialAnnual={grpAnnual}
-            initialTokens={grpTokens}
-            onSaved={onSaved}
-            editMode={editMode}
-          />
-        </CollapsibleSection>
+        <GRPSection
+          projectId={pid}
+          orgId={data.project.organization_id as number}
+          codDate={data.project.cod_date as string | null | undefined}
+          firstTariff={grpFirstTariff}
+          firstLp={grpFirstLp}
+          baselineGrp={data.baseline_grp ?? []}
+          initialMonthly={grpMonthly}
+          initialAnnual={grpAnnual}
+          initialTokens={grpTokens}
+          onSaved={onSaved}
+          editMode={editMode}
+        />
       </>)}
 
       {/* Tariff & Rate Schedule */}
@@ -1887,21 +1886,19 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
             </>)}
 
             {/* Section 5: Grid Reference Price — right after Escalation Rules */}
-            <CollapsibleSection title="Grid Reference Price">
-              <GRPSection
-                projectId={pid}
-                orgId={data.project.organization_id as number}
-                codDate={data.project.cod_date as string | null | undefined}
-                firstTariff={firstTariff}
-                firstLp={firstLp}
-                baselineGrp={data.baseline_grp ?? []}
-                initialMonthly={grpMonthly}
-                initialAnnual={grpAnnual}
-                initialTokens={grpTokens}
-                onSaved={onSaved}
-                editMode={editMode}
-              />
-            </CollapsibleSection>
+            <GRPSection
+              projectId={pid}
+              orgId={data.project.organization_id as number}
+              codDate={data.project.cod_date as string | null | undefined}
+              firstTariff={firstTariff}
+              firstLp={firstLp}
+              baselineGrp={data.baseline_grp ?? []}
+              initialMonthly={grpMonthly}
+              initialAnnual={grpAnnual}
+              initialTokens={grpTokens}
+              onSaved={onSaved}
+              editMode={editMode}
+            />
 
             {/* Available Energy — now displayed inside the ENER003 BillingProductCard */}
 
