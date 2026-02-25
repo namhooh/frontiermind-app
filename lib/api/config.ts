@@ -15,12 +15,6 @@ export function getApiBaseUrl(): string {
     return envUrl || 'http://localhost:8000'
   }
 
-  // Browser on production/preview (non-localhost): use relative URLs
-  // Next.js rewrites proxy /api/* to the backend
-  if (window.location.hostname !== 'localhost') {
-    return ''
-  }
-
-  // Browser on localhost: use local backend to avoid auth issues with remote ALB
-  return 'http://localhost:8000'
+  // Browser: always use relative URLs so Next.js rewrites proxy to backend
+  return ''
 }
