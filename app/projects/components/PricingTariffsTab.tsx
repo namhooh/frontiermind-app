@@ -1416,16 +1416,21 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
   const hardCurrencyCode = ((tariff_rates ?? []) as R[]).find((tr) => tr.hard_currency_code != null)?.hard_currency_code as string | undefined
   const billingCurrencyCode = ((tariff_rates ?? []) as R[]).find((tr) => tr.billing_currency_code != null)?.billing_currency_code as string | undefined
 
-  if (contracts.length === 0) {
-    return (
-      <div className="space-y-4">
-        <EmptyState>No contracts found</EmptyState>
-      </div>
-    )
-  }
+  // Top-level first tariff/LP for GRP section (independent of contracts loop)
+  const grpFirstTariff = (() => {
+    const c = contracts[0]
+    if (!c) return undefined
+    const ct = tariffs.filter((t) => t.contract_id === c.id)
+    return (ct.find((t) => t.is_current === true) ?? ct[0]) as R | undefined
+  })()
+  const grpFirstLp = (grpFirstTariff?.logic_parameters ?? {}) as R
 
   return (
     <div className="space-y-4">
+      {contracts.length === 0 && (
+        <EmptyState>No contracts found</EmptyState>
+      )}
+
       {/* Tariff & Rate Schedule */}
       <CollapsibleSection title="Tariff & Rate Schedule">
         {tariffs.length === 0 ? (
@@ -1864,23 +1869,6 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
               )}
             </>)}
 
-            {/* Section 5: Grid Reference Price — always visible */}
-            <CollapsibleSection title="Grid Reference Price">
-              <GRPSection
-                projectId={pid}
-                orgId={data.project.organization_id as number}
-                codDate={data.project.cod_date as string | null | undefined}
-                firstTariff={firstTariff}
-                firstLp={firstLp}
-                baselineGrp={data.baseline_grp ?? []}
-                initialMonthly={grpMonthly}
-                initialAnnual={grpAnnual}
-                initialTokens={grpTokens}
-                onSaved={onSaved}
-                editMode={editMode}
-              />
-            </CollapsibleSection>
-
             {/* Available Energy — now displayed inside the ENER003 BillingProductCard */}
 
             {firstTariff != null && (<>
@@ -1978,6 +1966,23 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
           </div>
         )
       })}
+
+      {/* Section 5: Grid Reference Price — always visible, even without contracts/tariffs */}
+      <CollapsibleSection title="Grid Reference Price">
+        <GRPSection
+          projectId={pid}
+          orgId={data.project.organization_id as number}
+          codDate={data.project.cod_date as string | null | undefined}
+          firstTariff={grpFirstTariff}
+          firstLp={grpFirstLp}
+          baselineGrp={data.baseline_grp ?? []}
+          initialMonthly={grpMonthly}
+          initialAnnual={grpAnnual}
+          initialTokens={grpTokens}
+          onSaved={onSaved}
+          editMode={editMode}
+        />
+      </CollapsibleSection>
 
     </div>
   )
