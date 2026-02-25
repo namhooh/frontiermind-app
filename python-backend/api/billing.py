@@ -417,6 +417,15 @@ async def generate_expected_invoice(
                 rounding_mode = tax_config.get("rounding_mode", "ROUND_HALF_UP")
                 avail_mode = tax_config.get("available_energy_line_mode", "single")
 
+                # Round rates to invoice precision (default 4dp) to match
+                # CBE billing system which truncates effective rates before
+                # multiplying by kWh quantities.
+                invoice_rate_precision = tax_config.get("invoice_rate_precision", 4)
+                for ct_id in rate_by_tariff:
+                    rate_by_tariff[ct_id] = rate_by_tariff[ct_id].quantize(
+                        Decimal(10) ** -invoice_rate_precision, rounding=ROUND_HALF_UP
+                    )
+
                 # ----------------------------------------------------------
                 # 6. Resolve line item type IDs
                 # ----------------------------------------------------------
@@ -855,7 +864,7 @@ async def get_monthly_billing(
                         FROM production_forecast
                         WHERE project_id = %(pid)s
                     ),
-                    -- Aggregate actuals per month (metered + available, includes meterless rows)
+                    -- Aggregate actuals per month (metered + available only; excludes test energy)
                     monthly_actuals AS (
                         SELECT
                             date_trunc('month', ma.period_start)::date AS billing_month,
@@ -868,6 +877,7 @@ async def get_monthly_billing(
                         WHERE (ma.meter_id IN (SELECT id FROM project_meters)
                                OR (c.project_id = %(pid)s AND ma.contract_line_id IS NOT NULL))
                           AND ma.period_start IS NOT NULL
+                          AND (cl.energy_category IS DISTINCT FROM 'test')
                         GROUP BY 1, 2
                     ),
                     -- Get forecasts per month
@@ -909,6 +919,11 @@ async def get_monthly_billing(
                     key = (ppr["billing_month"].strftime("%Y-%m-%d") if isinstance(ppr["billing_month"], date) else str(ppr["billing_month"]),
                            ppr["billing_product_id"])
                     per_product_map[key] = _decimal_to_float(ppr["product_kwh"])
+
+                # Months that have per-product meter_aggregate data; the
+                # actual*rate fallback is only used for months WITHOUT any
+                # per-product breakdown (legacy/manual rows).
+                months_with_product_data: set[str] = {bm for (bm, _) in per_product_map}
 
                 # 4) Build rate lookup: for each product, get rates per month
                 rate_map: dict[str, dict[str, float]] = {}
@@ -1026,16 +1041,16 @@ async def get_monthly_billing(
                             if p.is_metered:
                                 if product_kwh is not None:
                                     amount = product_kwh * rate
-                                elif actual is not None:
-                                    amount = actual * rate  # fallback
+                                elif bm_str not in months_with_product_data and actual is not None:
+                                    amount = actual * rate  # fallback only for months without per-product data
                             else:
                                 amount = rate
                         if rate_hard is not None:
                             if p.is_metered:
                                 if product_kwh is not None:
                                     amount_hard = product_kwh * rate_hard
-                                elif actual is not None:
-                                    amount_hard = actual * rate_hard  # fallback
+                                elif bm_str not in months_with_product_data and actual is not None:
+                                    amount_hard = actual * rate_hard  # fallback only for months without per-product data
                             else:
                                 amount_hard = rate_hard
 
@@ -1592,16 +1607,19 @@ async def get_meter_billing(
                         date_trunc('month', ma.period_start)::date AS billing_month,
                         ma.meter_id,
                         m.name AS meter_name,
-                        ma.opening_reading,
-                        ma.closing_reading,
-                        COALESCE(ma.energy_kwh, ma.total_production, 0) AS metered_kwh,
-                        COALESCE(ma.available_energy_kwh, 0) AS available_kwh,
-                        ma.billing_period_id
+                        MAX(CASE WHEN COALESCE(ma.energy_kwh, ma.total_production, 0) > 0
+                                 THEN ma.opening_reading END) AS opening_reading,
+                        MAX(CASE WHEN COALESCE(ma.energy_kwh, ma.total_production, 0) > 0
+                                 THEN ma.closing_reading END) AS closing_reading,
+                        SUM(COALESCE(ma.energy_kwh, ma.total_production, 0)) AS metered_kwh,
+                        SUM(COALESCE(ma.available_energy_kwh, 0)) AS available_kwh,
+                        MAX(ma.billing_period_id) AS billing_period_id
                     FROM meter_aggregate ma
                     JOIN meter m ON m.id = ma.meter_id
                     WHERE ma.meter_id = ANY(%(mids)s)
                       AND ma.period_start IS NOT NULL
-                    ORDER BY ma.period_start DESC, ma.meter_id
+                    GROUP BY date_trunc('month', ma.period_start)::date, ma.meter_id, m.name
+                    ORDER BY date_trunc('month', ma.period_start)::date DESC, ma.meter_id
                 """, {"mids": meter_ids})
                 agg_rows = cur.fetchall()
 

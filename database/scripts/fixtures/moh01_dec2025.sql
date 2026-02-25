@@ -53,6 +53,23 @@ WHERE c.id = cl.contract_id
   AND cl.external_line_id IS NOT NULL;
 
 -- ============================================================================
+-- 2b. Add missing available-energy contract_lines for Bottles and BBM2
+-- ============================================================================
+
+INSERT INTO contract_line (contract_id, billing_product_id, meter_id, contract_line_number, product_desc, energy_category, organization_id, is_active)
+SELECT c.id, NULL, m.id, mapping.line_no, mapping.desc, 'available'::energy_category, p.organization_id, true
+FROM project p
+JOIN contract c ON c.project_id = p.id
+CROSS JOIN (
+    VALUES
+        ('%Bottle%'::text, 6001, 'Available Energy (EAvailable) - Bottles'),
+        ('%BBM2%'::text,   8001, 'Available Energy (EAvailable) - BBM2')
+) AS mapping(meter_pattern, line_no, "desc")
+JOIN meter m ON m.project_id = p.id AND m.name ILIKE mapping.meter_pattern
+WHERE p.external_project_id = 'MOH01'
+ON CONFLICT (contract_id, contract_line_number) DO NOTHING;
+
+-- ============================================================================
 -- 3. Link contract_lines to clause_tariff + billing_product
 -- ============================================================================
 
@@ -125,7 +142,8 @@ SET logic_parameters = COALESCE(ct.logic_parameters, '{}')::jsonb || '{
     "effective_from": "2025-01-01",
     "rounding_mode": "ROUND_HALF_UP",
     "rounding_precision": 2,
-    "available_energy_line_mode": "single",
+    "invoice_rate_precision": 4,
+    "available_energy_line_mode": "per_meter",
     "levies": [
       {"code": "NHIL", "name": "NHIL", "rate": 0.025, "applies_to": {"base": "energy_subtotal"}, "sort_order": 10},
       {"code": "GETFUND", "name": "GETFund", "rate": 0.025, "applies_to": {"base": "energy_subtotal"}, "sort_order": 11},
@@ -161,7 +179,8 @@ SELECT
   '{
     "rounding_mode": "ROUND_HALF_UP",
     "rounding_precision": 2,
-    "available_energy_line_mode": "single",
+    "invoice_rate_precision": 4,
+    "available_energy_line_mode": "per_meter",
     "levies": [
       {"code": "NHIL", "name": "NHIL", "rate": 0.025, "applies_to": {"base": "energy_subtotal"}, "sort_order": 10},
       {"code": "GETFUND", "name": "GETFund", "rate": 0.025, "applies_to": {"base": "energy_subtotal"}, "sort_order": 11},
@@ -215,6 +234,7 @@ WITH
     SELECT
       cl.id AS contract_line_id,
       cl.meter_id,
+      md.meter_name_pattern,
       md.energy_kwh,
       md.opening,
       md.closing
@@ -231,6 +251,7 @@ INSERT INTO meter_aggregate (
   contract_line_id, period_type, period_start, period_end,
   energy_kwh, total_production, available_energy_kwh,
   opening_reading, closing_reading,
+  ghi_irradiance_wm2,
   source_system
 )
 SELECT
@@ -247,12 +268,30 @@ SELECT
   0,
   rm.opening,
   rm.closing,
+  -- Actual GHI from Operations Plant Performance Workbook (97,719.45 Wh/m²)
+  CASE WHEN rm.meter_name_pattern = '%PPL1%' THEN 97719.45 ELSE NULL END,
   'fixture_moh01_dec2025'
 FROM resolved_meters rm
 WHERE EXISTS (SELECT 1 FROM bp) AND EXISTS (SELECT 1 FROM ct)
 ON CONFLICT DO NOTHING;
 
--- Available energy aggregate (22,613.90 kWh linked to first available contract_line)
+-- Clean up old lump-sum available energy row (replaced by per-meter rows below)
+DELETE FROM meter_aggregate
+WHERE source_system = 'fixture_moh01_dec2025'
+  AND period_start = '2025-12-01'
+  AND available_energy_kwh > 0
+  AND COALESCE(energy_kwh, 0) = 0
+  AND contract_line_id IN (
+      SELECT cl.id FROM contract_line cl
+      JOIN contract c ON c.id = cl.contract_id
+      JOIN project p ON p.id = c.project_id
+      WHERE p.external_project_id = 'MOH01'
+        AND cl.energy_category = 'available'
+  );
+
+-- Per-meter available energy aggregates (from Operations Plant Performance Workbook)
+-- PPL1: 5694.03, Sacks: 6058.70, Bottles: 3771.08, BBM1: 4930.81, BBM2: 2159.33
+-- Total: 22613.95 kWh
 WITH
   proj AS (
     SELECT id AS project_id, organization_id
@@ -272,15 +311,23 @@ WITH
     WHERE ct.is_current = true
     LIMIT 1
   ),
-  avail_line AS (
-    SELECT cl.id AS contract_line_id, cl.meter_id
-    FROM contract_line cl
+  avail_data (meter_name_pattern, avail_kwh) AS (
+    VALUES
+      ('%PPL1%'::text,   5694.03::numeric),
+      ('%PPL2%'::text,   6058.70),
+      ('%Bottle%'::text,  3771.08),
+      ('%BBM1%'::text,   4930.81),
+      ('%BBM2%'::text,   2159.33)
+  ),
+  resolved_avail AS (
+    SELECT cl.id AS contract_line_id, cl.meter_id, ad.avail_kwh
+    FROM avail_data ad
+    JOIN contract_line cl ON cl.is_active = true
     JOIN contract c ON c.id = cl.contract_id
     JOIN proj p ON c.project_id = p.project_id
+    JOIN meter m ON m.id = cl.meter_id
     WHERE cl.energy_category = 'available'
-      AND cl.is_active = true
-    ORDER BY cl.contract_line_number
-    LIMIT 1
+      AND m.name ILIKE ad.meter_name_pattern
   )
 INSERT INTO meter_aggregate (
   organization_id, meter_id, billing_period_id, clause_tariff_id,
@@ -289,71 +336,25 @@ INSERT INTO meter_aggregate (
 )
 SELECT
   (SELECT organization_id FROM proj),
-  al.meter_id,
+  ra.meter_id,
   (SELECT billing_period_id FROM bp),
   (SELECT clause_tariff_id FROM ct),
-  al.contract_line_id,
+  ra.contract_line_id,
   'monthly',
   '2025-12-01'::date,
   '2025-12-31'::date,
   0,
-  22613.90,
+  ra.avail_kwh,
   'fixture_moh01_dec2025'
-FROM avail_line al
+FROM resolved_avail ra
 WHERE EXISTS (SELECT 1 FROM bp) AND EXISTS (SELECT 1 FROM ct)
 ON CONFLICT DO NOTHING;
 
--- Test energy aggregate (945,184.39 kWh linked to line 3000, meter_id=NULL)
-WITH
-  proj AS (
-    SELECT id AS project_id, organization_id
-    FROM project WHERE external_project_id = 'MOH01'
-    LIMIT 1
-  ),
-  bp AS (
-    SELECT id AS billing_period_id
-    FROM billing_period
-    WHERE start_date = '2025-12-01' AND end_date = '2025-12-31'
-    LIMIT 1
-  ),
-  ct AS (
-    SELECT ct.id AS clause_tariff_id
-    FROM clause_tariff ct
-    JOIN proj p ON ct.project_id = p.project_id
-    WHERE ct.is_current = true
-    LIMIT 1
-  ),
-  test_line AS (
-    SELECT cl.id AS contract_line_id
-    FROM contract_line cl
-    JOIN contract c ON c.id = cl.contract_id
-    JOIN proj p ON c.project_id = p.project_id
-    WHERE cl.contract_line_number = 3000
-      AND cl.energy_category = 'test'
-      AND cl.is_active = true
-    LIMIT 1
-  )
-INSERT INTO meter_aggregate (
-  organization_id, meter_id, billing_period_id, clause_tariff_id,
-  contract_line_id, period_type, period_start, period_end,
-  energy_kwh, total_production, available_energy_kwh, source_system
-)
-SELECT
-  (SELECT organization_id FROM proj),
-  NULL,  -- no meter for test energy
-  (SELECT billing_period_id FROM bp),
-  (SELECT clause_tariff_id FROM ct),
-  tl.contract_line_id,
-  'monthly',
-  '2025-12-01'::date,
-  '2025-12-31'::date,
-  945184.39,
-  945184.39,
-  0,
-  'fixture_moh01_dec2025'
-FROM test_line tl
-WHERE EXISTS (SELECT 1 FROM bp) AND EXISTS (SELECT 1 FROM ct)
-ON CONFLICT DO NOTHING;
+-- Test energy aggregate: REMOVED for now (E_Test not part of Net Due calc).
+-- The contract_line (3000) is kept so the schema is ready when test energy
+-- data is re-introduced.  A partial unique index
+-- (idx_meter_aggregate_billing_dedup_null_meter) now covers meter_id IS NULL
+-- rows to prevent the duplicate that previously existed here.
 
 -- ============================================================================
 -- 8. Seed post-COD GRP (reference_price) for Sep-Dec 2025
@@ -387,17 +388,20 @@ WHERE p.external_project_id = 'MOH01'
 -- ============================================================================
 -- 9. Insert plant_performance for Dec 2025
 -- ============================================================================
--- Regular generation only (excluding test energy):
---   Total metered = 27028.297 + 28254.406 + 22925.406 + 46677.219 + 24097.000 = 148982.328 kWh
---   Total available = 22613.900 kWh
---   Total energy = 171596.228 kWh
---   Forecast (Dec 2025) = 292826.089 kWh
---   energy_comparison = 171596.228 / 292826.089 ≈ 0.586
+-- From Operations Plant Performance Workbook (post-COD row, OY=1):
+--   Total energy = 171596.228 kWh, Forecast = 292826.089 kWh
+--   Actual GHI = 97,719.45 Wh/m², Forecast GHI = 141,590.61 Wh/m²
+--   Actual PR = 0.6711, Forecast PR = 0.7940
+--   Availability = 100%
+--   energy_comparison = 171596.228 / 292826.089 ≈ 0.5860
+--   irr_comparison = 97719.45 / 141590.61 ≈ 0.6902
+--   pr_comparison = 0.6711 / 0.7940 ≈ 0.8452
 
 INSERT INTO plant_performance (
   project_id, organization_id, production_forecast_id,
   billing_period_id, billing_month, operating_year,
-  energy_comparison
+  actual_pr, actual_availability_pct,
+  energy_comparison, irr_comparison, pr_comparison
 )
 SELECT
   p.id,
@@ -406,7 +410,11 @@ SELECT
   bp.id,
   '2025-12-01'::date,
   1,
-  ROUND(171596.228 / pf.forecast_energy_kwh, 6)
+  0.6711,
+  100,
+  ROUND(171596.228 / pf.forecast_energy_kwh, 6),
+  ROUND(97719.45 / pf.forecast_ghi_irradiance, 6),
+  ROUND(0.6711 / pf.forecast_pr, 6)
 FROM project p
 JOIN production_forecast pf ON pf.project_id = p.id AND pf.forecast_month = '2025-12-01'
 JOIN billing_period bp ON bp.start_date = '2025-12-01' AND bp.end_date = '2025-12-31'

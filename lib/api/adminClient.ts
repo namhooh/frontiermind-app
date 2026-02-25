@@ -82,6 +82,7 @@ export interface ProjectListItem {
 export interface ProjectGroupedItem {
   id: number
   name: string
+  external_project_id: string | null
   organization_id: number
   organization_name: string
 }
@@ -105,6 +106,7 @@ export interface ProjectDashboardResponse {
   amendments: Record<string, unknown>[]
   exchange_rates: Record<string, unknown>[]
   baseline_grp: Record<string, unknown>[]
+  contract_lines: Record<string, unknown>[]
   lookups: Record<string, { id: number; code?: string; name: string }[]>
 }
 
@@ -112,7 +114,7 @@ export interface ProjectDashboardResponse {
 // Inline Editing Types
 // ============================================================================
 
-export type PatchEntity = 'projects' | 'contracts' | 'tariffs' | 'assets' | 'meters' | 'forecasts' | 'guarantees' | 'contacts' | 'billing-products' | 'rate-periods'
+export type PatchEntity = 'projects' | 'contracts' | 'tariffs' | 'assets' | 'meters' | 'forecasts' | 'guarantees' | 'contacts' | 'billing-products' | 'rate-periods' | 'exchange-rates'
 
 export interface PatchEntityRequest {
   entity: PatchEntity

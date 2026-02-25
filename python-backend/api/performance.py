@@ -248,11 +248,12 @@ async def get_plant_performance(
                         SELECT
                             date_trunc('month', ma.period_start)::date AS billing_month,
                             ma.meter_id,
-                            COALESCE(ma.energy_kwh, ma.total_production, 0) AS metered_kwh,
-                            COALESCE(ma.available_energy_kwh, 0) AS available_kwh
+                            COALESCE(ma.energy_kwh, ma.total_production, 0) AS metered_kwh
                         FROM meter_aggregate ma
+                        JOIN contract_line cl ON cl.id = ma.contract_line_id
                         WHERE ma.meter_id = ANY(%(mids)s)
                           AND ma.period_start IS NOT NULL
+                          AND cl.energy_category = 'metered'
                     """, {"mids": meter_ids_ordered})
                     for row in cur.fetchall():
                         bm = row["billing_month"]
@@ -261,7 +262,6 @@ async def get_plant_performance(
                             per_meter_data[bm_key] = {}
                         per_meter_data[bm_key][row["meter_id"]] = {
                             "metered_kwh": _d2f(row["metered_kwh"]),
-                            "available_kwh": _d2f(row["available_kwh"]),
                         }
 
                 # Meter name lookup
@@ -301,7 +301,6 @@ async def get_plant_performance(
                             meter_id=mid,
                             meter_name=meter_name_map.get(mid),
                             metered_kwh=md.get("metered_kwh"),
-                            available_kwh=md.get("available_kwh"),
                         ))
 
                     # GHI normalization: actual_ghi is Wh/m² (monthly cumulative)

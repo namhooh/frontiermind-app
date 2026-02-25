@@ -1,21 +1,119 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
-import { Upload, Download, Plus, Loader2, Check, X, ChevronDown, ChevronRight } from 'lucide-react'
+import { Upload, Download, Plus, Loader2, Check, X, ChevronDown, ChevronRight, Maximize2, Minimize2 } from 'lucide-react'
 import { IS_DEMO } from '@/lib/demoMode'
 import { toast } from 'sonner'
 import {
   adminClient,
   type MonthlyBillingResponse,
-  type MonthlyBillingRow,
   type MonthlyBillingProductColumn,
   type MeterBillingResponse,
   type MeterBillingMonth,
   type MeterReadingDetail,
-  type MeterInfo,
   type ExpectedInvoiceSummary,
+  type ExpectedInvoiceLineItem,
 } from '@/lib/api/adminClient'
 import { formatMonth, fmtNum, fmtCurrency, varianceClass } from '@/app/projects/utils/formatters'
+
+// ---------------------------------------------------------------------------
+// InlineNumberEdit — click-to-edit number cell for existing rows
+// ---------------------------------------------------------------------------
+
+function InlineNumberEdit({
+  value,
+  billingMonth,
+  field,
+  projectId,
+  onSaved,
+}: {
+  value: number | null
+  billingMonth: string
+  field: 'actual_kwh' | 'forecast_kwh'
+  projectId: number
+  onSaved: () => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState('')
+  const [saving, setSaving] = useState(false)
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus()
+      inputRef.current.select()
+    }
+  }, [editing])
+
+  const startEdit = useCallback((e: React.MouseEvent) => {
+    e.stopPropagation()
+    setDraft(value != null ? String(value) : '')
+    setEditing(true)
+  }, [value])
+
+  const handleSave = useCallback(async () => {
+    const num = draft.trim() === '' ? undefined : parseFloat(draft)
+    // Skip save if unchanged
+    if (num === value || (num === undefined && value == null)) {
+      setEditing(false)
+      return
+    }
+    if (IS_DEMO) {
+      toast('Demo mode — changes are not saved', { duration: 3000 })
+      setEditing(false)
+      return
+    }
+    setSaving(true)
+    setEditing(false)
+    try {
+      await adminClient.addManualBillingEntry(projectId, {
+        billing_month: billingMonth,
+        [field]: num,
+      })
+      toast('Field updated', { duration: 3000 })
+      onSaved()
+    } catch {
+      toast.error('Save failed')
+    } finally {
+      setSaving(false)
+    }
+  }, [draft, value, projectId, billingMonth, field, onSaved])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent) => {
+    if (e.key === 'Enter') { e.preventDefault(); handleSave() }
+    else if (e.key === 'Escape') setEditing(false)
+  }, [handleSave])
+
+  if (saving) {
+    return <Loader2 className="h-3 w-3 animate-spin text-slate-400 ml-auto" />
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="number"
+        step="any"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={() => handleSave()}
+        onKeyDown={handleKeyDown}
+        onClick={(e) => e.stopPropagation()}
+        className="w-24 text-xs text-right border border-blue-300 rounded px-1.5 py-0.5 outline-none ring-1 ring-blue-200 focus:ring-blue-400"
+      />
+    )
+  }
+
+  return (
+    <span
+      onClick={startEdit}
+      className="cursor-pointer rounded px-1 -mx-1 bg-amber-50 hover:bg-amber-100 transition-colors"
+      title="Click to edit"
+    >
+      {fmtNum(value)}
+    </span>
+  )
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -28,6 +126,16 @@ function shortProductLabel(name: string): string {
   if (lower.includes('test') || lower.includes('early operating')) return 'E_Test'
   if (lower.includes('eavailable') || lower.includes('available')) return 'E_Avail'
   return name
+}
+
+/** Determine the energy category of a billing product for per-meter mapping */
+function productEnergyCategory(p: MonthlyBillingProductColumn): 'metered' | 'available' | 'test' | null {
+  const name = (p.product_name ?? '').toLowerCase()
+  const code = p.product_code.toUpperCase()
+  if (code === 'ENER003' || name.includes('eavailable') || name.includes('available')) return 'available'
+  if (code === 'ENER001' || name.includes('test') || name.includes('early operating')) return 'test'
+  if (code === 'ENER002' || name.includes('emetered') || (name.includes('metered') && !name.includes('available'))) return 'metered'
+  return null
 }
 
 // ---------------------------------------------------------------------------
@@ -70,6 +178,9 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+
+  // Fullscreen state
+  const [fullscreen, setFullscreen] = useState(false)
 
   // Import state
   const fileInputRef = useRef<HTMLInputElement>(null)
@@ -148,6 +259,7 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
   // Manual entry save
   const handleSaveManual = useCallback(async () => {
     if (!projectId) return
+    if (IS_DEMO) { toast('Demo mode — changes are not saved', { duration: 3000 }); setShowAddRow(false); return }
     if (!draft.billing_month) {
       toast.error('Billing month is required')
       return
@@ -243,10 +355,19 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
       }
     }
 
-    // Sort descending
+    // Sort descending and exclude months before Sept 2025 (pre-COD)
     result.sort((a, b) => b.billing_month.localeCompare(a.billing_month))
-    return result
+    return result.filter((r) => r.billing_month >= '2025-09')
   }, [data, meterData])
+
+  // Auto-expand the most recent (top) month on initial load
+  const autoExpandedRef = useRef(false)
+  useEffect(() => {
+    if (!autoExpandedRef.current && unifiedRows.length > 0) {
+      autoExpandedRef.current = true
+      setExpanded(new Set([unifiedRows[0].billing_month]))
+    }
+  }, [unifiedRows])
 
   // Compute footer totals
   const totals = useMemo(() => {
@@ -279,21 +400,11 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
     }
   }, [unifiedRows])
 
-  // Deduplicated meter list for per-meter revenue columns
-  const uniqueMeters = useMemo(() => {
-    const seen = new Map<number, MeterInfo>()
-    for (const m of meterData?.meters ?? []) {
-      if (!seen.has(m.meter_id)) seen.set(m.meter_id, m)
-    }
-    return Array.from(seen.values())
-  }, [meterData])
-
   // Determine how many product columns we have
   const productColCount = products.length
-  const meterColCount = uniqueMeters.length
-  // Total columns: expand chevron + month + actual + forecast + var% + product cols + meter cols + levies + VAT + gross + W/H + net due
+  // Total columns: expand chevron + month + actual + forecast + var% + product cols + levies + VAT + gross + W/H + net due
   const waterfallCols = 5 // levies, VAT, gross, W/H, net due
-  const totalCols = 1 + 1 + 1 + 1 + 1 + productColCount + meterColCount + waterfallCols
+  const totalCols = 1 + 1 + 1 + 1 + 1 + productColCount + waterfallCols
 
   // Loading / error states
   if (!projectId) {
@@ -315,7 +426,7 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
   const hasData = unifiedRows.length > 0 || showAddRow
 
   return (
-    <div className="space-y-4">
+    <div className={`space-y-4 ${fullscreen ? 'fixed inset-0 z-50 bg-white overflow-auto p-6' : ''}`}>
       {/* Toolbar */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
@@ -345,6 +456,13 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
               <Plus className="h-3 w-3" /> Add Month
             </button>
           )}
+          <button
+            onClick={() => setFullscreen((v) => !v)}
+            className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50"
+            title={fullscreen ? 'Exit full screen' : 'Full screen'}
+          >
+            {fullscreen ? <Minimize2 className="h-3 w-3" /> : <Maximize2 className="h-3 w-3" />}
+          </button>
           {!IS_DEMO && (
             <label className="inline-flex items-center gap-1 text-xs px-2.5 py-1.5 rounded border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 cursor-pointer">
               {importing ? <Loader2 className="h-3 w-3 animate-spin" /> : <Upload className="h-3 w-3" />}
@@ -389,7 +507,7 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
                   Generation
                 </th>
                 {/* Billing group */}
-                <th colSpan={productColCount + meterColCount + waterfallCols} className="px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 text-center">
+                <th colSpan={productColCount + waterfallCols} className="px-3 py-1.5 text-xs font-semibold text-amber-700 bg-amber-50 text-center">
                   Billing{currency ? ` (${currency})` : ''}
                 </th>
               </tr>
@@ -406,12 +524,6 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
                 {products.map((p) => (
                   <th key={p.product_code} className="text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap" title={p.product_name}>
                     {shortProductLabel(p.product_name)}
-                  </th>
-                ))}
-                {/* Per-meter revenue columns */}
-                {uniqueMeters.map((m, i) => (
-                  <th key={`meter-hdr-${m.meter_id}`} className={`text-right px-3 py-2 font-medium text-slate-600 whitespace-nowrap ${i === uniqueMeters.length - 1 ? 'border-r border-slate-200' : ''}`}>
-                    {m.meter_name || `Meter ${m.meter_id}`}
                   </th>
                 ))}
                 {/* Invoice waterfall */}
@@ -457,9 +569,6 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
                   {products.map((p) => (
                     <td key={p.product_code} className="px-3 py-1.5" />
                   ))}
-                  {uniqueMeters.map((m) => (
-                    <td key={`meter-add-${m.meter_id}`} className="px-3 py-1.5" />
-                  ))}
                   {/* waterfall empties */}
                   <td className="px-3 py-1.5" />
                   <td className="px-3 py-1.5" />
@@ -491,13 +600,15 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
                   key={row.billing_month}
                   row={row}
                   products={products}
-                  meters={uniqueMeters}
                   currency={currency}
                   hardCurrency={hardCurrency}
                   showHardCcy={showHardCcy}
                   isExpanded={expanded.has(row.billing_month)}
                   onToggle={() => toggleExpand(row.billing_month)}
                   totalCols={totalCols}
+                  editMode={editMode}
+                  projectId={projectId}
+                  onSaved={fetchData}
                 />
               ))}
             </tbody>
@@ -513,9 +624,6 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
                   <td className="px-3 py-2" />
                   {products.map((p) => (
                     <td key={p.product_code} className="px-3 py-2" />
-                  ))}
-                  {uniqueMeters.map((m) => (
-                    <td key={`meter-total-${m.meter_id}`} className="px-3 py-2" />
                   ))}
                   <td className="px-3 py-2" />
                   <td className="px-3 py-2" />
@@ -549,26 +657,30 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
 function UnifiedRow({
   row,
   products,
-  meters,
   currency,
   hardCurrency,
   showHardCcy,
   isExpanded,
   onToggle,
   totalCols,
+  editMode,
+  projectId,
+  onSaved,
 }: {
   row: UnifiedBillingRow
   products: MonthlyBillingProductColumn[]
-  meters: MeterInfo[]
   currency: string | null
   hardCurrency: string | null
   showHardCcy: boolean
   isExpanded: boolean
   onToggle: () => void
   totalCols: number
+  editMode?: boolean
+  projectId?: number
+  onSaved?: () => void
 }) {
   const inv = row.expected_invoice
-  const hasDetail = row.meter_readings.length > 0
+  const hasDetail = row.meter_readings.length > 0 || (inv?.line_items?.length ?? 0) > 0
 
   // Net due: from invoice, or fall back to total_billing_amount
   const netDue = inv ? inv.net_due : row.total_billing_amount
@@ -591,15 +703,18 @@ function UnifiedRow({
         {/* Month */}
         <td className="px-3 py-2 text-slate-700 whitespace-nowrap">
           {formatMonth(row.billing_month)}
-          {inv && (
-            <span className="ml-1.5 text-[10px] font-medium text-emerald-600 bg-emerald-50 px-1 py-0.5 rounded">
-              v{inv.version_no}
-            </span>
-          )}
         </td>
         {/* Generation */}
-        <td className="px-3 py-2 text-right tabular-nums text-slate-700">{fmtNum(row.actual_kwh)}</td>
-        <td className="px-3 py-2 text-right tabular-nums text-slate-500">{fmtNum(row.forecast_kwh)}</td>
+        <td className="px-3 py-2 text-right tabular-nums text-slate-700">
+          {editMode && projectId && onSaved ? (
+            <InlineNumberEdit value={row.actual_kwh} billingMonth={row.billing_month} field="actual_kwh" projectId={projectId} onSaved={onSaved} />
+          ) : fmtNum(row.actual_kwh)}
+        </td>
+        <td className="px-3 py-2 text-right tabular-nums text-slate-500">
+          {editMode && projectId && onSaved ? (
+            <InlineNumberEdit value={row.forecast_kwh} billingMonth={row.billing_month} field="forecast_kwh" projectId={projectId} onSaved={onSaved} />
+          ) : fmtNum(row.forecast_kwh)}
+        </td>
         <td className={`px-3 py-2 text-right tabular-nums ${varianceClass(row.variance_pct)}`}>
           {row.variance_pct != null ? `${row.variance_pct >= 0 ? '+' : ''}${row.variance_pct.toFixed(1)}%` : '—'}
         </td>
@@ -609,20 +724,6 @@ function UnifiedRow({
           return (
             <td key={p.product_code} className="px-3 py-2 text-right tabular-nums text-slate-600">
               {fmtCurrency(amount, currency)}
-            </td>
-          )
-        })}
-        {/* Per-meter revenue columns */}
-        {meters.map((m, i) => {
-          const reading = row.meter_readings.find(r => r.meter_id === m.meter_id)
-          return (
-            <td key={`meter-${m.meter_id}`} className={`px-3 py-2 text-right tabular-nums text-slate-600 ${i === meters.length - 1 ? 'border-r border-slate-200' : ''}`}>
-              {reading?.amount != null ? fmtCurrency(reading.amount, currency) : '—'}
-              {showHardCcy && reading?.amount_hard_ccy != null && (
-                <div className="text-[10px] text-slate-400 tabular-nums">
-                  {fmtCurrency(reading.amount_hard_ccy, hardCurrency)}
-                </div>
-              )}
             </td>
           )
         })}
@@ -655,12 +756,12 @@ function UnifiedRow({
         </td>
       </tr>
 
-      {/* Expanded: per-meter detail */}
+      {/* Expanded detail rows: meters + levy/WHT breakdown */}
       {isExpanded && hasDetail && (
-        <MeterDetailRows
+        <ExpandedDetailRows
           readings={row.meter_readings}
+          expectedInvoice={inv}
           products={products}
-          meters={meters}
           currency={currency}
           hardCurrency={hardCurrency}
           showHardCcy={showHardCcy}
@@ -672,98 +773,145 @@ function UnifiedRow({
 }
 
 // ---------------------------------------------------------------------------
-// MeterDetailRows — child rows showing per-meter breakdown
+// ExpandedDetailRows — meter breakdown + levy/WHT breakdown
 // ---------------------------------------------------------------------------
 
-function MeterDetailRows({
+function ExpandedDetailRows({
   readings,
+  expectedInvoice,
   products,
-  meters,
   currency,
   hardCurrency,
   showHardCcy,
   totalCols,
 }: {
   readings: MeterReadingDetail[]
+  expectedInvoice: ExpectedInvoiceSummary | null
   products: MonthlyBillingProductColumn[]
-  meters: MeterInfo[]
   currency: string | null
   hardCurrency: string | null
   showHardCcy: boolean
   totalCols: number
 }) {
-  return (
-    <tr>
-      <td colSpan={totalCols} className="p-0">
-        <div className="bg-slate-50/80 border-t border-slate-100">
-          <table className="w-full text-xs">
-            <tbody>
-              {readings.map((r, idx) => (
-                <tr key={`${r.meter_id}-${idx}`} className="border-b border-slate-100/50">
-                  {/* Indent + meter name */}
-                  <td className="w-6 px-1 py-1.5" />
-                  <td className="px-3 py-1.5 text-slate-500 whitespace-nowrap">
-                    {r.meter_name || `Meter ${r.meter_id}`}
-                  </td>
-                  {/* Metered kWh in actual column */}
-                  <td className="px-3 py-1.5 text-right tabular-nums text-slate-500">
-                    {fmtNum(r.metered_kwh)}
-                  </td>
-                  {/* Forecast + Var% empty for child rows */}
-                  <td className="px-3 py-1.5" />
-                  <td className="px-3 py-1.5" />
-                  {/* Product amounts: show rate + amount per product */}
-                  {products.map((p) => {
-                    const isAvailableEnergy = p.product_code.toLowerCase().includes('available')
-                    const qty = isAvailableEnergy ? r.available_kwh : r.metered_kwh
-                    const rate = r.rate
-                    const amt = qty != null && rate != null ? qty * rate : null
+  const levyItems = expectedInvoice?.line_items
+    .filter(li => li.line_item_type_code === 'LEVY')
+    .sort((a, b) => a.sort_order - b.sort_order) ?? []
+  const whItems = expectedInvoice?.line_items
+    .filter(li => li.line_item_type_code === 'WITHHOLDING')
+    .sort((a, b) => a.sort_order - b.sort_order) ?? []
 
-                    return (
-                      <td key={p.product_code} className="px-3 py-1.5 text-right">
-                        {amt != null ? (
-                          <div>
-                            <span className="tabular-nums text-slate-500">{fmtCurrency(amt, currency)}</span>
-                            {rate != null && (
-                              <div className="text-[10px] text-slate-400 tabular-nums">
-                                @{fmtNum(rate, 4)}
-                              </div>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-slate-300">—</span>
-                        )}
-                      </td>
-                    )
-                  })}
-                  {/* Per-meter columns: highlight this meter's column */}
-                  {meters.map((m) => (
-                    <td key={`detail-meter-${m.meter_id}`} className="px-3 py-1.5 text-right">
-                      {m.meter_id === r.meter_id ? (
-                        <span className="tabular-nums text-slate-500">{fmtCurrency(r.amount, currency)}</span>
-                      ) : null}
-                    </td>
-                  ))}
-                  {/* Waterfall columns empty for child rows */}
-                  <td className="px-3 py-1.5" />
-                  <td className="px-3 py-1.5" />
-                  <td className="px-3 py-1.5" />
-                  <td className="px-3 py-1.5" />
-                  {/* Per-meter amount + hard ccy */}
-                  <td className="px-3 py-1.5 text-right">
-                    <span className="tabular-nums text-slate-500">{fmtCurrency(r.amount, currency)}</span>
-                    {showHardCcy && r.amount_hard_ccy != null && (
-                      <div className="text-[10px] text-slate-400 tabular-nums">
-                        {fmtCurrency(r.amount_hard_ccy, hardCurrency)} {hardCurrency}
-                      </div>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </td>
-    </tr>
+  // Number of empty columns between name and waterfall: actual + forecast + var% + products
+  const midEmpties = 3 + products.length
+
+  // Shared sub-row cell class (matches parent px-3 py-2 but slightly compact)
+  const sc = 'px-3 py-1.5'
+
+  return (
+    <>
+      {/* Meter breakdown rows */}
+      {readings.map((r, idx) => {
+        const rate = r.rate
+        return (
+          <tr key={`meter-${r.meter_id}-${idx}`} className="bg-slate-50/80 border-b border-slate-100/50 text-xs">
+            <td className="w-6 px-1 py-1.5" />
+            <td className={`${sc} text-slate-500 whitespace-nowrap`}>
+              {r.meter_name || `Meter ${r.meter_id}`}
+              {rate != null && (
+                <span className="ml-1.5 text-[10px] text-slate-400 tabular-nums">@{fmtNum(rate, 4)}/kWh</span>
+              )}
+            </td>
+            {/* Total kWh (metered + available) — aligns with Actual kWh */}
+            <td className={`${sc} text-right tabular-nums text-slate-500`}>
+              {fmtNum(r.metered_kwh != null || r.available_kwh != null
+                ? (r.metered_kwh ?? 0) + (r.available_kwh ?? 0)
+                : null)}
+            </td>
+            {/* Forecast + Var% empty */}
+            <td className={sc} />
+            <td className={sc} />
+            {/* Product amounts — map each product to the correct per-meter kWh */}
+            {products.map((p) => {
+              const cat = productEnergyCategory(p)
+              // metered → metered_kwh, available → available_kwh, test → no per-meter breakdown
+              const qty = cat === 'available' ? r.available_kwh
+                : cat === 'metered' ? r.metered_kwh
+                : null
+              const amt = qty != null && rate != null ? qty * rate : null
+              return (
+                <td key={p.product_code} className={`${sc} text-right tabular-nums text-slate-500`}>
+                  {amt != null ? fmtCurrency(amt, currency) : <span className="text-slate-300">&mdash;</span>}
+                </td>
+              )
+            })}
+            {/* Waterfall empty (Levies, VAT, Gross, W/H) */}
+            <td className={sc} />
+            <td className={sc} />
+            <td className={sc} />
+            <td className={sc} />
+            {/* Net Due */}
+            <td className={`${sc} text-right`}>
+              <span className="tabular-nums text-slate-500">{fmtCurrency(r.amount, currency)}</span>
+              {showHardCcy && r.amount_hard_ccy != null && (
+                <div className="text-[10px] text-slate-400 tabular-nums">
+                  {fmtCurrency(r.amount_hard_ccy, hardCurrency)} {hardCurrency}
+                </div>
+              )}
+            </td>
+          </tr>
+        )
+      })}
+
+      {/* Levy breakdown rows */}
+      {levyItems.length > 0 && readings.length > 0 && (
+        <tr><td colSpan={totalCols} className="h-px bg-slate-200/60" /></tr>
+      )}
+      {levyItems.map((li, i) => (
+        <tr key={`levy-${i}`} className="bg-slate-50/80 border-b border-slate-100/50 text-xs">
+          <td className="w-6 px-1 py-1.5" />
+          <td className={`${sc} text-slate-500 whitespace-nowrap`}>
+            {li.description}
+          </td>
+          {/* Empty: actual, forecast, var%, products */}
+          {Array.from({ length: midEmpties }).map((_, j) => (
+            <td key={j} className={sc} />
+          ))}
+          {/* Levies column */}
+          <td className={`${sc} text-right tabular-nums text-slate-500`}>
+            {fmtCurrency(li.line_total_amount, currency)}
+          </td>
+          {/* VAT, Gross, W/H, Net Due empty */}
+          <td className={sc} />
+          <td className={sc} />
+          <td className={sc} />
+          <td className={sc} />
+        </tr>
+      ))}
+
+      {/* Withholding breakdown rows */}
+      {whItems.length > 0 && (readings.length > 0 || levyItems.length > 0) && levyItems.length === 0 && (
+        <tr><td colSpan={totalCols} className="h-px bg-slate-200/60" /></tr>
+      )}
+      {whItems.map((li, i) => (
+        <tr key={`wh-${i}`} className="bg-slate-50/80 border-b border-slate-100/50 text-xs">
+          <td className="w-6 px-1 py-1.5" />
+          <td className={`${sc} text-slate-500 whitespace-nowrap`}>
+            {li.description}
+          </td>
+          {/* Empty: actual, forecast, var%, products */}
+          {Array.from({ length: midEmpties }).map((_, j) => (
+            <td key={j} className={sc} />
+          ))}
+          {/* Levies, VAT, Gross empty */}
+          <td className={sc} />
+          <td className={sc} />
+          <td className={sc} />
+          {/* W/H column */}
+          <td className={`${sc} text-right tabular-nums text-red-500`}>
+            ({fmtCurrency(Math.abs(li.line_total_amount), currency)})
+          </td>
+          <td className={sc} />
+        </tr>
+      ))}
+    </>
   )
 }

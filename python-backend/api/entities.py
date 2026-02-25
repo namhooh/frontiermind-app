@@ -112,6 +112,7 @@ class ProjectGroupedItem(BaseModel):
     """A project with its organization name."""
     id: int
     name: str
+    external_project_id: Optional[str] = None
     organization_id: int
     organization_name: str
 
@@ -142,6 +143,7 @@ class ProjectDashboardResponse(BaseModel):
     amendments: List[dict] = Field(default_factory=list)
     exchange_rates: List[dict] = Field(default_factory=list)
     baseline_grp: List[dict] = Field(default_factory=list, description="Pre-COD baseline GRP observations (operating_year=0)")
+    contract_lines: List[dict] = Field(default_factory=list, description="Contract lines linking meters to billing products")
     lookups: dict = Field(default_factory=dict)
 
 
@@ -275,6 +277,11 @@ class RatePeriodPatch(BaseModel):
     effective_rate_contract_ccy: Optional[float] = None
     calculation_basis: Optional[str] = None
     is_current: Optional[bool] = None
+
+
+class ExchangeRatePatch(BaseModel):
+    rate: Optional[float] = None
+    source: Optional[str] = None
 
 
 # Tables that have an updated_at column
@@ -532,8 +539,8 @@ async def list_projects_grouped() -> ProjectsGroupedResponse:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT p.id, p.name, p.organization_id,
-                           o.name AS organization_name
+                    SELECT p.id, p.name, p.external_project_id,
+                           p.organization_id, o.name AS organization_name
                     FROM project p
                     JOIN organization o ON o.id = p.organization_id
                     ORDER BY o.name, p.name
@@ -544,6 +551,7 @@ async def list_projects_grouped() -> ProjectsGroupedResponse:
                     ProjectGroupedItem(
                         id=row['id'],
                         name=row['name'],
+                        external_project_id=row.get('external_project_id'),
                         organization_id=row['organization_id'],
                         organization_name=row['organization_name'],
                     )
@@ -795,6 +803,16 @@ async def get_project_dashboard(
                         WHERE c.project_id = %(pid)s
                         ORDER BY c.name, cbp.is_primary DESC, bp.code
                     ),
+                    contract_lines_data AS (
+                        SELECT cl.id, cl.contract_id, cl.billing_product_id,
+                               cl.meter_id, m.name AS meter_name,
+                               cl.contract_line_number, cl.energy_category::text AS energy_category
+                        FROM contract_line cl
+                        JOIN contract c ON c.id = cl.contract_id
+                        LEFT JOIN meter m ON m.id = cl.meter_id
+                        WHERE c.project_id = %(pid)s AND cl.is_active = true
+                        ORDER BY cl.contract_line_number
+                    ),
                     rate_periods_data AS (
                         SELECT tr.id, tr.clause_tariff_id, tr.contract_year,
                                tr.period_start, tr.period_end,
@@ -936,6 +954,7 @@ async def get_project_dashboard(
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM amendments_data d) AS amendments,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM exchange_rates_data d) AS exchange_rates,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM baseline_grp_data d) AS baseline_grp,
+                        (SELECT COALESCE(json_agg(d), '[]'::json) FROM contract_lines_data d) AS contract_lines,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM contract_types_lookup d) AS contract_types_lookup,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM contract_statuses_lookup d) AS contract_statuses_lookup,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM currencies_lookup d) AS currencies_lookup,
@@ -982,6 +1001,7 @@ async def get_project_dashboard(
                 amendments = _parse(row['amendments'])
                 exchange_rates = _parse(row['exchange_rates'])
                 baseline_grp = _parse(row['baseline_grp'])
+                contract_lines = _parse(row['contract_lines'])
 
                 lookups = {
                     "contract_types": _parse(row['contract_types_lookup']),
@@ -1015,6 +1035,7 @@ async def get_project_dashboard(
                     amendments=amendments,
                     exchange_rates=exchange_rates,
                     baseline_grp=baseline_grp,
+                    contract_lines=contract_lines,
                     lookups=lookups,
                 )
 
@@ -1302,6 +1323,14 @@ async def patch_rate_period(
     body: RatePeriodPatch = ...,
 ) -> dict:
     return await _execute_patch("tariff_rate", rate_period_id, body)
+
+
+@router.patch("/exchange-rates/{exchange_rate_id}", summary="Patch an exchange rate")
+async def patch_exchange_rate(
+    exchange_rate_id: int = Path(..., description="Exchange rate ID"),
+    body: ExchangeRatePatch = ...,
+) -> dict:
+    return await _execute_patch("exchange_rate", exchange_rate_id, body)
 
 
 @router.post(

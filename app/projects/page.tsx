@@ -6,7 +6,7 @@ import { ArrowLeft, Loader2, Pencil, PencilOff } from 'lucide-react'
 import { IS_DEMO } from '@/lib/demoMode'
 import { toast } from 'sonner'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/app/components/ui/tabs'
-import { adminClient, type ProjectDashboardResponse } from '@/lib/api/adminClient'
+import { adminClient, type ProjectDashboardResponse, type GRPObservation, type SubmissionTokenItem } from '@/lib/api/adminClient'
 import { ProjectSidebar } from './components/ProjectSidebar'
 import { ProjectOverviewTab } from './components/ProjectOverviewTab'
 import { ProjectTableTab, type Column } from './components/ProjectTableTab'
@@ -23,16 +23,37 @@ export default function ProjectsPage() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [editMode, setEditMode] = useState(false)
+  const [grpMonthly, setGrpMonthly] = useState<GRPObservation[]>([])
+  const [grpAnnual, setGrpAnnual] = useState<GRPObservation[]>([])
+  const [grpTokens, setGrpTokens] = useState<SubmissionTokenItem[]>([])
+
+  /** Fetch GRP post-COD data for a given project + org */
+  const fetchGrpData = useCallback(async (pid: number, orgId: number) => {
+    const [, monthlyRes, annualRes, tokensRes] = await Promise.all([
+      adminClient.refreshGRP(pid, orgId).catch(() => {}),
+      adminClient.listGRPObservations(pid, orgId, { observation_type: 'monthly' })
+        .catch(() => ({ observations: [] as GRPObservation[], total: 0 })),
+      adminClient.listGRPObservations(pid, orgId, { observation_type: 'annual' })
+        .catch(() => ({ observations: [] as GRPObservation[], total: 0 })),
+      adminClient.listTokens(orgId, { project_id: pid, submission_type: 'grp_upload', include_expired: true })
+        .catch(() => ({ tokens: [] as SubmissionTokenItem[] })),
+    ])
+    setGrpMonthly(monthlyRes.observations.filter(o => o.operating_year !== 0))
+    setGrpAnnual(annualRes.observations)
+    setGrpTokens(tokensRes.tokens)
+  }, [])
 
   const refreshDashboard = useCallback(async () => {
     if (!selectedProjectId) return
     try {
       const data = await adminClient.getProjectDashboard(selectedProjectId)
       setDashboard(data)
+      const orgId = data.project.organization_id as number
+      await fetchGrpData(selectedProjectId, orgId)
     } catch {
       // Silently fail on refresh — data shown is just stale
     }
-  }, [selectedProjectId])
+  }, [selectedProjectId, fetchGrpData])
 
   async function handleSelectProject(projectId: number) {
     if (projectId === selectedProjectId) return
@@ -42,6 +63,8 @@ export default function ProjectsPage() {
     try {
       const data = await adminClient.getProjectDashboard(projectId)
       setDashboard(data)
+      const orgId = data.project.organization_id as number
+      await fetchGrpData(projectId, orgId)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load project data')
       setDashboard(null)
@@ -119,10 +142,10 @@ export default function ProjectsPage() {
   ]
 
   const contactColumns: Column[] = [
+    { key: 'role', label: 'Title', editable: true, type: 'text' },
     { key: 'full_name', label: 'Full Name', editable: true, type: 'text' },
     { key: 'email', label: 'Email', editable: true, type: 'text' },
     { key: 'phone', label: 'Phone', editable: true, type: 'text' },
-    { key: 'role', label: 'Role', editable: true, type: 'text' },
     { key: 'include_in_invoice_email', label: 'Invoice', editable: true, type: 'boolean' },
     { key: 'escalation_only', label: 'Escalation', editable: true, type: 'boolean' },
   ]
@@ -255,6 +278,9 @@ export default function ProjectsPage() {
                       onSaved={refreshDashboard}
                       editMode={editMode}
                       projectId={projectId}
+                      grpMonthly={grpMonthly}
+                      grpAnnual={grpAnnual}
+                      grpTokens={grpTokens}
                     />
                   </TabsContent>
 

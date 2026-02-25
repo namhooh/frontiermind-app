@@ -1,9 +1,20 @@
 'use client'
 
+import { useMemo } from 'react'
 import type { ProjectDashboardResponse } from '@/lib/api/adminClient'
 import { CollapsibleSection } from './CollapsibleSection'
 import { ProjectTableTab, type Column } from './ProjectTableTab'
 import { FieldGrid, type FieldDef } from './shared/FieldGrid'
+
+// Required customer contact titles — always shown even when empty
+const REQUIRED_CONTACT_ROLES = [
+  'Accounting Department 1',
+  'Accounting Department 2',
+  'CFO',
+  'Financial Manager',
+  'General Manager',
+  'Operations Manager',
+]
 
 interface ProjectOverviewTabProps {
   data: ProjectDashboardResponse
@@ -20,6 +31,37 @@ interface ProjectOverviewTabProps {
 export function ProjectOverviewTab({ data, contractColumns, projectId, onSaved, editMode, contacts, contactColumns, onAddContact, onRemoveContact }: ProjectOverviewTabProps) {
   const { project, contracts, clauses, lookups } = data
   const pid = project.id as number
+
+  // Merge DB contacts with required role slots so every title always appears
+  const mergedContacts = useMemo(() => {
+    const dbContacts = contacts ?? []
+    // Index existing contacts by normalised role
+    const byRole = new Map<string, Record<string, unknown>>()
+    for (const c of dbContacts) {
+      const role = String(c.role ?? '').trim()
+      if (role) byRole.set(role.toLowerCase(), c)
+    }
+    const result: Record<string, unknown>[] = []
+    const usedIds = new Set<unknown>()
+    // First: required roles in order, filling from DB or creating a placeholder
+    for (const role of REQUIRED_CONTACT_ROLES) {
+      const existing = byRole.get(role.toLowerCase())
+      if (existing) {
+        result.push(existing)
+        usedIds.add(existing.id)
+      } else {
+        // Placeholder row — no id means it cannot be edited/removed inline
+        result.push({ role, full_name: null, email: null, phone: null, include_in_invoice_email: false, escalation_only: false })
+      }
+    }
+    // Append any additional contacts not matching required roles
+    for (const c of dbContacts) {
+      if (!usedIds.has(c.id)) {
+        result.push(c)
+      }
+    }
+    return result
+  }, [contacts])
 
   const toOpts = (items: { id: number; code?: string; name: string }[]) =>
     (items ?? []).map((t) => ({ value: t.id, label: t.name }))
@@ -197,10 +239,10 @@ export function ProjectOverviewTab({ data, contractColumns, projectId, onSaved, 
         />
       </CollapsibleSection>
 
-      {contacts && contactColumns && (
+      {contactColumns && (
         <CollapsibleSection title="Contacts">
           <ProjectTableTab
-            data={contacts}
+            data={mergedContacts}
             columns={contactColumns}
             emptyMessage="No contacts found"
             entity="contacts"

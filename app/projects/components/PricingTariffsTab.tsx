@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo, Fragment } from 'react'
+import { useState, useMemo, Fragment } from 'react'
 import { ChevronRight, Plus, Trash2, Loader2, Copy, Upload, Link2, Calculator, CheckCircle2, XCircle, Ban } from 'lucide-react'
 import { toast } from 'sonner'
 import { Card, CardHeader, CardTitle, CardContent } from '@/app/components/ui/card'
@@ -85,10 +85,11 @@ const PAYMENT_TERMS_OPTS = [
 // TariffDetailPanel — renders a single tariff's full detail block
 // ---------------------------------------------------------------------------
 
-function TariffDetailPanel({ t, pid, rate_periods, monthly_rates, onSaved, editMode, currencyOpts }: {
+function TariffDetailPanel({ t, pid, rate_periods, monthly_rates, onSaved, editMode, currencyOpts, hardCurrencyCode }: {
   t: R; pid: number; rate_periods: R[]; monthly_rates: R[]
   onSaved?: () => void; editMode?: boolean
   currencyOpts: { value: number | string; label: string }[]
+  hardCurrencyCode?: string
 }) {
   const lp = (t.logic_parameters ?? {}) as R
   const currentPeriod = rate_periods.find((rp) => rp.clause_tariff_id === t.id && rp.is_current)
@@ -97,6 +98,7 @@ function TariffDetailPanel({ t, pid, rate_periods, monthly_rates, onSaved, editM
   )
   const localCurrency = currentMonthlyRate?.currency_code ? ` (${currentMonthlyRate.currency_code})` : ''
   const baseCurrency = t.currency_code ? ` (${t.currency_code})` : ''
+  const hardCcy = hardCurrencyCode ? ` (${hardCurrencyCode})` : baseCurrency
   const isRebased = String(t.escalation_type_code ?? '') === 'REBASED_MARKET_PRICE'
   const monthSuffix = currentMonthlyRate?.billing_month ? ` — ${formatBillingMonth(currentMonthlyRate.billing_month)}` : ''
   const fxRate = currentMonthlyRate?.exchange_rate != null ? Number(currentMonthlyRate.exchange_rate) : null
@@ -116,8 +118,8 @@ function TariffDetailPanel({ t, pid, rate_periods, monthly_rates, onSaved, editM
         ...(currentPeriod ? [['Contract Year', currentPeriod.contract_year, { fieldKey: 'contract_year', entity: 'rate-periods' as const, entityId: currentPeriod.id as number, type: 'number' as const }] as FieldDef] : []),
         ['Market Ref Currency', t.market_ref_currency_code, { fieldKey: 'market_ref_currency_id', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'select' as const, options: currencyOpts, selectValue: t.market_ref_currency_id }],
         ['Solar Discount (%)', lp.discount_pct != null ? Number((Number(lp.discount_pct) * 100).toFixed(4)) : null, { fieldKey: 'lp_discount_pct', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const, scaleOnSave: 0.01 }],
-        [`Floor Rate${baseCurrency}`, lp.floor_rate, { fieldKey: 'lp_floor_rate', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const }],
-        [`Ceiling Rate${baseCurrency}`, lp.ceiling_rate, { fieldKey: 'lp_ceiling_rate', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const }],
+        [`Floor Rate${hardCcy}`, lp.floor_rate, { fieldKey: 'lp_floor_rate', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const }],
+        [`Ceiling Rate${hardCcy}`, lp.ceiling_rate, { fieldKey: 'lp_ceiling_rate', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const }],
         ['Annual Degradation (%)', lp.degradation_pct != null ? Number((Number(lp.degradation_pct) * 100).toFixed(4)) : null, { fieldKey: 'lp_degradation_pct', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const, scaleOnSave: 0.01 }],
       ]} />
 
@@ -329,44 +331,34 @@ function RateBoundsSchedule({ logicParameters, contractTermYears, codDate }: {
     rows.push({ year: y, min, max, periodEnd, escalation: esc })
   }
 
-  const [open, setOpen] = useState(false)
-
   return (
     <div className="mt-4">
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        className="flex items-center gap-1.5 text-xs font-medium text-slate-400 uppercase hover:text-slate-600 transition-colors"
-      >
-        <ChevronRight className={`h-3.5 w-3.5 transition-transform ${open ? 'rotate-90' : ''}`} />
-        Floor & Ceiling Rate Schedule ({years} years)
-      </button>
-      {open && (
-        <div className="overflow-x-auto mt-2">
+      <CollapsibleSection title={`Floor & Ceiling Rate Schedule (${years} years)`} defaultOpen={false}>
+        <div className="overflow-x-auto">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-slate-200">
-                <th className="text-center px-3 py-1.5 text-xs font-medium text-slate-500">OY</th>
-                {floorRate != null && <th className="text-right px-3 py-1.5 text-xs font-medium text-slate-500">Min (Floor)</th>}
-                {ceilingRate != null && <th className="text-right px-3 py-1.5 text-xs font-medium text-slate-500">Max (Ceiling)</th>}
-                {cod && <th className="text-right px-3 py-1.5 text-xs font-medium text-slate-500">Date Ended</th>}
-                <th className="text-right px-3 py-1.5 text-xs font-medium text-slate-500">Escalation</th>
+            <thead className="bg-slate-50 text-slate-600">
+              <tr>
+                <th className="text-center px-4 py-2.5 font-medium">OY</th>
+                {floorRate != null && <th className="text-right px-4 py-2.5 font-medium">Min (Floor)</th>}
+                {ceilingRate != null && <th className="text-right px-4 py-2.5 font-medium">Max (Ceiling)</th>}
+                {cod && <th className="text-right px-4 py-2.5 font-medium">Period End</th>}
+                <th className="text-right px-4 py-2.5 font-medium">Escalation</th>
               </tr>
             </thead>
-            <tbody>
+            <tbody className="divide-y divide-slate-100">
               {rows.map((r) => (
-                <tr key={r.year} className={`border-b border-slate-50 ${r.year === 1 ? 'bg-blue-50/40' : 'hover:bg-slate-50'}`}>
-                  <td className="px-3 py-1.5 text-center text-slate-600 tabular-nums">{r.year}</td>
-                  {floorRate != null && <td className="px-3 py-1.5 text-right text-slate-700 tabular-nums font-medium">${r.min!.toFixed(4)}</td>}
-                  {ceilingRate != null && <td className="px-3 py-1.5 text-right text-slate-700 tabular-nums font-medium">${r.max!.toFixed(4)}</td>}
-                  {cod && <td className="px-3 py-1.5 text-right text-slate-600 text-xs tabular-nums">{r.periodEnd}</td>}
-                  <td className="px-3 py-1.5 text-right text-slate-500 tabular-nums">{r.escalation}</td>
+                <tr key={r.year} className="hover:bg-slate-50">
+                  <td className="px-4 py-2.5 text-center font-mono tabular-nums">{r.year}</td>
+                  {floorRate != null && <td className="px-4 py-2.5 text-right font-mono tabular-nums">${r.min!.toFixed(4)}</td>}
+                  {ceilingRate != null && <td className="px-4 py-2.5 text-right font-mono tabular-nums">${r.max!.toFixed(4)}</td>}
+                  {cod && <td className="px-4 py-2.5 text-right font-mono tabular-nums">{r.periodEnd}</td>}
+                  <td className="px-4 py-2.5 text-right font-mono tabular-nums">{r.escalation}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
-      )}
+      </CollapsibleSection>
     </div>
   )
 }
@@ -455,18 +447,38 @@ function AddProductRow({ contractId, existingProductIds, billingProductOpts, onA
 // BillingProductCard — expandable card for a product + its tariffs
 // ---------------------------------------------------------------------------
 
-function BillingProductCard({ pw, pid, rate_periods, monthly_rates, onSaved, editMode, isOpen, onToggle, onRemove, billingProductOpts, tariffTypeOpts, energySaleTypeOpts, escalationTypeOpts, currencyOpts }: {
+function BillingProductCard({ pw, pid, rate_periods, monthly_rates, contractLines, onSaved, editMode, isOpen, onToggle, onRemove, billingProductOpts, tariffTypeOpts, energySaleTypeOpts, escalationTypeOpts, currencyOpts, hardCurrencyCode }: {
   pw: { product: R; tariffs: R[] }; pid: number; rate_periods: R[]; monthly_rates: R[]
+  contractLines: R[]
   onSaved?: () => void; editMode?: boolean; isOpen: boolean; onToggle: () => void; onRemove?: () => void
   billingProductOpts: { value: number | string; label: string }[]
   tariffTypeOpts: { value: number | string; label: string }[]
   energySaleTypeOpts: { value: number | string; label: string }[]
   escalationTypeOpts: { value: number | string; label: string }[]
   currencyOpts: { value: number | string; label: string }[]
+  hardCurrencyCode?: string
 }) {
   const bp = pw.product
   const allNonEnergy = pw.tariffs.length > 0 && pw.tariffs.every(isNonEnergyTariff)
   const isAvailableEnergy = /available/i.test(String(bp.product_name ?? ''))
+
+  // Meters associated with this billing product via contract_lines
+  const productMeters = useMemo(() => {
+    const bpId = bp.billing_product_id
+    if (bpId == null) return []
+    const seen = new Set<number>()
+    const result: { meter_id: number; meter_name: string; energy_category: string }[] = []
+    for (const cl of contractLines) {
+      if (cl.billing_product_id === bpId && cl.meter_id != null) {
+        const mid = cl.meter_id as number
+        if (!seen.has(mid)) {
+          seen.add(mid)
+          result.push({ meter_id: mid, meter_name: String(cl.meter_name ?? `Meter ${mid}`), energy_category: String(cl.energy_category ?? '') })
+        }
+      }
+    }
+    return result
+  }, [contractLines, bp.billing_product_id])
 
   return (
     <div className="border border-slate-200 rounded-lg overflow-hidden">
@@ -505,6 +517,19 @@ function BillingProductCard({ pw, pid, rate_periods, monthly_rates, onSaved, edi
           </button>
         )}
       </div>
+
+      {/* Meter composition — always visible when meters are linked */}
+      {productMeters.length > 0 && (
+        <div className="px-4 py-2 border-t border-slate-100 bg-slate-50/50">
+          <span className="text-xs text-slate-400 mr-2">Meters:</span>
+          {productMeters.map((m, i) => (
+            <span key={m.meter_id} className="text-xs text-slate-600">
+              {i > 0 && <span className="text-slate-300 mx-1">&middot;</span>}
+              {m.meter_name}
+            </span>
+          ))}
+        </div>
+      )}
 
       {/* Expanded body */}
       {isOpen && (
@@ -547,7 +572,7 @@ function BillingProductCard({ pw, pid, rate_periods, monthly_rates, onSaved, edi
                     <TariffDetailPanel
                       t={t} pid={pid} rate_periods={rate_periods} monthly_rates={monthly_rates}
                       onSaved={onSaved} editMode={editMode}
-                      currencyOpts={currencyOpts}
+                      currencyOpts={currencyOpts} hardCurrencyCode={hardCurrencyCode}
                     />
                   )}
                 </div>
@@ -580,7 +605,16 @@ function BillingProductCard({ pw, pid, rate_periods, monthly_rates, onSaved, edi
                         onSaved={onSaved}
                       />
                     ) : (
-                      <span className="whitespace-pre-line">{String(lp.pricing_formula_text)}</span>
+                      <span className="whitespace-pre-line">{String(lp.pricing_formula_text).split('\n').map((line, i) => {
+                        const trimmed = line.trim().toLowerCase()
+                        const isMono = trimmed === 'or, if higher' || trimmed === 'but not exceeding'
+                        return (
+                          <Fragment key={i}>
+                            {i > 0 && '\n'}
+                            {isMono ? <span className="font-mono">{line}</span> : line}
+                          </Fragment>
+                        )
+                      })}</span>
                     )}
                   </dd>
                 </div>
@@ -687,6 +721,9 @@ function GRPSection({
   firstTariff,
   firstLp,
   baselineGrp,
+  initialMonthly,
+  initialAnnual,
+  initialTokens,
   onSaved,
   editMode,
 }: {
@@ -696,14 +733,16 @@ function GRPSection({
   firstTariff: R | undefined
   firstLp: R
   baselineGrp: R[]
+  initialMonthly: GRPObservation[]
+  initialAnnual: GRPObservation[]
+  initialTokens: SubmissionTokenItem[]
   onSaved?: () => void
   editMode?: boolean
 }) {
   const pid = projectId
-  const [monthlyObs, setMonthlyObs] = useState<GRPObservation[]>([])
-  const [annualObs, setAnnualObs] = useState<GRPObservation[]>([])
-  const [existingTokens, setExistingTokens] = useState<SubmissionTokenItem[]>([])
-  const [loading, setLoading] = useState(true)
+  const monthlyObs = initialMonthly
+  const annualObs = initialAnnual
+  const existingTokens = initialTokens
 
   const [showTokenDialog, setShowTokenDialog] = useState(false)
   const [showUploadDialog, setShowUploadDialog] = useState(false)
@@ -722,38 +761,12 @@ function GRPSection({
   const [aggIncludePending, setAggIncludePending] = useState(false)
   const [aggLoading, setAggLoading] = useState(false)
 
-  const fetchData = useCallback(async () => {
-    setLoading(true)
-    try {
-      // Baseline GRP now comes from dashboard props — only fetch post-COD data here.
-      // Run refresh + observation fetches in parallel.
-      const [, monthlyRes, annualRes, tokensRes] = await Promise.all([
-        adminClient.refreshGRP(pid, orgId).catch(() => {}),
-        adminClient.listGRPObservations(pid, orgId, { observation_type: 'monthly' })
-          .catch(() => ({ observations: [] as GRPObservation[], total: 0 })),
-        adminClient.listGRPObservations(pid, orgId, { observation_type: 'annual' })
-          .catch(() => ({ observations: [] as GRPObservation[], total: 0 })),
-        adminClient.listTokens(orgId, { project_id: pid, submission_type: 'grp_upload', include_expired: true })
-          .catch(() => ({ tokens: [] as SubmissionTokenItem[] })),
-      ])
-      setMonthlyObs(monthlyRes.observations.filter(o => o.operating_year !== 0))
-      setAnnualObs(annualRes.observations)
-      setExistingTokens(tokensRes.tokens)
-    } catch {
-      // silently ignore — GRP data may not exist yet
-    } finally {
-      setLoading(false)
-    }
-  }, [pid, orgId])
-
-  useEffect(() => { fetchData() }, [fetchData])
-
-  // Baseline GRP: derive sorted observations + component keys from dashboard prop
+  // Baseline GRP: derive sorted observations, component keys, and weighted average
   const baselineData = useMemo(() => {
     if (baselineGrp.length === 0) return null
 
     const sorted = [...baselineGrp].sort(
-      (a, b) => new Date(String(a.period_start)).getTime() - new Date(String(b.period_start)).getTime()
+      (a, b) => new Date(String(b.period_start)).getTime() - new Date(String(a.period_start)).getTime()
     )
 
     const componentKeysSet = new Set<string>()
@@ -763,7 +776,29 @@ function GRPSection({
     }
     const componentKeys = [...componentKeysSet].sort()
 
-    return { observations: sorted, componentKeys }
+    // Compute weighted-average GRP across baseline months
+    let totalCharges = 0
+    let totalKwh = 0
+    let simpleSum = 0
+    let simpleCount = 0
+    for (const obs of sorted) {
+      const charges = obs.total_variable_charges as number | null
+      const kwh = obs.total_kwh_invoiced as number | null
+      const grp = obs.calculated_grp_per_kwh as number | null
+      if (charges != null && kwh != null && kwh > 0) {
+        totalCharges += charges
+        totalKwh += kwh
+      }
+      if (grp != null) {
+        simpleSum += grp
+        simpleCount++
+      }
+    }
+    // Prefer weighted average; fall back to simple average
+    const averageGrp = totalKwh > 0 ? totalCharges / totalKwh : simpleCount > 0 ? simpleSum / simpleCount : null
+    const monthCount = sorted.length
+
+    return { observations: sorted, componentKeys, averageGrp, monthCount }
   }, [baselineGrp])
 
   async function handleGenerateToken() {
@@ -777,11 +812,7 @@ function GRPSection({
       })
       setTokenResult({ url: res.submission_url, tokenId: res.token_id })
       toast.success(res.message)
-      // Refresh token list
-      try {
-        const tokensRes = await adminClient.listTokens(orgId, { project_id: pid, submission_type: 'grp_upload', include_expired: true })
-        setExistingTokens(tokensRes.tokens)
-      } catch { /* non-critical */ }
+      onSaved?.()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to generate token')
     } finally {
@@ -807,7 +838,7 @@ function GRPSection({
       setShowUploadDialog(false)
       setUploadFile(null)
       setUploadMonth('')
-      await fetchData()
+      onSaved?.()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Upload failed')
     } finally {
@@ -824,7 +855,7 @@ function GRPSection({
       })
       toast.success(res.message)
       setShowAggregateDialog(false)
-      await fetchData()
+      onSaved?.()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Aggregation failed')
     } finally {
@@ -836,8 +867,7 @@ function GRPSection({
     try {
       await adminClient.revokeToken(orgId, tokenId)
       toast.success('Token revoked')
-      const tokensRes = await adminClient.listTokens(orgId, { project_id: pid, submission_type: 'grp_upload', include_expired: true })
-      setExistingTokens(tokensRes.tokens)
+      onSaved?.()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Failed to revoke token')
     }
@@ -849,7 +879,7 @@ function GRPSection({
         verification_status: status,
       })
       toast.success(res.message)
-      await fetchData()
+      onSaved?.()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Verification failed')
     }
@@ -911,35 +941,133 @@ function GRPSection({
             <div>
               <dt className="text-xs text-slate-400">Operating Window</dt>
               <dd className="text-slate-800 font-medium mt-0.5">
-                {firstLp.grp_time_window_start != null && firstLp.grp_time_window_end != null
-                  ? `${String(firstLp.grp_time_window_start)} – ${String(firstLp.grp_time_window_end)}`
-                  : '—'}
+                {editMode ? (
+                  <span className="flex items-center gap-1">
+                    <EditableCell
+                      value={firstLp.grp_time_window_start as string | null ?? null}
+                      fieldKey="lp_grp_time_window_start"
+                      entity="tariffs"
+                      entityId={firstTariff.id as number}
+                      projectId={pid}
+                      type="text"
+                      editMode={true}
+                      onSaved={onSaved}
+                    />
+                    <span className="text-slate-400">–</span>
+                    <EditableCell
+                      value={firstLp.grp_time_window_end as string | null ?? null}
+                      fieldKey="lp_grp_time_window_end"
+                      entity="tariffs"
+                      entityId={firstTariff.id as number}
+                      projectId={pid}
+                      type="text"
+                      editMode={true}
+                      onSaved={onSaved}
+                    />
+                  </span>
+                ) : (
+                  firstLp.grp_time_window_start != null && firstLp.grp_time_window_end != null
+                    ? `${String(firstLp.grp_time_window_start)} – ${String(firstLp.grp_time_window_end)}`
+                    : '—'
+                )}
               </dd>
             </div>
             <div>
               <dt className="text-xs text-slate-400">Calculation Due</dt>
               <dd className="text-slate-800 font-medium mt-0.5">
-                {firstLp.grp_calculation_due_days != null
-                  ? `${String(firstLp.grp_calculation_due_days)} days after month-end`
-                  : '—'}
+                {editMode ? (
+                  <span className="flex items-center gap-1">
+                    <EditableCell
+                      value={firstLp.grp_calculation_due_days as number | null ?? null}
+                      fieldKey="lp_grp_calculation_due_days"
+                      entity="tariffs"
+                      entityId={firstTariff.id as number}
+                      projectId={pid}
+                      type="number"
+                      editMode={true}
+                      onSaved={onSaved}
+                    />
+                    <span className="text-xs text-slate-400">days after month-end</span>
+                  </span>
+                ) : (
+                  firstLp.grp_calculation_due_days != null
+                    ? `${String(firstLp.grp_calculation_due_days)} days after month-end`
+                    : '—'
+                )}
               </dd>
             </div>
             <div>
               <dt className="text-xs text-slate-400">Verification Deadline</dt>
               <dd className="text-slate-800 font-medium mt-0.5">
-                {firstLp.grp_verification_deadline_days != null
-                  ? `${String(firstLp.grp_verification_deadline_days)} days`
-                  : '—'}
+                {editMode ? (
+                  <span className="flex items-center gap-1">
+                    <EditableCell
+                      value={firstLp.grp_verification_deadline_days as number | null ?? null}
+                      fieldKey="lp_grp_verification_deadline_days"
+                      entity="tariffs"
+                      entityId={firstTariff.id as number}
+                      projectId={pid}
+                      type="number"
+                      editMode={true}
+                      onSaved={onSaved}
+                    />
+                    <span className="text-xs text-slate-400">days</span>
+                  </span>
+                ) : (
+                  firstLp.grp_verification_deadline_days != null
+                    ? `${String(firstLp.grp_verification_deadline_days)} days`
+                    : '—'
+                )}
               </dd>
             </div>
             <div>
               <dt className="text-xs text-slate-400">Exclusions</dt>
               <dd className="mt-0.5 flex flex-wrap gap-1">
-                {Boolean(firstLp.grp_exclude_vat) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-slate-100 text-slate-600">VAT</span>}
-                {Boolean(firstLp.grp_exclude_demand_charges) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-slate-100 text-slate-600">Demand</span>}
-                {Boolean(firstLp.grp_exclude_savings_charges) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-slate-100 text-slate-600">Savings</span>}
-                {!firstLp.grp_exclude_vat && !firstLp.grp_exclude_demand_charges && !firstLp.grp_exclude_savings_charges && (
-                  <span className="text-slate-500">None</span>
+                {editMode ? (
+                  <>
+                    <EditableCell
+                      value={firstLp.grp_exclude_vat as boolean | null ?? false}
+                      fieldKey="lp_grp_exclude_vat"
+                      entity="tariffs"
+                      entityId={firstTariff.id as number}
+                      projectId={pid}
+                      type="boolean"
+                      editMode={true}
+                      onSaved={onSaved}
+                      formatDisplay={(v) => v ? 'VAT ✓' : 'VAT'}
+                    />
+                    <EditableCell
+                      value={firstLp.grp_exclude_demand_charges as boolean | null ?? false}
+                      fieldKey="lp_grp_exclude_demand_charges"
+                      entity="tariffs"
+                      entityId={firstTariff.id as number}
+                      projectId={pid}
+                      type="boolean"
+                      editMode={true}
+                      onSaved={onSaved}
+                      formatDisplay={(v) => v ? 'Demand ✓' : 'Demand'}
+                    />
+                    <EditableCell
+                      value={firstLp.grp_exclude_savings_charges as boolean | null ?? false}
+                      fieldKey="lp_grp_exclude_savings_charges"
+                      entity="tariffs"
+                      entityId={firstTariff.id as number}
+                      projectId={pid}
+                      type="boolean"
+                      editMode={true}
+                      onSaved={onSaved}
+                      formatDisplay={(v) => v ? 'Savings ✓' : 'Savings'}
+                    />
+                  </>
+                ) : (
+                  <>
+                    {Boolean(firstLp.grp_exclude_vat) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-slate-100 text-slate-600">VAT</span>}
+                    {Boolean(firstLp.grp_exclude_demand_charges) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-slate-100 text-slate-600">Demand</span>}
+                    {Boolean(firstLp.grp_exclude_savings_charges) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-slate-100 text-slate-600">Savings</span>}
+                    {!firstLp.grp_exclude_vat && !firstLp.grp_exclude_demand_charges && !firstLp.grp_exclude_savings_charges && (
+                      <span className="text-slate-500">None</span>
+                    )}
+                  </>
                 )}
               </dd>
             </div>
@@ -962,11 +1090,23 @@ function GRPSection({
         </div>
       )}
 
-      {/* Baseline GRP (OY=0) — table only, loaded from dashboard data (no spinner) */}
+      {/* Current GRP — weighted average of pre-COD baseline months */}
+      {baselineData && baselineData.averageGrp != null && (
+        <div className="rounded border border-slate-200 px-3 py-2">
+          <div className="flex items-baseline gap-2">
+            <span className="text-sm text-slate-600">Current Grid Reference Price</span>
+            <span className="text-sm font-bold font-mono text-slate-900 tabular-nums">{grpFormatGRP(baselineData.averageGrp)} /kWh</span>
+          </div>
+          <p className="text-xs text-slate-500 mt-0.5">
+            Weighted average of {baselineData.monthCount} pre-COD month{baselineData.monthCount !== 1 ? 's' : ''} (total variable charges &divide; total kWh invoiced).
+          </p>
+        </div>
+      )}
+
+      {/* Baseline GRP (Pre-COD) */}
       {baselineData && (
-        <div className="space-y-2">
-          <h4 className="text-xs font-medium text-slate-400 uppercase">Baseline Grid Reference Price (Pre-COD)</h4>
-          <div className="overflow-x-auto rounded-lg border border-slate-200">
+        <CollapsibleSection title="Baseline Grid Reference Price (Pre-COD)">
+          <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-slate-600">
                 <tr>
@@ -977,7 +1117,6 @@ function GRPSection({
                       {key.replace(/_/g, ' ')}
                     </th>
                   ))}
-                  <th className="text-center px-4 py-2.5 font-medium">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -993,159 +1132,148 @@ function GRPSection({
                         </td>
                       )
                     })}
-                    <td className="px-4 py-2.5 text-center">
-                      <Badge variant={grpStatusBadge(String(obs.verification_status))}>{grpStatusLabel(String(obs.verification_status))}</Badge>
-                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
-        </div>
+        </CollapsibleSection>
       )}
 
       {/* Post-COD GRP Observations */}
-      {loading ? (
-        <div className="flex items-center justify-center h-24">
-          <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
-        </div>
-      ) : (
-        <>
-          {/* Collection Links */}
-          {existingTokens.length > 0 && (
-            <div className="space-y-2">
-              <div className="text-xs font-medium text-slate-400 uppercase">Collection Links</div>
-              <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-                {existingTokens.map((tk) => {
-                  const isActive = tk.submission_token_status === 'active'
-                  const isExpired = tk.submission_token_status === 'expired' || (tk.expires_at && new Date(tk.expires_at) < new Date())
-                  const isUsed = tk.submission_token_status === 'used'
-                  const isRevoked = tk.submission_token_status === 'revoked'
-                  const statusVariant: 'success' | 'warning' | 'destructive' = isActive ? 'success' : isUsed ? 'warning' : 'destructive'
-                  const statusLabel = isActive ? 'Active' : isUsed ? 'Used' : isRevoked ? 'Revoked' : isExpired ? 'Expired' : tk.submission_token_status
-                  return (
-                    <div key={tk.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-                      <Badge variant={statusVariant}>{statusLabel}</Badge>
-                      <span className="text-slate-600 tabular-nums">{tk.use_count}/{tk.max_uses} uses</span>
-                      {tk.expires_at && (
-                        <span className="text-xs text-slate-400">
-                          Expires {new Date(tk.expires_at).toLocaleDateString()}
-                        </span>
-                      )}
-                      <span className="ml-auto flex items-center gap-1">
-                        {isActive && tk.submission_url && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 text-xs"
-                            onClick={() => {
-                              navigator.clipboard.writeText(tk.submission_url!)
-                              toast.success('URL copied to clipboard')
-                            }}
-                          >
-                            <Copy className="h-3.5 w-3.5" /> Copy URL
-                          </Button>
-                        )}
-                        {isActive && !IS_DEMO && (
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            className="h-7 text-xs text-red-600 hover:text-red-700"
-                            onClick={() => handleRevokeToken(tk.id)}
-                          >
-                            <Ban className="h-3.5 w-3.5" /> Revoke
-                          </Button>
-                        )}
-                        {!isActive && !tk.submission_url && (
-                          <span className="text-xs text-slate-400 italic">No URL</span>
-                        )}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-
-          {/* Annual GRP Cards */}
-          {annualObs.map(obs => {
-            const meta = obs.source_metadata?.aggregation as Record<string, unknown> | undefined
-            return (
-              <Card key={obs.id}>
-                <CardHeader className="pb-2">
-                  <CardTitle className="text-sm font-semibold">Annual GRP &mdash; Operating Year {obs.operating_year}</CardTitle>
-                </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-4 gap-4 text-sm">
-                    <div><span className="text-slate-500">GRP/kWh</span><p className="font-mono font-semibold">{grpFormatGRP(obs.calculated_grp_per_kwh)}</p></div>
-                    <div><span className="text-slate-500">Total Charges</span><p className="font-mono">{grpFormatNumber(obs.total_variable_charges)}</p></div>
-                    <div><span className="text-slate-500">Total kWh</span><p className="font-mono">{grpFormatNumber(obs.total_kwh_invoiced)}</p></div>
-                    <div><span className="text-slate-500">Months Included</span><p className="font-mono">{meta?.months_included != null ? String(meta.months_included) : '-'}</p></div>
-                  </div>
-                  <div className="flex items-center gap-2 mt-2">
-                    <Badge variant={grpStatusBadge(obs.verification_status)}>{grpStatusLabel(obs.verification_status)}</Badge>
-                    {obs.created_at && <span className="text-xs text-slate-400">Aggregated {new Date(obs.created_at).toLocaleDateString()}</span>}
-                  </div>
-                </CardContent>
-              </Card>
-            )
-          })}
-
-          {/* Monthly Observations Table */}
-          {monthlyObs.length === 0 ? (
-            <div className="text-center py-8 text-sm text-slate-400">
-              No monthly GRP observations yet. Upload an invoice or generate a collection token to get started.
-            </div>
-          ) : (
-            <div className="overflow-x-auto rounded-lg border border-slate-200">
-              <table className="w-full text-sm">
-                <thead className="bg-slate-50 text-slate-600">
-                  <tr>
-                    <th className="text-left px-4 py-2.5 font-medium">Period</th>
-                    <th className="text-right px-4 py-2.5 font-medium">GRP/kWh</th>
-                    <th className="text-right px-4 py-2.5 font-medium">Variable Charges</th>
-                    <th className="text-right px-4 py-2.5 font-medium">kWh Invoiced</th>
-                    <th className="text-center px-4 py-2.5 font-medium">Confidence</th>
-                    <th className="text-center px-4 py-2.5 font-medium">Status</th>
-                    <th className="text-right px-4 py-2.5 font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {monthlyObs.map(obs => {
-                    const confidence = (obs.source_metadata?.extraction_confidence as string) ?? 'unknown'
+      <CollapsibleSection title="Monthly GRP Observations (Post-COD)">
+          <div className="space-y-4">
+            {/* Collection Links */}
+            {existingTokens.length > 0 && (
+              <div className="space-y-2">
+                <div className="text-xs font-medium text-slate-400 uppercase">Collection Links</div>
+                <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                  {existingTokens.map((tk) => {
+                    const isActive = tk.submission_token_status === 'active'
+                    const isExpired = tk.submission_token_status === 'expired' || (tk.expires_at && new Date(tk.expires_at) < new Date())
+                    const isUsed = tk.submission_token_status === 'used'
+                    const isRevoked = tk.submission_token_status === 'revoked'
+                    const statusVariant: 'success' | 'warning' | 'destructive' = isActive ? 'success' : isUsed ? 'warning' : 'destructive'
+                    const statusLabel = isActive ? 'Active' : isUsed ? 'Used' : isRevoked ? 'Revoked' : isExpired ? 'Expired' : tk.submission_token_status
                     return (
-                      <tr key={obs.id} className="hover:bg-slate-50">
-                        <td className="px-4 py-2.5">{grpFormatPeriod(obs.period_start)}</td>
-                        <td className="px-4 py-2.5 text-right font-mono">{grpFormatGRP(obs.calculated_grp_per_kwh)}</td>
-                        <td className="px-4 py-2.5 text-right font-mono">{grpFormatNumber(obs.total_variable_charges)}</td>
-                        <td className="px-4 py-2.5 text-right font-mono">{grpFormatNumber(obs.total_kwh_invoiced)}</td>
-                        <td className="px-4 py-2.5 text-center">
-                          {confidence !== 'unknown' && <Badge variant={grpConfidenceBadge(confidence)}>{confidence}</Badge>}
-                        </td>
-                        <td className="px-4 py-2.5 text-center">
-                          <Badge variant={grpStatusBadge(obs.verification_status)}>{grpStatusLabel(obs.verification_status)}</Badge>
-                        </td>
-                        <td className="px-4 py-2.5 text-right">
-                          {obs.verification_status === 'pending' && !IS_DEMO && (
-                            <div className="flex items-center justify-end gap-1">
-                              <Button variant="ghost" size="sm" className="h-7 text-xs text-green-700 hover:text-green-800" onClick={() => handleVerify(obs.id, 'jointly_verified')}>
-                                <CheckCircle2 className="h-3.5 w-3.5" /> Verify
-                              </Button>
-                              <Button variant="ghost" size="sm" className="h-7 text-xs text-red-600 hover:text-red-700" onClick={() => handleVerify(obs.id, 'disputed')}>
-                                <XCircle className="h-3.5 w-3.5" /> Dispute
-                              </Button>
-                            </div>
+                      <div key={tk.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
+                        <Badge variant={statusVariant}>{statusLabel}</Badge>
+                        <span className="text-slate-600 tabular-nums">{tk.use_count}/{tk.max_uses} uses</span>
+                        {tk.expires_at && (
+                          <span className="text-xs text-slate-400">
+                            Expires {new Date(tk.expires_at).toLocaleDateString()}
+                          </span>
+                        )}
+                        <span className="ml-auto flex items-center gap-1">
+                          {isActive && tk.submission_url && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs"
+                              onClick={() => {
+                                navigator.clipboard.writeText(tk.submission_url!)
+                                toast.success('URL copied to clipboard')
+                              }}
+                            >
+                              <Copy className="h-3.5 w-3.5" /> Copy URL
+                            </Button>
                           )}
-                        </td>
-                      </tr>
+                          {isActive && !IS_DEMO && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              className="h-7 text-xs text-red-600 hover:text-red-700"
+                              onClick={() => handleRevokeToken(tk.id)}
+                            >
+                              <Ban className="h-3.5 w-3.5" /> Revoke
+                            </Button>
+                          )}
+                          {!isActive && !tk.submission_url && (
+                            <span className="text-xs text-slate-400 italic">No URL</span>
+                          )}
+                        </span>
+                      </div>
                     )
                   })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </>
-      )}
+                </div>
+              </div>
+            )}
+
+            {/* Annual GRP Cards */}
+            {annualObs.map(obs => {
+              const meta = obs.source_metadata?.aggregation as Record<string, unknown> | undefined
+              return (
+                <Card key={obs.id}>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-semibold">Annual GRP &mdash; Operating Year {obs.operating_year}</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <div className="grid grid-cols-4 gap-4 text-sm">
+                      <div><span className="text-slate-500">GRP/kWh</span><p className="font-mono font-semibold">{grpFormatGRP(obs.calculated_grp_per_kwh)}</p></div>
+                      <div><span className="text-slate-500">Total Charges</span><p className="font-mono">{grpFormatNumber(obs.total_variable_charges)}</p></div>
+                      <div><span className="text-slate-500">Total kWh</span><p className="font-mono">{grpFormatNumber(obs.total_kwh_invoiced)}</p></div>
+                      <div><span className="text-slate-500">Months Included</span><p className="font-mono">{meta?.months_included != null ? String(meta.months_included) : '-'}</p></div>
+                    </div>
+                    <div className="flex items-center gap-2 mt-2">
+                      <Badge variant={grpStatusBadge(obs.verification_status)}>{grpStatusLabel(obs.verification_status)}</Badge>
+                      {obs.created_at && <span className="text-xs text-slate-400">Aggregated {new Date(obs.created_at).toLocaleDateString()}</span>}
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })}
+
+            {/* Monthly Observations Table */}
+            {monthlyObs.length === 0 ? (
+              <div className="text-center py-8 text-sm text-slate-400">
+                No monthly GRP observations yet. Upload an invoice or generate a collection token to get started.
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-slate-200">
+                <table className="w-full text-sm">
+                  <thead className="bg-slate-50 text-slate-600">
+                    <tr>
+                      <th className="text-left px-4 py-2.5 font-medium">Period</th>
+                      <th className="text-right px-4 py-2.5 font-medium">GRP/kWh</th>
+                      <th className="text-right px-4 py-2.5 font-medium">Variable Charges</th>
+                      <th className="text-right px-4 py-2.5 font-medium">kWh Invoiced</th>
+                      <th className="text-center px-4 py-2.5 font-medium">Confidence</th>
+                      <th className="text-right px-4 py-2.5 font-medium">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {[...monthlyObs].sort((a, b) => new Date(b.period_start).getTime() - new Date(a.period_start).getTime()).map(obs => {
+                      const confidence = (obs.source_metadata?.extraction_confidence as string) ?? 'unknown'
+                      return (
+                        <tr key={obs.id} className="hover:bg-slate-50">
+                          <td className="px-4 py-2.5">{grpFormatPeriod(obs.period_start)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">{grpFormatGRP(obs.calculated_grp_per_kwh)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">{grpFormatNumber(obs.total_variable_charges)}</td>
+                          <td className="px-4 py-2.5 text-right font-mono">{grpFormatNumber(obs.total_kwh_invoiced)}</td>
+                          <td className="px-4 py-2.5 text-center">
+                            {confidence !== 'unknown' && <Badge variant={grpConfidenceBadge(confidence)}>{confidence}</Badge>}
+                          </td>
+                          <td className="px-4 py-2.5 text-right">
+                            {obs.verification_status === 'pending' && !IS_DEMO && (
+                              <div className="flex items-center justify-end gap-1">
+                                <Button variant="ghost" size="sm" className="h-7 text-xs text-green-700 hover:text-green-800" onClick={() => handleVerify(obs.id, 'jointly_verified')}>
+                                  <CheckCircle2 className="h-3.5 w-3.5" /> Verify
+                                </Button>
+                                <Button variant="ghost" size="sm" className="h-7 text-xs text-red-600 hover:text-red-700" onClick={() => handleVerify(obs.id, 'disputed')}>
+                                  <XCircle className="h-3.5 w-3.5" /> Dispute
+                                </Button>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+      </CollapsibleSection>
 
       {/* Generate Token Dialog */}
       <Dialog open={showTokenDialog} onOpenChange={setShowTokenDialog}>
@@ -1243,9 +1371,12 @@ interface PricingTariffsTabProps {
   onSaved?: () => void
   editMode?: boolean
   projectId?: number
+  grpMonthly?: GRPObservation[]
+  grpAnnual?: GRPObservation[]
+  grpTokens?: SubmissionTokenItem[]
 }
 
-export function PricingTariffsTab({ data, onSaved, editMode, projectId }: PricingTariffsTabProps) {
+export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonthly = [], grpAnnual = [], grpTokens = [] }: PricingTariffsTabProps) {
   const { contracts, tariffs, billing_products, rate_periods, monthly_rates, tariff_rates, exchange_rates, lookups } = data
   const pid = data.project.id as number
 
@@ -1280,6 +1411,10 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
     value: bp.id,
     label: bp.code ? `${bp.code} - ${bp.name}` : bp.name,
   }))
+
+  // Derive hard (USD) and billing currency codes from tariff_rates
+  const hardCurrencyCode = ((tariff_rates ?? []) as R[]).find((tr) => tr.hard_currency_code != null)?.hard_currency_code as string | undefined
+  const billingCurrencyCode = ((tariff_rates ?? []) as R[]).find((tr) => tr.billing_currency_code != null)?.billing_currency_code as string | undefined
 
   if (contracts.length === 0) {
     return (
@@ -1405,7 +1540,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
                                     return str(rp.effective_rate_contract_ccy)
                                   })()}
                                 </td>
-                                <td className="px-3 py-1.5 text-slate-500 text-xs">{str(rp.currency_code)}</td>
+                                <td className="px-3 py-1.5 text-slate-500 text-xs">{isRebasedTariff && periodMonthlyRates.length > 0 ? str(hardCurrencyCode ?? rp.currency_code) : str(rp.currency_code)}</td>
                                 <td className="px-3 py-1.5 text-slate-500 text-xs whitespace-pre-line max-w-[160px] break-words">
                                   {editMode && rp.id != null ? (
                                     <EditableCell value={rp.calculation_basis} fieldKey="calculation_basis" entity="rate-periods" entityId={rp.id as number} type="text" editMode onSaved={onSaved} />
@@ -1499,7 +1634,20 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
                       <tr key={er.id as number} className={`border-b border-slate-50 ${idx === 0 ? 'bg-blue-50/40' : 'hover:bg-slate-50'}`}>
                         <td className="px-3 py-1.5 text-slate-700 tabular-nums">{formatBillingMonth(er.rate_date)}</td>
                         <td className="px-3 py-1.5 text-slate-500 text-xs">{str(er.currency_code)}</td>
-                        <td className="px-3 py-1.5 text-right text-slate-700 tabular-nums font-medium">{rate.toFixed(2)}</td>
+                        <td className="px-3 py-1.5 text-right text-slate-700 tabular-nums font-medium">
+                          {editMode ? (
+                            <EditableCell
+                              value={er.rate}
+                              fieldKey="rate"
+                              entity="exchange-rates"
+                              entityId={er.id as number}
+                              type="number"
+                              editMode={true}
+                              onSaved={onSaved}
+                              formatDisplay={(v) => v != null ? Number(v).toFixed(2) : '—'}
+                            />
+                          ) : rate.toFixed(2)}
+                        </td>
                         <td className="px-3 py-1.5 text-right tabular-nums">
                           {momChange != null ? (
                             <span className={momChange > 0 ? 'text-red-600' : momChange < 0 ? 'text-green-600' : 'text-slate-400'}>
@@ -1509,7 +1657,19 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
                             <span className="text-slate-300">—</span>
                           )}
                         </td>
-                        <td className="px-3 py-1.5 text-slate-500 text-xs">{str(er.source)}</td>
+                        <td className="px-3 py-1.5 text-slate-500 text-xs">
+                          {editMode ? (
+                            <EditableCell
+                              value={er.source}
+                              fieldKey="source"
+                              entity="exchange-rates"
+                              entityId={er.id as number}
+                              type="text"
+                              editMode={true}
+                              onSaved={onSaved}
+                            />
+                          ) : str(er.source)}
+                        </td>
                       </tr>
                     )
                   })
@@ -1523,7 +1683,8 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
       {contracts.map((c, i) => {
         const cid = c.id as number
         const contractTariffs = tariffs.filter((t) => t.contract_id === c.id)
-        const firstTariff = contractTariffs[0] as R | undefined
+        const currentTariff = contractTariffs.find((t) => t.is_current === true) as R | undefined
+        const firstTariff = (currentTariff ?? contractTariffs[0]) as R | undefined
         const firstLp = (firstTariff?.logic_parameters ?? {}) as R
         const energySalesTariff = contractTariffs.find(
           (t) => String(t.tariff_type_code).toUpperCase() === 'ENERGY_SALES',
@@ -1543,7 +1704,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
                 ...(firstTariff && firstLp.billing_frequency != null
                   ? [['Billing Frequency', firstLp.billing_frequency, { fieldKey: 'lp_billing_frequency', entity: 'tariffs' as const, entityId: firstTariff.id as number, projectId: pid, type: 'select' as const, options: BILLING_FREQUENCY_OPTS, selectValue: firstLp.billing_frequency }] as FieldDef]
                   : []),
-                ...(firstTariff != null ? [['Billing Currency', firstTariff.currency_code, { fieldKey: 'currency_id', entity: 'tariffs' as const, entityId: firstTariff.id as number, projectId: pid, type: 'select' as const, options: currencyOpts, selectValue: firstTariff.currency_id }] as FieldDef] : []),
+                ...(billingCurrencyCode != null || firstTariff != null ? [['Billing Currency', billingCurrencyCode ?? firstTariff?.currency_code] as FieldDef] : []),
                 ['Payment Terms', c.payment_terms, { fieldKey: 'payment_terms', entity: 'contracts' as const, entityId: cid, projectId: pid, type: 'select' as const, options: PAYMENT_TERMS_OPTS, selectValue: c.payment_terms }],
               ]} />
               {/* Source of Exchange Rate */}
@@ -1616,6 +1777,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
                     <BillingProductCard
                       key={pw.product.id as number}
                       pw={pw} pid={pid} rate_periods={rate_periods} monthly_rates={monthly_rates}
+                      contractLines={data.contract_lines ?? []}
                       onSaved={onSaved} editMode={editMode}
                       isOpen={openProducts.has(pw.product.id)}
                       onToggle={() => toggleProduct(pw.product.id)}
@@ -1630,7 +1792,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
                       }}
                       billingProductOpts={billingProductOpts} tariffTypeOpts={tariffTypeOpts}
                       energySaleTypeOpts={energySaleTypeOpts} escalationTypeOpts={escalationTypeOpts}
-                      currencyOpts={currencyOpts}
+                      currencyOpts={currencyOpts} hardCurrencyCode={hardCurrencyCode}
                     />
                   ))}
 
@@ -1668,7 +1830,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
                             <TariffDetailPanel
                               t={t} pid={pid} rate_periods={rate_periods} monthly_rates={monthly_rates}
                               onSaved={onSaved} editMode={editMode}
-                              currencyOpts={currencyOpts}
+                              currencyOpts={currencyOpts} hardCurrencyCode={hardCurrencyCode}
                             />
                           )}
                         </div>
@@ -1710,6 +1872,9 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId }: Pricin
                   firstTariff={firstTariff}
                   firstLp={firstLp}
                   baselineGrp={data.baseline_grp ?? []}
+                  initialMonthly={grpMonthly}
+                  initialAnnual={grpAnnual}
+                  initialTokens={grpTokens}
                   onSaved={onSaved}
                   editMode={editMode}
                 />
