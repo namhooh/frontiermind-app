@@ -1103,45 +1103,8 @@ function GRPSection({
         </div>
       )}
 
-      {/* Baseline GRP (Pre-COD) */}
-      {baselineData && (
-        <CollapsibleSection title="Baseline Grid Reference Price (Pre-COD)">
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead className="bg-slate-50 text-slate-600">
-                <tr>
-                  <th className="text-left px-4 py-2.5 font-medium">Period</th>
-                  <th className="text-right px-4 py-2.5 font-medium">GRP/kWh</th>
-                  {baselineData.componentKeys.map(key => (
-                    <th key={key} className="text-right px-4 py-2.5 font-medium capitalize">
-                      {key.replace(/_/g, ' ')}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {baselineData.observations.map(obs => (
-                  <tr key={obs.id as number} className="hover:bg-slate-50">
-                    <td className="px-4 py-2.5">{grpFormatPeriod(String(obs.period_start))}</td>
-                    <td className="px-4 py-2.5 text-right font-mono font-medium">{grpFormatGRP(obs.calculated_grp_per_kwh as number | null)}</td>
-                    {baselineData.componentKeys.map(key => {
-                      const tc = (obs.source_metadata as R | undefined)?.tariff_components as Record<string, number> | undefined
-                      return (
-                        <td key={key} className="px-4 py-2.5 text-right font-mono tabular-nums">
-                          {tc?.[key] != null ? grpFormatGRP(tc[key]) : '-'}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </CollapsibleSection>
-      )}
-
       {/* Post-COD GRP Observations */}
-      <CollapsibleSection title="Monthly GRP Observations (Post-COD)">
+      <CollapsibleSection title="Monthly GRP Observations (Post-COD)" defaultOpen={false}>
           <div className="space-y-4">
             {/* Collection Links */}
             {existingTokens.length > 0 && (
@@ -1274,6 +1237,43 @@ function GRPSection({
             )}
           </div>
       </CollapsibleSection>
+
+      {/* Baseline GRP (Pre-COD) */}
+      {baselineData && (
+        <CollapsibleSection title="Baseline Grid Reference Price (Pre-COD)" defaultOpen={false}>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-600">
+                <tr>
+                  <th className="text-left px-4 py-2.5 font-medium">Period</th>
+                  <th className="text-right px-4 py-2.5 font-medium">GRP/kWh</th>
+                  {baselineData.componentKeys.map(key => (
+                    <th key={key} className="text-right px-4 py-2.5 font-medium capitalize">
+                      {key.replace(/_/g, ' ')}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {baselineData.observations.map(obs => (
+                  <tr key={obs.id as number} className="hover:bg-slate-50">
+                    <td className="px-4 py-2.5">{grpFormatPeriod(String(obs.period_start))}</td>
+                    <td className="px-4 py-2.5 text-right font-mono font-medium">{grpFormatGRP(obs.calculated_grp_per_kwh as number | null)}</td>
+                    {baselineData.componentKeys.map(key => {
+                      const tc = (obs.source_metadata as R | undefined)?.tariff_components as Record<string, number> | undefined
+                      return (
+                        <td key={key} className="px-4 py-2.5 text-right font-mono tabular-nums">
+                          {tc?.[key] != null ? grpFormatGRP(tc[key]) : '-'}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </CollapsibleSection>
+      )}
 
       {/* Generate Token Dialog */}
       <Dialog open={showTokenDialog} onOpenChange={setShowTokenDialog}>
@@ -1862,26 +1862,28 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
                   />
                 </CollapsibleSection>
               )}
+            </>)}
 
-              {/* Section 5: Grid Reference Price */}
-              <CollapsibleSection title="Grid Reference Price">
-                <GRPSection
-                  projectId={pid}
-                  orgId={data.project.organization_id as number}
-                  codDate={data.project.cod_date as string | null | undefined}
-                  firstTariff={firstTariff}
-                  firstLp={firstLp}
-                  baselineGrp={data.baseline_grp ?? []}
-                  initialMonthly={grpMonthly}
-                  initialAnnual={grpAnnual}
-                  initialTokens={grpTokens}
-                  onSaved={onSaved}
-                  editMode={editMode}
-                />
-              </CollapsibleSection>
+            {/* Section 5: Grid Reference Price — always visible */}
+            <CollapsibleSection title="Grid Reference Price">
+              <GRPSection
+                projectId={pid}
+                orgId={data.project.organization_id as number}
+                codDate={data.project.cod_date as string | null | undefined}
+                firstTariff={firstTariff}
+                firstLp={firstLp}
+                baselineGrp={data.baseline_grp ?? []}
+                initialMonthly={grpMonthly}
+                initialAnnual={grpAnnual}
+                initialTokens={grpTokens}
+                onSaved={onSaved}
+                editMode={editMode}
+              />
+            </CollapsibleSection>
 
-              {/* Available Energy — now displayed inside the ENER003 BillingProductCard */}
+            {/* Available Energy — now displayed inside the ENER003 BillingProductCard */}
 
+            {firstTariff != null && (<>
               {/* Section 7: Shortfall & Excused Events */}
               {hasAnyValue(firstLp, ['shortfall_formula_type', 'shortfall_formula_text', 'shortfall_formula_variables']) && (
                 <CollapsibleSection title="Shortfall Formula">
