@@ -11,7 +11,8 @@ export async function middleware(request: NextRequest) {
     if (
       !pathname.startsWith('/projects') &&
       !pathname.startsWith('/api') &&
-      !pathname.startsWith('/_next')
+      !pathname.startsWith('/_next') &&
+      !pathname.startsWith('/submit')
     ) {
       return NextResponse.redirect(new URL('/projects', request.url))
     }
