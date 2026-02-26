@@ -4,6 +4,10 @@ import { useEffect, useState } from 'react'
 import { adminClient, type ProjectGroupedItem } from '@/lib/api/adminClient'
 import { Loader2 } from 'lucide-react'
 
+// TODO: Replace with value from auth context once user authentication is implemented.
+// Reset to null on logout.
+const CURRENT_ORGANIZATION_ID = 1
+
 interface ProjectSidebarProps {
   selectedProjectId: number | null
   onSelectProject: (id: number) => void
@@ -18,7 +22,7 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject }: ProjectSi
     async function load() {
       try {
         const all = await adminClient.listProjectsGrouped()
-        setProjects(all.filter((p) => p.organization_name === 'FrontierSolar'))
+        setProjects(all.filter((p) => p.organization_id === CURRENT_ORGANIZATION_ID))
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to load projects')
       } finally {
