@@ -899,7 +899,7 @@ function GRPSection({
     </div>
   )
 
-  return (
+  return (<>
     <CollapsibleSection title="Grid Reference Price" actions={grpActions}>
     <div className="space-y-4">
       {/* GRP Definition */}
@@ -1106,62 +1106,6 @@ function GRPSection({
       {/* Post-COD GRP Observations */}
       <CollapsibleSection title="Monthly GRP Observations (Post-COD)" defaultOpen={false}>
           <div className="space-y-4">
-            {/* Collection Links */}
-            {existingTokens.length > 0 && (
-              <div className="space-y-2">
-                <div className="text-xs font-medium text-slate-400 uppercase">Collection Links</div>
-                <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
-                  {existingTokens.map((tk) => {
-                    const isActive = tk.submission_token_status === 'active'
-                    const isExpired = tk.submission_token_status === 'expired' || (tk.expires_at && new Date(tk.expires_at) < new Date())
-                    const isUsed = tk.submission_token_status === 'used'
-                    const isRevoked = tk.submission_token_status === 'revoked'
-                    const statusVariant: 'success' | 'warning' | 'destructive' = isActive ? 'success' : isUsed ? 'warning' : 'destructive'
-                    const statusLabel = isActive ? 'Active' : isUsed ? 'Used' : isRevoked ? 'Revoked' : isExpired ? 'Expired' : tk.submission_token_status
-                    return (
-                      <div key={tk.id} className="flex items-center gap-3 px-4 py-2.5 text-sm">
-                        <Badge variant={statusVariant}>{statusLabel}</Badge>
-                        <span className="text-slate-600 tabular-nums">{tk.use_count}/{tk.max_uses} uses</span>
-                        {tk.expires_at && (
-                          <span className="text-xs text-slate-400">
-                            Expires {new Date(tk.expires_at).toLocaleDateString()}
-                          </span>
-                        )}
-                        <span className="ml-auto flex items-center gap-1">
-                          {isActive && tk.submission_url && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 text-xs"
-                              onClick={() => {
-                                navigator.clipboard.writeText(tk.submission_url!)
-                                toast.success('URL copied to clipboard')
-                              }}
-                            >
-                              <Copy className="h-3.5 w-3.5" /> Copy URL
-                            </Button>
-                          )}
-                          {isActive && !IS_DEMO && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 text-xs text-red-600 hover:text-red-700"
-                              onClick={() => handleRevokeToken(tk.id)}
-                            >
-                              <Ban className="h-3.5 w-3.5" /> Revoke
-                            </Button>
-                          )}
-                          {!isActive && !tk.submission_url && (
-                            <span className="text-xs text-slate-400 italic">No URL</span>
-                          )}
-                        </span>
-                      </div>
-                    )
-                  })}
-                </div>
-              </div>
-            )}
-
             {/* Annual GRP Cards */}
             {annualObs.map(obs => {
               const meta = obs.source_metadata?.aggregation as Record<string, unknown> | undefined
@@ -1275,11 +1219,14 @@ function GRPSection({
         </CollapsibleSection>
       )}
 
-      {/* Generate Token Dialog */}
+    </div>
+    </CollapsibleSection>
+
+      {/* Generate Token Dialog — outside CollapsibleSection so it renders even when collapsed */}
       <Dialog open={showTokenDialog} onOpenChange={setShowTokenDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Generate GRP Collection Token</DialogTitle>
+            <DialogTitle>GRP Collection Tokens</DialogTitle>
             <DialogDescription>Create a reusable link for the counterparty to upload utility invoices.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
@@ -1306,6 +1253,76 @@ function GRPSection({
               {tokenLoading && <Loader2 className="h-4 w-4 animate-spin" />}
               {tokenResult ? 'Regenerate' : 'Generate Token'}
             </Button>
+
+            {/* Existing Tokens */}
+            {existingTokens.length > 0 && (
+              <>
+                <div className="border-t border-slate-200 pt-4">
+                  <div className="text-xs font-medium text-slate-500 uppercase mb-2">Existing Tokens</div>
+                  <div className="divide-y divide-slate-100 rounded-lg border border-slate-200">
+                    {existingTokens.map((tk) => {
+                      const isActive = tk.submission_token_status === 'active'
+                      const isExpired = tk.submission_token_status === 'expired' || (tk.expires_at && new Date(tk.expires_at) < new Date())
+                      const isUsed = tk.submission_token_status === 'used'
+                      const isRevoked = tk.submission_token_status === 'revoked'
+                      const statusVariant: 'success' | 'warning' | 'destructive' = isActive ? 'success' : isUsed ? 'warning' : 'destructive'
+                      const statusLabel = isActive ? 'Active' : isUsed ? 'Used' : isRevoked ? 'Revoked' : isExpired ? 'Expired' : tk.submission_token_status
+                      const tokenStr = tk.submission_url ? (() => { try { return new URL(tk.submission_url).pathname.split('/').pop() ?? '' } catch { return '' } })() : ''
+                      return (
+                        <div key={tk.id} className="px-3 py-2.5 space-y-1.5">
+                          <div className="flex items-center gap-2">
+                            <Badge variant={statusVariant}>{statusLabel}</Badge>
+                            <span className="text-xs text-slate-500 tabular-nums">{tk.use_count}/{tk.max_uses} uses</span>
+                            {tk.expires_at && (
+                              <span className="text-xs text-slate-400">
+                                Expires {new Date(tk.expires_at).toLocaleDateString()}
+                              </span>
+                            )}
+                            {isActive && !IS_DEMO && (
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="ml-auto h-6 text-xs text-red-600 hover:text-red-700 px-2"
+                                onClick={() => handleRevokeToken(tk.id)}
+                              >
+                                <Ban className="h-3 w-3" /> Revoke
+                              </Button>
+                            )}
+                          </div>
+                          {tokenStr && (
+                            <div className="flex items-center gap-1.5">
+                              <code className="text-xs font-mono text-slate-500 truncate max-w-[180px]">{tokenStr}</code>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 text-xs px-1.5"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(tokenStr)
+                                  toast.success('Token copied')
+                                }}
+                              >
+                                <Copy className="h-3 w-3" /> Token
+                              </Button>
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                className="h-6 text-xs px-1.5"
+                                onClick={() => {
+                                  navigator.clipboard.writeText(tk.submission_url!)
+                                  toast.success('URL copied')
+                                }}
+                              >
+                                <Link2 className="h-3 w-3" /> URL
+                              </Button>
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
         </DialogContent>
       </Dialog>
@@ -1358,8 +1375,7 @@ function GRPSection({
           </div>
         </DialogContent>
       </Dialog>
-    </div>
-    </CollapsibleSection>
+    </>
   )
 }
 

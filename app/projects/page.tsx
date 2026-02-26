@@ -36,7 +36,10 @@ export default function ProjectsPage() {
       adminClient.listGRPObservations(pid, orgId, { observation_type: 'annual' })
         .catch(() => ({ observations: [] as GRPObservation[], total: 0 })),
       adminClient.listTokens(orgId, { project_id: pid, submission_type: 'grp_upload', include_expired: true })
-        .catch(() => ({ tokens: [] as SubmissionTokenItem[] })),
+        .catch((err) => {
+          console.error('Failed to fetch GRP tokens:', err)
+          return { tokens: [] as SubmissionTokenItem[] }
+        }),
     ])
     setGrpMonthly(monthlyRes.observations.filter(o => o.operating_year !== 0))
     setGrpAnnual(annualRes.observations)
