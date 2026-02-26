@@ -785,6 +785,22 @@ export class AdminClient {
     return this.handleResponse<VerifyObservationResponse>(response)
   }
 
+  async deleteGRPObservation(
+    projectId: number,
+    orgId: number,
+    observationId: number
+  ): Promise<{ success: boolean; message: string }> {
+    this.log('Deleting GRP observation', { projectId, orgId, observationId })
+    const response = await fetch(
+      `${this.baseUrl}/api/projects/${projectId}/grp-observations/${observationId}`,
+      {
+        method: 'DELETE',
+        headers: { 'X-Organization-ID': String(orgId) },
+      }
+    )
+    return this.handleResponse<{ success: boolean; message: string }>(response)
+  }
+
   async generateGRPToken(
     orgId: number,
     body: { project_id: number; operating_year: number; max_uses?: number }

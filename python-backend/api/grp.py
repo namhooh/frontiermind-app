@@ -125,7 +125,8 @@ def _reaggregate_annual(cur, project_id: int, org_id: int, operating_year: int) 
     include_pending = agg_meta.get("include_pending", True)
 
     # Fetch monthly observations with the same filter
-    status_filter = ""
+    # Always exclude disputed observations from aggregation
+    status_filter = "AND rp.verification_status != 'disputed'"
     if not include_pending:
         status_filter = "AND rp.verification_status = 'jointly_verified'"
 
@@ -391,7 +392,8 @@ async def aggregate_grp(
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 # Fetch all monthly observations for the operating year
-                status_filter = ""
+                # Always exclude disputed observations from aggregation
+                status_filter = "AND rp.verification_status != 'disputed'"
                 params: list = [project_id, org_id, body.operating_year]
                 if not body.include_pending:
                     status_filter = "AND rp.verification_status = 'jointly_verified'"
@@ -553,6 +555,76 @@ async def aggregate_grp(
         total_kwh_invoiced=float(total_kwh),
         message=f"Annual GRP aggregated from {months_included} month(s) for operating year {body.operating_year}",
     )
+
+
+# =============================================================================
+# DELETE /api/projects/{project_id}/grp-observations/{observation_id}
+# =============================================================================
+
+@router.delete(
+    "/projects/{project_id}/grp-observations/{observation_id}",
+    summary="Delete a disputed GRP observation",
+)
+async def delete_observation(
+    request: Request,
+    project_id: int,
+    observation_id: int,
+):
+    """Delete a GRP observation. Only disputed observations may be deleted."""
+    org_id = _get_org_id(request)
+    _validate_project_ownership(project_id, org_id)
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT id, verification_status, operating_year, observation_type
+                    FROM reference_price
+                    WHERE id = %s AND project_id = %s AND organization_id = %s
+                    """,
+                    (observation_id, project_id, org_id),
+                )
+                row = cur.fetchone()
+                if not row:
+                    raise HTTPException(
+                        status_code=status.HTTP_404_NOT_FOUND,
+                        detail={"success": False, "message": "Observation not found"},
+                    )
+
+                if row["verification_status"] != "disputed":
+                    raise HTTPException(
+                        status_code=status.HTTP_400_BAD_REQUEST,
+                        detail={
+                            "success": False,
+                            "message": "Only disputed observations can be deleted",
+                        },
+                    )
+
+                operating_year = row["operating_year"]
+                obs_type = row["observation_type"]
+
+                cur.execute(
+                    "DELETE FROM reference_price WHERE id = %s AND project_id = %s AND organization_id = %s",
+                    (observation_id, project_id, org_id),
+                )
+
+                # Re-aggregate annual if a monthly observation was deleted
+                if obs_type == "monthly":
+                    _reaggregate_annual(cur, project_id, org_id, operating_year)
+
+                conn.commit()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting observation: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"success": False, "message": str(e)})
+
+    return {
+        "success": True,
+        "message": f"Observation {observation_id} deleted",
+    }
 
 
 # =============================================================================
@@ -952,5 +1024,5 @@ async def manual_grp_entry(
     return ManualGRPBatchResponse(
         inserted_count=len(observation_ids),
         observation_ids=observation_ids,
-        message=f"Inserted {len(observation_ids)} manual GRP rate(s) for project {project_id}",
+        message=f"Inserted {len(observation_ids)} manual GRP rate(s) successfully",
     )
