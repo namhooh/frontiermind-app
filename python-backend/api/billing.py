@@ -6,7 +6,7 @@ and per-product billing amounts computed as kWh × effective_rate.
 
 Invoice generation endpoint writes to expected_invoice_* tables with
 full tax/levy/withholding calculations.
-"""No
+"""
 
 import io
 import json

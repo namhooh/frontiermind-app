@@ -37,7 +37,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter(
     prefix="/api/notifications",
     tags=["notifications"],
-    dependencies=[Depends(require_api_key)],
     responses={
         401: {"description": "Missing or invalid API key"},
         404: {"description": "Resource not found"},
@@ -96,7 +95,7 @@ def require_repo():
     response_model=SendEmailResponse,
     summary="Send email immediately",
 )
-async def send_email(request: Request, body: SendEmailRequest) -> SendEmailResponse:
+async def send_email(request: Request, body: SendEmailRequest, auth: dict = Depends(require_api_key)) -> SendEmailResponse:
     require_repo()
     org_id = get_org_id(request)
 
@@ -138,6 +137,7 @@ async def list_templates(
     request: Request,
     email_schedule_type: Optional[str] = Query(None),
     include_inactive: bool = Query(False),
+    auth: dict = Depends(require_api_key),
 ) -> EmailTemplateListResponse:
     require_repo()
     org_id = get_org_id(request)
@@ -155,7 +155,7 @@ async def list_templates(
 
 
 @router.get("/templates/{template_id}", response_model=EmailTemplateResponse)
-async def get_template(request: Request, template_id: int) -> EmailTemplateResponse:
+async def get_template(request: Request, template_id: int, auth: dict = Depends(require_api_key)) -> EmailTemplateResponse:
     require_repo()
     org_id = get_org_id(request)
     template = notification_repo.get_template(template_id, org_id)
@@ -170,7 +170,7 @@ async def get_template(request: Request, template_id: int) -> EmailTemplateRespo
     status_code=status.HTTP_201_CREATED,
 )
 async def create_template(
-    request: Request, body: CreateEmailTemplateRequest
+    request: Request, body: CreateEmailTemplateRequest, auth: dict = Depends(require_api_key),
 ) -> EmailTemplateResponse:
     require_repo()
     org_id = get_org_id(request)
@@ -187,7 +187,7 @@ async def create_template(
 
 @router.put("/templates/{template_id}", response_model=EmailTemplateResponse)
 async def update_template(
-    request: Request, template_id: int, body: UpdateEmailTemplateRequest
+    request: Request, template_id: int, body: UpdateEmailTemplateRequest, auth: dict = Depends(require_api_key),
 ) -> EmailTemplateResponse:
     require_repo()
     org_id = get_org_id(request)
@@ -202,7 +202,7 @@ async def update_template(
 
 
 @router.delete("/templates/{template_id}", response_model=SuccessResponse)
-async def delete_template(request: Request, template_id: int) -> SuccessResponse:
+async def delete_template(request: Request, template_id: int, auth: dict = Depends(require_api_key)) -> SuccessResponse:
     require_repo()
     org_id = get_org_id(request)
     success = notification_repo.deactivate_template(template_id, org_id)
@@ -219,6 +219,7 @@ async def delete_template(request: Request, template_id: int) -> SuccessResponse
 async def list_schedules(
     request: Request,
     include_inactive: bool = Query(False),
+    auth: dict = Depends(require_api_key),
 ) -> NotificationScheduleListResponse:
     require_repo()
     org_id = get_org_id(request)
@@ -230,7 +231,7 @@ async def list_schedules(
 
 
 @router.get("/schedules/{schedule_id}", response_model=NotificationScheduleResponse)
-async def get_schedule(request: Request, schedule_id: int) -> NotificationScheduleResponse:
+async def get_schedule(request: Request, schedule_id: int, auth: dict = Depends(require_api_key)) -> NotificationScheduleResponse:
     require_repo()
     org_id = get_org_id(request)
     schedule = notification_repo.get_schedule(schedule_id, org_id)
@@ -245,7 +246,7 @@ async def get_schedule(request: Request, schedule_id: int) -> NotificationSchedu
     status_code=status.HTTP_201_CREATED,
 )
 async def create_schedule(
-    request: Request, body: CreateScheduleRequest
+    request: Request, body: CreateScheduleRequest, auth: dict = Depends(require_api_key),
 ) -> NotificationScheduleResponse:
     require_repo()
     org_id = get_org_id(request)
@@ -269,7 +270,7 @@ async def create_schedule(
 
 @router.put("/schedules/{schedule_id}", response_model=NotificationScheduleResponse)
 async def update_schedule(
-    request: Request, schedule_id: int, body: UpdateScheduleRequest
+    request: Request, schedule_id: int, body: UpdateScheduleRequest, auth: dict = Depends(require_api_key),
 ) -> NotificationScheduleResponse:
     require_repo()
     org_id = get_org_id(request)
@@ -284,7 +285,7 @@ async def update_schedule(
 
 
 @router.delete("/schedules/{schedule_id}", response_model=SuccessResponse)
-async def delete_schedule(request: Request, schedule_id: int) -> SuccessResponse:
+async def delete_schedule(request: Request, schedule_id: int, auth: dict = Depends(require_api_key)) -> SuccessResponse:
     require_repo()
     org_id = get_org_id(request)
     existing = notification_repo.get_schedule(schedule_id, org_id)
@@ -295,7 +296,7 @@ async def delete_schedule(request: Request, schedule_id: int) -> SuccessResponse
 
 
 @router.post("/schedules/{schedule_id}/trigger", response_model=SendEmailResponse)
-async def trigger_schedule(request: Request, schedule_id: int) -> SendEmailResponse:
+async def trigger_schedule(request: Request, schedule_id: int, auth: dict = Depends(require_api_key)) -> SendEmailResponse:
     """Manually trigger a schedule immediately."""
     require_repo()
     org_id = get_org_id(request)
@@ -343,6 +344,7 @@ async def list_email_logs(
     email_status: Optional[str] = Query(None, alias="email_status"),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    auth: dict = Depends(require_api_key),
 ) -> EmailLogListResponse:
     require_repo()
     org_id = get_org_id(request)
@@ -370,6 +372,7 @@ async def list_submissions(
     invoice_header_id: Optional[int] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    auth: dict = Depends(require_api_key),
 ) -> SubmissionResponseListResponse:
     require_repo()
     org_id = get_org_id(request)
