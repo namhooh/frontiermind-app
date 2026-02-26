@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, Fragment } from 'react'
-import { ChevronRight, Plus, Trash2, Loader2, Copy, Upload, Link2, Calculator, CheckCircle2, XCircle, Ban } from 'lucide-react'
+import { ChevronRight, Plus, Trash2, Loader2, Copy, Upload, Link2, CheckCircle2, XCircle, Ban, AlertTriangle, Pencil, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import { Card, CardHeader, CardTitle, CardContent } from '@/app/components/ui/card'
 import { Badge } from '@/app/components/ui/badge'
@@ -694,12 +694,6 @@ function grpFormatGRP(n: number | null | undefined): string {
   return n.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
 }
 
-function grpConfidenceBadge(conf: string): 'success' | 'warning' | 'destructive' {
-  if (conf === 'high') return 'success'
-  if (conf === 'medium') return 'warning'
-  return 'destructive'
-}
-
 function grpStatusBadge(s: string): 'success' | 'warning' | 'destructive' {
   if (s === 'jointly_verified') return 'success'
   if (s === 'pending' || s === 'estimated') return 'warning'
@@ -746,7 +740,6 @@ function GRPSection({
 
   const [showTokenDialog, setShowTokenDialog] = useState(false)
   const [showUploadDialog, setShowUploadDialog] = useState(false)
-  const [showAggregateDialog, setShowAggregateDialog] = useState(false)
 
   const [tokenYear, setTokenYear] = useState(1)
   const [tokenMaxUses, setTokenMaxUses] = useState(12)
@@ -757,9 +750,19 @@ function GRPSection({
   const [uploadFile, setUploadFile] = useState<File | null>(null)
   const [uploadLoading, setUploadLoading] = useState(false)
 
-  const [aggYear, setAggYear] = useState(1)
-  const [aggIncludePending, setAggIncludePending] = useState(false)
-  const [aggLoading, setAggLoading] = useState(false)
+
+  // Dispute dialog state
+  const [showDisputeDialog, setShowDisputeDialog] = useState(false)
+  const [disputeObsId, setDisputeObsId] = useState<number | null>(null)
+  const [disputeNotes, setDisputeNotes] = useState('')
+  const [disputeLoading, setDisputeLoading] = useState(false)
+
+  // Manual entry dialog state (for disputed observation correction)
+  const [showManualEntryDialog, setShowManualEntryDialog] = useState(false)
+  const [manualEntryPeriod, setManualEntryPeriod] = useState('')
+  const [manualEntryGrp, setManualEntryGrp] = useState('')
+  const [manualEntryLoading, setManualEntryLoading] = useState(false)
+  const [manualEntryIsBaseline, setManualEntryIsBaseline] = useState(false)
 
   // Baseline GRP: derive sorted observations, component keys, and weighted average
   const baselineData = useMemo(() => {
@@ -846,23 +849,6 @@ function GRPSection({
     }
   }
 
-  async function handleAggregate() {
-    setAggLoading(true)
-    try {
-      const res = await adminClient.aggregateGRP(pid, orgId, {
-        operating_year: aggYear,
-        include_pending: aggIncludePending,
-      })
-      toast.success(res.message)
-      setShowAggregateDialog(false)
-      onSaved?.()
-    } catch (e) {
-      toast.error(e instanceof Error ? e.message : 'Aggregation failed')
-    } finally {
-      setAggLoading(false)
-    }
-  }
-
   async function handleRevokeToken(tokenId: number) {
     try {
       await adminClient.revokeToken(orgId, tokenId)
@@ -873,15 +859,76 @@ function GRPSection({
     }
   }
 
-  async function handleVerify(observationId: number, status: 'jointly_verified' | 'disputed') {
+  async function handleVerify(observationId: number) {
     try {
       const res = await adminClient.verifyObservation(pid, orgId, observationId, {
-        verification_status: status,
+        verification_status: 'jointly_verified',
       })
       toast.success(res.message)
       onSaved?.()
     } catch (e) {
       toast.error(e instanceof Error ? e.message : 'Verification failed')
+    }
+  }
+
+  function openDisputeDialog(observationId: number) {
+    setDisputeObsId(observationId)
+    setDisputeNotes('')
+    setShowDisputeDialog(true)
+  }
+
+  async function handleDisputeSubmit() {
+    if (!disputeObsId || !disputeNotes.trim()) return
+    setDisputeLoading(true)
+    try {
+      const res = await adminClient.verifyObservation(pid, orgId, disputeObsId, {
+        verification_status: 'disputed',
+        notes: disputeNotes.trim(),
+      })
+      toast.success(res.message)
+      setShowDisputeDialog(false)
+      onSaved?.()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Dispute failed')
+    } finally {
+      setDisputeLoading(false)
+    }
+  }
+
+  async function handleDeleteObservation(observationId: number) {
+    try {
+      const res = await adminClient.deleteGRPObservation(pid, orgId, observationId)
+      toast.success(res.message)
+      onSaved?.()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Delete failed')
+    }
+  }
+
+  function openManualEntryFor(obs: { period_start: string }, isBaseline = false) {
+    // Pre-fill the manual entry dialog with the observation's period
+    const d = new Date(obs.period_start)
+    setManualEntryPeriod(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`)
+    setManualEntryGrp('')
+    setManualEntryIsBaseline(isBaseline)
+    setShowManualEntryDialog(true)
+  }
+
+  async function handleManualEntrySubmit() {
+    if (!manualEntryPeriod || !manualEntryGrp) return
+    setManualEntryLoading(true)
+    try {
+      const res = await adminClient.submitManualGRPRates(pid, orgId, {
+        entries: [{ billing_month: manualEntryPeriod, grp_per_kwh: parseFloat(manualEntryGrp) }],
+        is_baseline: manualEntryIsBaseline,
+      })
+      toast.success(res.message)
+      setShowManualEntryDialog(false)
+      onSaved?.()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Manual entry failed')
+    } finally {
+      setManualEntryLoading(false)
     }
   }
 
@@ -892,9 +939,6 @@ function GRPSection({
       </Button>
       <Button variant="outline" size="sm" onClick={() => setShowUploadDialog(true)}>
         <Upload className="h-4 w-4" /> Upload Invoice
-      </Button>
-      <Button variant="outline" size="sm" onClick={() => setShowAggregateDialog(true)}>
-        <Calculator className="h-4 w-4" /> Aggregate Year
       </Button>
     </div>
   )
@@ -1144,35 +1188,75 @@ function GRPSection({
                       <th className="text-right px-4 py-2.5 font-medium">GRP/kWh</th>
                       <th className="text-right px-4 py-2.5 font-medium">Variable Charges</th>
                       <th className="text-right px-4 py-2.5 font-medium">kWh Invoiced</th>
-                      <th className="text-center px-4 py-2.5 font-medium">Confidence</th>
                       <th className="text-right px-4 py-2.5 font-medium">Actions</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
                     {[...monthlyObs].sort((a, b) => new Date(b.period_start).getTime() - new Date(a.period_start).getTime()).map(obs => {
-                      const confidence = (obs.source_metadata?.extraction_confidence as string) ?? 'unknown'
+                      const verificationLog = (obs.source_metadata?.verification_log as Array<{ status: string; notes: string; timestamp: string }>) ?? []
+                      const lastDispute = verificationLog.filter(l => l.status === 'disputed').at(-1)
+                      const isDisputed = obs.verification_status === 'disputed'
                       return (
-                        <tr key={obs.id} className="hover:bg-slate-50">
-                          <td className="px-4 py-2.5">{grpFormatPeriod(obs.period_start)}</td>
-                          <td className="px-4 py-2.5 text-right font-mono">{grpFormatGRP(obs.calculated_grp_per_kwh)}</td>
-                          <td className="px-4 py-2.5 text-right font-mono">{grpFormatNumber(obs.total_variable_charges)}</td>
-                          <td className="px-4 py-2.5 text-right font-mono">{grpFormatNumber(obs.total_kwh_invoiced)}</td>
-                          <td className="px-4 py-2.5 text-center">
-                            {confidence !== 'unknown' && <Badge variant={grpConfidenceBadge(confidence)}>{confidence}</Badge>}
-                          </td>
-                          <td className="px-4 py-2.5 text-right">
-                            {obs.verification_status === 'pending' && !IS_DEMO && (
-                              <div className="flex items-center justify-end gap-1">
-                                <Button variant="ghost" size="sm" className="h-7 text-xs text-green-700 hover:text-green-800" onClick={() => handleVerify(obs.id, 'jointly_verified')}>
-                                  <CheckCircle2 className="h-3.5 w-3.5" /> Verify
-                                </Button>
-                                <Button variant="ghost" size="sm" className="h-7 text-xs text-red-600 hover:text-red-700" onClick={() => handleVerify(obs.id, 'disputed')}>
-                                  <XCircle className="h-3.5 w-3.5" /> Dispute
-                                </Button>
-                              </div>
-                            )}
-                          </td>
-                        </tr>
+                        <Fragment key={obs.id}>
+                          <tr className={`hover:bg-slate-50${isDisputed ? ' bg-red-50/50' : ''}`}>
+                            <td className="px-4 py-2.5">{grpFormatPeriod(obs.period_start)}</td>
+                            <td
+                              className={`px-4 py-2.5 text-right font-mono${isDisputed ? ' line-through text-slate-400' : ''}${editMode && !isDisputed ? ' cursor-pointer rounded bg-amber-50 hover:bg-amber-100 transition-colors' : ''}`}
+                              onClick={editMode && !isDisputed ? () => openManualEntryFor(obs) : undefined}
+                              title={editMode && !isDisputed ? 'Click to edit' : undefined}
+                            >{grpFormatGRP(obs.calculated_grp_per_kwh)}</td>
+                            <td className={`px-4 py-2.5 text-right font-mono${isDisputed ? ' line-through text-slate-400' : ''}`}>{grpFormatNumber(obs.total_variable_charges)}</td>
+                            <td className={`px-4 py-2.5 text-right font-mono${isDisputed ? ' line-through text-slate-400' : ''}`}>{grpFormatNumber(obs.total_kwh_invoiced)}</td>
+                            <td className="px-4 py-2.5 text-right">
+                              {obs.verification_status === 'pending' && (
+                                <div className="flex items-center justify-end gap-1">
+                                  <Button variant="ghost" size="sm" className="h-7 text-xs text-green-700 hover:text-green-800" onClick={() => handleVerify(obs.id)}>
+                                    <CheckCircle2 className="h-3.5 w-3.5" /> Verify
+                                  </Button>
+                                  <Button variant="ghost" size="sm" className="h-7 text-xs text-red-600 hover:text-red-700" onClick={() => openDisputeDialog(obs.id)}>
+                                    <XCircle className="h-3.5 w-3.5" /> Dispute
+                                  </Button>
+                                </div>
+                              )}
+                              {isDisputed && (
+                                <div className="flex items-center justify-end gap-1">
+                                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => {
+                                    const token = existingTokens.find(t => t.submission_token_status === 'active')
+                                    if (token?.submission_url) {
+                                      navigator.clipboard.writeText(token.submission_url)
+                                      toast.success('Collection URL copied — send to counterparty to re-upload')
+                                    } else {
+                                      toast.info('No active collection token. Generate one first.')
+                                      setShowTokenDialog(true)
+                                    }
+                                  }}>
+                                    <RotateCcw className="h-3.5 w-3.5" /> Re-upload
+                                  </Button>
+                                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => openManualEntryFor(obs)}>
+                                    <Pencil className="h-3.5 w-3.5" /> Manual
+                                  </Button>
+                                  <Button variant="ghost" size="sm" className="h-7 text-xs text-red-600 hover:text-red-700" onClick={() => handleDeleteObservation(obs.id)}>
+                                    <Trash2 className="h-3.5 w-3.5" /> Delete
+                                  </Button>
+                                </div>
+                              )}
+                            </td>
+                          </tr>
+                          {isDisputed && lastDispute && (
+                            <tr className="bg-red-50/30">
+                              <td colSpan={5} className="px-4 py-2">
+                                <div className="flex items-start gap-2 text-xs">
+                                  <AlertTriangle className="h-3.5 w-3.5 text-red-500 mt-0.5 shrink-0" />
+                                  <div>
+                                    <span className="font-medium text-red-700">Disputed</span>
+                                    <span className="text-slate-600 ml-1">— {lastDispute.notes}</span>
+                                    <span className="text-slate-400 ml-2">{new Date(lastDispute.timestamp).toLocaleDateString()}</span>
+                                  </div>
+                                </div>
+                              </td>
+                            </tr>
+                          )}
+                        </Fragment>
                       )
                     })}
                   </tbody>
@@ -1202,7 +1286,11 @@ function GRPSection({
                 {baselineData.observations.map(obs => (
                   <tr key={obs.id as number} className="hover:bg-slate-50">
                     <td className="px-4 py-2.5">{grpFormatPeriod(String(obs.period_start))}</td>
-                    <td className="px-4 py-2.5 text-right font-mono font-medium">{grpFormatGRP(obs.calculated_grp_per_kwh as number | null)}</td>
+                    <td
+                      className={`px-4 py-2.5 text-right font-mono font-medium${editMode ? ' cursor-pointer rounded bg-amber-50 hover:bg-amber-100 transition-colors' : ''}`}
+                      onClick={editMode ? () => openManualEntryFor({ period_start: String(obs.period_start) }, true) : undefined}
+                      title={editMode ? 'Click to edit' : undefined}
+                    >{grpFormatGRP(obs.calculated_grp_per_kwh as number | null)}</td>
                     {baselineData.componentKeys.map(key => {
                       const tc = (obs.source_metadata as R | undefined)?.tariff_components as Record<string, number> | undefined
                       return (
@@ -1352,25 +1440,60 @@ function GRPSection({
         </DialogContent>
       </Dialog>
 
-      {/* Aggregate Year Dialog */}
-      <Dialog open={showAggregateDialog} onOpenChange={setShowAggregateDialog}>
+      {/* Dispute Dialog */}
+      <Dialog open={showDisputeDialog} onOpenChange={setShowDisputeDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Aggregate Annual GRP</DialogTitle>
-            <DialogDescription>Calculate the weighted average GRP from monthly observations for an operating year.</DialogDescription>
+            <DialogTitle>Dispute GRP Observation</DialogTitle>
+            <DialogDescription>Provide a reason for disputing this observation. The disputed value will be excluded from annual GRP aggregation.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="grpAggYear">Operating Year</Label>
-              <Input id="grpAggYear" type="number" min={1} value={aggYear} onChange={e => setAggYear(Number(e.target.value))} />
+              <Label htmlFor="disputeNotes">Reason for Dispute *</Label>
+              <textarea
+                id="disputeNotes"
+                className="flex min-h-[80px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
+                placeholder="e.g., GRP value extracted incorrectly — 209.5 vs expected ~2.0"
+                value={disputeNotes}
+                onChange={e => setDisputeNotes(e.target.value)}
+              />
             </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input type="checkbox" checked={aggIncludePending} onChange={e => setAggIncludePending(e.target.checked)} className="rounded border-slate-300" />
-              Include pending (unverified) observations
-            </label>
-            <Button className="w-full" disabled={aggLoading} onClick={handleAggregate}>
-              {aggLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-              Aggregate
+            <Button
+              className="w-full"
+              variant="destructive"
+              disabled={disputeLoading || !disputeNotes.trim()}
+              onClick={handleDisputeSubmit}
+            >
+              {disputeLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+              Submit Dispute
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Manual Entry Dialog (for correcting disputed observation) */}
+      <Dialog open={showManualEntryDialog} onOpenChange={setShowManualEntryDialog}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Enter Corrected GRP</DialogTitle>
+            <DialogDescription>Manually enter the corrected GRP rate for this period. This will replace the disputed observation with an estimated value.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label htmlFor="manualEntryPeriod">Billing Month</Label>
+              <Input id="manualEntryPeriod" type="month" value={manualEntryPeriod} onChange={e => setManualEntryPeriod(e.target.value)} />
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="manualEntryGrp">GRP per kWh</Label>
+              <Input id="manualEntryGrp" type="number" step="0.0001" min="0" placeholder="e.g., 2.0350" value={manualEntryGrp} onChange={e => setManualEntryGrp(e.target.value)} />
+            </div>
+            <Button
+              className="w-full"
+              disabled={manualEntryLoading || !manualEntryPeriod || !manualEntryGrp}
+              onClick={handleManualEntrySubmit}
+            >
+              {manualEntryLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+              Save Corrected Value
             </Button>
           </div>
         </DialogContent>
