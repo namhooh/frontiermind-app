@@ -4,12 +4,13 @@ This document maps CBE's data architecture to FrontierMind's canonical schema an
 
 **Sources:** AM Onboarding Template (Excel), PPA Contract PDFs, Utility Invoices (GRP — Grid Reference Price), Snowflake data warehouse, Operations Plant Performance Workbook, Operating Revenue Masterfile.
 
-**Schema version:** v10.4 (migration 041)
+**Schema version:** v10.9 (migration 046)
 
 **Companion documentation:**
 - [`contract-digitization/docs/IMPLEMENTATION_GUIDE.md`](../contract-digitization/docs/IMPLEMENTATION_GUIDE.md) — Full contract digitization pipeline (OCR, PII, clause extraction, ontology)
 - [`contract-digitization/docs/POWER_PURCHASE_ONTOLOGY_FRAMEWORK.md`](../contract-digitization/docs/POWER_PURCHASE_ONTOLOGY_FRAMEWORK.md) — Ontology concepts, clause categories, relationship types
 - [`database/scripts/project-onboarding/audits/`](../database/scripts/project-onboarding/audits/) — Per-project onboarding audit trail
+- [`database/migrations/046_populate_portfolio_base_data.sql`](../database/migrations/046_populate_portfolio_base_data.sql) — Full portfolio population (Section 17)
 
 ---
 
@@ -1659,6 +1660,8 @@ Tracks which tables/views referenced in this mapping doc have concrete migration
 | `meter_aggregate.available_energy_kwh`, `contract_line_id`, `ghi_irradiance_wm2`, `poa_irradiance_wm2` | 041 | Implemented |
 | `plant_performance` | 041 | Implemented (derived monthly performance metrics, FKs to production_forecast + billing_period) |
 | `energy_category` enum (`metered`, `available`, `test`) | 041 | Implemented |
+| `contract.parent_contract_id` | 046 | Implemented (BIGINT FK, self-ref with CHECK + trigger for same-project) |
+| `contract_amendment.amendment_date` nullable | 046 | Implemented (nullable — unknown signing dates) |
 | `price_index` | — | **Pending** — needed for CPI escalation |
 | `loan_schedule` / `loan_payment` | — | **Pending** — needed for loan repayment tracking |
 
@@ -1687,3 +1690,201 @@ From the MOH01 onboarding audit (`database/scripts/project-onboarding/audits/GH_
 | 15 | PPA structured field mapping incomplete — LLM returns structured `default_rate` and `available_energy` but parser only populated deprecated flat fields | `default_rate` and `available_energy` always None in `PPAContractData` | **Fixed** (parser now populates structured models) |
 | 16 | `formula_type` not set at onboarding — rebased market price engine requires `logic_parameters.formula_type` but tariff builder never set it | Engine would fail when invoked for onboarded REBASED_MARKET_PRICE projects | **Fixed** (infers GRID_DISCOUNT_BOUNDED from floor/ceiling presence) |
 | 17 | Cross-tenant counterparty conflation — global unique key `(counterparty_type_id, LOWER(name))` means two orgs with same counterparty name conflict | Currently single-tenant (CBE only); will need `organization_id` added when second client onboards | Open (design debt) |
+
+---
+
+## 17. Portfolio Population (Migration 046)
+
+**Migration:** `database/migrations/046_populate_portfolio_base_data.sql`
+**Date:** 2026-02-27
+
+### Schema Changes
+
+| Change | Table | Details |
+|--------|-------|---------|
+| New column | `contract` | `parent_contract_id BIGINT REFERENCES contract(id)` — links ancillary docs to primary contract |
+| Constraint | `contract` | `chk_contract_no_self_parent` — prevents self-reference |
+| Trigger | `contract` | `trg_contract_same_project_parent` — parent must be same project |
+| Index | `contract` | `idx_contract_parent` — partial index WHERE parent IS NOT NULL |
+| Nullable | `contract_amendment` | `amendment_date` now nullable (unknown signing dates) |
+
+### Legal Entity Mapping
+
+11 entities total (3 existing + 8 new), all `organization_id = 1`.
+
+| Code | Name | Country | Status |
+|------|------|---------|--------|
+| CBCH | CrossBoundary Energy Credit Holding | Mauritius | Existing |
+| EGY0 | CrossBoundary Energy Egypt For Solar Energy | Egypt | Existing |
+| GHA0 | CrossBoundary Energy Ghana Limited Company | Ghana | Existing |
+| KEN0 | CrossBoundary Energy Kenya Limited | Kenya | **New** |
+| MAD0 | CrossBoundary Energy Madagascar | Madagascar | **New** |
+| MAD2 | CrossBoundary Energy Madagascar II SA | Madagascar | **New** |
+| NIG0 | CrossBoundary Energy Nigeria Ltd | Nigeria | **New** |
+| SL02 | CrossBoundary Energy (SL) Limited | Sierra Leone | **New** |
+| SOM0 | KUBE Energy Somalia LLC | Somalia | **New** |
+| MOZ0 | Balama Renewables, Limitada | Mozambique | **New** |
+| ZIM0 | CrossBoundary Energy Zimbabwe Limited | Zimbabwe | **New** |
+
+### Counterparty Mapping
+
+~28 counterparties total (6 existing + ~22 new). All as `counterparty_type = OFFTAKER`.
+
+| Counterparty Name | Industry | Country | Projects |
+|--------------------|----------|---------|----------|
+| GC Retail | Real Estate | Mauritius | GC01 |
+| Zoodlabs Group | Telecom | Mauritius | ZO01, ZL02 |
+| iSAT Africa | Telecom | Mauritius | TBC |
+| Indorama Ventures | Oil, Petrochemical | Egypt | IVL01 |
+| Diageo | Food & Drink | Ghana | GBL01 |
+| Kasapreko Company | Food & Drink | Ghana | KAS01 |
+| Unilever | Consumer Products | Ghana | UGL01 |
+| Polytanks Ghana Limited | Consumer Products | Ghana | MOH01 (existing) |
+| Arijiju Retreat | Hospitality | Kenya | AR01 |
+| Oryx Ltd | Hospitality | Kenya | LOI01 |
+| Devki Group | Manufacturing | Kenya | MB01, MF01, MP01, MP02, NC02, NC03 |
+| Brush Manufacturers | Manufacturing | Kenya | TBM01 |
+| Lipton | Food & Drink | Kenya | UTK01 |
+| XFlora Group | Agriculture | Kenya | XF-AB |
+| Ampersand | Transport | Kenya | AMP01 |
+| Rio Tinto | Mining | Madagascar | QMM01 |
+| Next Source Materials | Mining | Madagascar | ERG |
+| Jabi Mall Development Co | Real Estate | Nigeria | JAB01 |
+| Heineken | Food & Drink | Nigeria | NBL01, NBL02 |
+| Miro Forestry and Timber Products | Forestry | Sierra Leone | MIR01 |
+| UNSOS | NGO | Somalia | UNSOS |
+| Twigg Exploration and Mining | Mining | Mozambique | TWG01 |
+| Blanket Mine | Mining | Zimbabwe | CAL01 |
+| Accra Breweries | Food & Drink | Ghana | ABI01 |
+| Izuba BNT | Energy | Rwanda | BNT01 |
+
+### Project Mapping
+
+33 projects total. MOH01 is pre-existing (id=8).
+
+| Sage ID | External ID | Project Name | Country | Legal Entity | COD Date | Capacity (kWp) | Currency |
+|---------|-------------|--------------|---------|--------------|----------|----------------|----------|
+| GC01 | KE 22006 | Garden City Mall | Kenya | CBCH | 2016-06-01 | 858 | USD |
+| ZO01 | SL 22030 | Zoodlabs Group | Sierra Leone | CBCH | 2024-04-01 | - | USD |
+| TBC | DRC 23521 | iSAT Africa | DRC | CBCH | 2025-08-29 | - | USD |
+| IVL01 | EG 22008 | Indorama Ventures - Expanded | Egypt | EGY0 | 2023-10-02 | 3,238 | USD |
+| GBL01 | GH 22005 | Guinness Ghana Breweries | Ghana | GHA0 | 2021-03-19 | 1,095 | GHS |
+| KAS01 | GH 22010 | Kasapreko - Phase I and II | Ghana | GHA0 | 2024-05-03 | 1,305 | GHS |
+| UGL01 | GH 22022 | Unilever Ghana | Ghana | GHA0 | 2021-01-05 | 970 | GHS |
+| **MOH01** | **GH 22015** | **Mohinani Group** | **Ghana** | **GHA0** | **2025-12-12** | **2,617** | **GHS** |
+| ABI01 | - | Accra Breweries Ghana | Ghana | GHA0 | - | - | - |
+| AR01 | KE 22469 | Arijiju Retreat | Kenya | KEN0 | 2023-10-24 | 205 | USD |
+| LOI01 | KE 22013 | Loisaba | Kenya | KEN0 | 2019-03-01 | 74 | USD |
+| MB01 | KE 22434 | Maisha Mabati Mills LuKenya | Kenya | KEN0 | 2025-01-01 | 1,173 | USD |
+| MF01 | KE 22435 | Maisha Minerals & Fertilizer | Kenya | KEN0 | 2023-10-24 | 674 | USD |
+| MP02 | KE 22436 | Maisha Packaging LuKenya | Kenya | KEN0 | 2024-03-28 | 1,386 | USD |
+| MP01 | KE 22471 | Maisha Packaging Nakuru | Kenya | KEN0 | 2024-04-05 | 681 | USD |
+| NC02 | KE 22432 | National Cement Athi River | Kenya | KEN0 | 2023-10-24 | 493 | USD |
+| NC03 | KE 22433 | National Cement Nakuru | Kenya | KEN0 | 2024-04-08 | 2,237 | USD |
+| TBM01 | KE 22021 | TeePee Brushes | Kenya | KEN0 | 2023-02-08 | 1,508 | KES |
+| UTK01 | KE 22023 | eKaterra Tea Kenya | Kenya | KEN0 | 2019-05-27 | 619 | KES |
+| XF-AB | KE 22025 | XFlora Group | Kenya | KEN0 | 2021-02-01 | 424 | KES |
+| AMP01 | KE 23622 | Ampersand | Kenya | KEN0 | - | 37 | USD |
+| BNT01 | - | Izuba BNT | Rwanda | KEN0 | - | - | - |
+| QMM01 | MG 22017 | Rio Tinto QMM | Madagascar | MAD0 | 2025-02-01 | 14,448 | MGA |
+| ERG | MG 22028 | Molo Graphite | Madagascar | MAD2 | 2023-11-16 | 2,696 | MGA |
+| JAB01 | NG 22009 | Jabi Lake Mall | Nigeria | NIG0 | 2020-06-30 | 610 | NGN |
+| NBL01 | NG 22016 | Nigerian Breweries - Ibadan | Nigeria | NIG0 | 2025-01-01 | 3,173 | NGN |
+| NBL02 | NG 22031 | Nigerian Breweries - Ama | Nigeria | NIG0 | 2023-02-27 | 4,006 | NGN |
+| MIR01 | SL 22014 | Miro Forestry | Sierra Leone | SL02 | 2023-10-01 | 236 | SLE |
+| ZL02 | SL 24702 | Zoodlabs Energy Services | Sierra Leone | SL02 | 2025-03-01 | - | USD |
+| UNSOS | SO 22024 | UNSOS Baidoa | Somalia | SOM0 | 2024-03-17 | 2,732 | USD |
+| TWG01 | MZ 22003 | Balama Graphite | Mozambique | MOZ0 | 2025-12-01 | 11,249 | MZN |
+| CAL01 | ZW 23541 | Caledonia | Zimbabwe | ZIM0 | 2025-04-15 | 13,895 | USD |
+
+### Contract Type Mapping
+
+| CBE Agreement Type | FrontierMind `contract_type.code` |
+|--------------------|-----------------------------------|
+| SSA / PPA / RESA / Project Agreement | `PPA` |
+| Finance Lease / Operating Lease / BOOT Operating Lease / Equipment Lease | `LEASE` |
+| ESA / ESA + O&M / ESA + Battery Lease | `ESA` |
+| Wheeling Agreement / Loan Agreement | `OTHER` |
+
+### Contract Hierarchy
+
+Primary contracts have `parent_contract_id = NULL`. Ancillary documents reference the primary via `parent_contract_id`.
+
+**Ancillary Documents (~13):**
+
+| Project | Ancillary Document | Document Type |
+|---------|-------------------|---------------|
+| GC01 | Garden City SolarAfrica-CBE Project Agreement Assignment | assignment_agreement |
+| GC01 | Garden City Transaction Documents | transaction_documents |
+| LOI01 | Loisaba SSA Revised Annexures | revised_annexures |
+| LOI01 | Loisaba SolarAfrica COD Acceptance Certificate | cod_certificate |
+| LOI01 | Loisaba Transfer Acceptance Certificates | transfer_certificate |
+| QMM01 | QMM Permission Agreement | permission_agreement |
+| UGL01 | Unilever Ghana SSA Schedules | ssa_schedules |
+| UGL01 | Unilever Ghana COD Notice | cod_notice |
+| UTK01 | Unilever Tea Kenya SSA Schedules | ssa_schedules |
+| XF-AB | XFlora SSA 1st Amendment COD Extension | cod_extension |
+| XF-AB | XFlora SSA Adherence Agreement | adherence_agreement |
+| CAL01 | CMS Sale of Shares and Sale Claims Agreement | share_sale_agreement |
+| ZO01 | Zoodlabs Solar Loan Agreement | loan_agreement |
+
+### Amendment Mapping
+
+~19 amendments total (1 existing MOH01 + 18 new). `NULL` dates indicate unknown signing dates.
+
+| Project | # | Date | Description |
+|---------|---|------|-------------|
+| MOH01 | 1 | 2023-07-05 | *Existing* — Extended term, increased discount |
+| GBL01 | 1 | 2019-12-19 | 1st Amendment to Guinness Ghana Breweries SSA |
+| GBL01 | 2 | 2020-12-17 | 2nd Amendment to Guinness Ghana Breweries SSA |
+| IVL01 | 1 | 2022-08-18 | Amendment & Restatement of IVL Dhunseri SSA |
+| KAS01 | 1 | 2017-05-31 | Kasapreko SSA Amendment (Solar Africa) |
+| KAS01 | 2 | 2019-04-26 | 1st Amendment Solar Phase II |
+| KAS01 | 3 | 2020-07-06 | 2nd Amendment - Reinforcement Works |
+| KAS01 | 4 | 2021-03-01 | 3rd Amendment - Interconnection Works |
+| LOI01 | 1 | 2018-10-16 | 1st Amendment to Loisaba SSA |
+| MIR01 | 1 | 2021-11-11 | 1st Amendment to Miro Forestry SSA |
+| NBL01 | 1 | 2019-02-01 | 1st Amendment to Nigerian Breweries Ibadan SSA |
+| NBL01 | 2 | 2021-05-07 | 2nd Amendment to Nigerian Breweries Ibadan SSA |
+| NBL01 | 3 | 2022-10-22 | 3rd Amendment to Nigerian Breweries Ibadan SSA |
+| NBL02 | 2 | 2021-05-01 | 2nd Amendment to Nigerian Breweries Ama SSA |
+| QMM01 | 1 | *NULL* | 1st Amendment to QMM RESA |
+| QMM01 | 2 | *NULL* | 2nd Amendment to QMM RESA |
+| UNSOS | 2 | *NULL* | 2nd Amendment to UNSOS Baidoa SSA |
+| UNSOS | 3 | 2023-11-14 | 3rd Amendment to UNSOS Baidoa SSA (Kube) |
+| XF-AB | 1 | 2020-06-20 | 1st Amendment to XFlora Group SSA |
+
+### Sage ID Normalization
+
+| CBE Source Value | FrontierMind Sage ID | Reason |
+|------------------|---------------------|--------|
+| GC001 | GC01 | Normalized to 2-digit suffix |
+| ZL01 (Zoodlabs Group, CBCH entity) | ZO01 | Disambiguated from ZL02 (Zoodlabs, SL02 entity) |
+| XF-AB/BV/L01/SS | XF-AB | Shortened compound ID |
+
+### Anomalies & Decisions
+
+| Project | Issue | Decision |
+|---------|-------|----------|
+| CAL01 | No original PPA — only Amended & Restated version | Insert A&R as the primary contract |
+| KAS01 | No original SSA — earliest doc is 2017 Solar Africa amendment | Insert placeholder primary contract; amendments reference it |
+| UNSOS | Original SSA + 1st Amendment not available | Insert placeholder primary; 2nd & 3rd amendments reference it |
+| NBL01 | 3rd Amendment may be duplicated (two files with same size) | Insert once |
+| NBL02 | 2nd Amendment dated 2021-05-01 before SSA dated 2021-12-10 | Insert with actual dates; `amendment_number = 2` per source doc title |
+| UNSOS | Original SSA + 1st Amendment not available | `amendment_number` starts at 2 (2nd) and 3 (3rd) per source doc titles |
+| TBM01 | Two copies of SSA (stamped + signed) | Insert once |
+| ABI01 | No Excel entry — found only in contract PDFs | Insert as project with limited metadata |
+| BNT01 | No Excel entry — found only in contract PDFs | Insert as project with limited metadata |
+| TBC / ZL02 | No contract PDFs available | Project + counterparty only, no contract row |
+| ZO01 | Originally listed as no PDFs, but 2 exist | Primary ESA + ancillary loan agreement; country corrected to Sierra Leone |
+| GC01 / TBC | `project.country` was legal jurisdiction (Mauritius) | Corrected to physical site location: Kenya (GC01), DRC (TBC) |
+| GC01 / ZO01 / XF-AB | Sage ID normalized from source | `extraction_metadata.source_sage_customer_id` preserves original: GC001, ZL01, XF-AB/BV/L01/SS |
+| Unclassified PDF | `Please sign IHS POC contract - signed.pdf` | Skipped — not attributable to any project |
+
+### Backend Code Changes
+
+| File | Change | Reason |
+|------|--------|--------|
+| `python-backend/api/billing.py` (~line 264) | Added `AND c.parent_contract_id IS NULL` to contract JOIN | Prevent billing from picking ancillary doc |
+| `python-backend/api/billing.py` (~line 27-40) | Added 8 country codes to `_COUNTRY_NAME_TO_CODE`: EG, MG, SL, SO, MZ, ZW, CD, RW | `_country_to_code()` now resolves all portfolio countries |
+| `python-backend/api/entities.py` (~line 728) | Changed ORDER BY to `c.parent_contract_id NULLS FIRST, c.effective_date` | Ensure `contracts[0]` is always the primary contract |

@@ -1871,19 +1871,19 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
               <div className="mt-2 py-1">
                 <dt className="text-xs text-slate-400">Source of Exchange Rate</dt>
                 <dd className="text-sm text-slate-900 mt-0.5">
-                  {editMode ? (
+                  {editMode && firstTariff ? (
                     <EditableCell
-                      value={c.agreed_fx_rate_source}
+                      value={firstTariff.agreed_fx_rate_source}
                       fieldKey="agreed_fx_rate_source"
-                      entity="contracts"
-                      entityId={cid}
+                      entity="tariffs"
+                      entityId={firstTariff.id as number}
                       projectId={pid}
                       type="text"
                       editMode={true}
                       onSaved={onSaved}
                     />
                   ) : (
-                    <span className="whitespace-pre-line">{c.agreed_fx_rate_source != null ? String(c.agreed_fx_rate_source) : '—'}</span>
+                    <span className="whitespace-pre-line">{firstTariff?.agreed_fx_rate_source != null ? String(firstTariff.agreed_fx_rate_source) : '—'}</span>
                   )}
                 </dd>
               </div>

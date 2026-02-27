@@ -29,6 +29,14 @@ _COUNTRY_NAME_TO_CODE: dict[str, str] = {
     "kenya": "KE",
     "nigeria": "NG",
     "south africa": "ZA",
+    "egypt": "EG",
+    "madagascar": "MG",
+    "sierra leone": "SL",
+    "somalia": "SO",
+    "mozambique": "MZ",
+    "zimbabwe": "ZW",
+    "drc": "CD",
+    "rwanda": "RW",
 }
 
 
@@ -262,6 +270,7 @@ async def generate_expected_invoice(
                            c.id AS contract_id
                     FROM project p
                     JOIN contract c ON c.project_id = p.id
+                      AND c.parent_contract_id IS NULL
                     WHERE p.id = %(pid)s
                     LIMIT 1
                 """, {"pid": project_id})

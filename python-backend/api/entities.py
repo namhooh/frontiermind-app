@@ -163,6 +163,8 @@ class ProjectPatch(BaseModel):
     installed_ac_capacity_kw: Optional[float] = None
     installation_location_url: Optional[str] = None
     legal_entity_id: Optional[int] = None
+    # technical_specs JSONB sub-fields (prefixed ts_)
+    ts_interconnection_voltage_kv: Optional[float] = None
 
 
 class ContractPatch(BaseModel):
@@ -172,9 +174,6 @@ class ContractPatch(BaseModel):
     end_date: Optional[str] = None
     contract_term_years: Optional[float] = None
     file_location: Optional[str] = None
-    payment_security_details: Optional[str] = None
-    agreed_fx_rate_source: Optional[str] = None
-    interconnection_voltage_kv: Optional[float] = None
     contract_type_id: Optional[int] = None
     contract_status_id: Optional[int] = None
     counterparty_id: Optional[int] = None
@@ -195,6 +194,7 @@ class TariffPatch(BaseModel):
     energy_sale_type_id: Optional[int] = None
     escalation_type_id: Optional[int] = None
     market_ref_currency_id: Optional[int] = None
+    agreed_fx_rate_source: Optional[str] = None
     # logic_parameters JSONB sub-fields (prefixed lp_)
     lp_floor_rate: Optional[float] = None
     lp_ceiling_rate: Optional[float] = None
@@ -294,6 +294,7 @@ _TABLES_WITH_UPDATED_AT = {"contract", "clause_tariff", "customer_contact", "pro
 _JSONB_PREFIX_MAP = {
     "lp_": "logic_parameters",
     "meta_": "extraction_metadata",
+    "ts_": "technical_specs",
 }
 
 
@@ -724,7 +725,7 @@ async def get_project_dashboard(
                         LEFT JOIN contract_status cs ON cs.id = c.contract_status_id
                         LEFT JOIN counterparty cp ON cp.id = c.counterparty_id
                         WHERE c.project_id = %(pid)s
-                        ORDER BY c.effective_date
+                        ORDER BY c.parent_contract_id NULLS FIRST, c.effective_date
                     ),
                     tariffs_data AS (
                         SELECT ct.*,

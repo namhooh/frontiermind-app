@@ -70,8 +70,9 @@ export function TechnicalTab({ project, contracts, assets, meters, tariffs, fore
   const lp = (tariffs[0]?.logic_parameters as Record<string, unknown>) ?? {}
   const annualSpecificYield = typeof lp.annual_specific_yield === 'number' ? lp.annual_specific_yield : null
 
-  // Interconnection voltage from first contract that has it
-  const interconnectionVoltage = contracts.find((c) => c.interconnection_voltage_kv != null)?.interconnection_voltage_kv
+  // Interconnection voltage from project.technical_specs JSONB
+  const techSpecs = (project.technical_specs as Record<string, unknown>) ?? {}
+  const interconnectionVoltage = techSpecs.interconnection_voltage_kv
 
   // Billing meter aggregations
   const billingMeters = meters.filter((m) => {

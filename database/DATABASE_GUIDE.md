@@ -85,6 +85,8 @@ database/
 │   ├── 042_invoice_generation_prerequisites.sql       # Phase 10.5: clean dedup index, billing_tax_rule (GiST), invoice header versioning, line item audit/sign, new line item types
 │   ├── 043_billing_gap_analysis_fixes.sql              # Phase 10.6: org-scoped billing_tax_rule RLS
 │   ├── 044_legal_entity_industry_and_moh01_fixes.sql  # Phase 10.7: legal_entity table, counterparty.industry, MOH01 data fixes
+│   ├── 045_relocate_contract_columns.sql              # Phase 10.8: Relocate interconnection_voltage_kv, agreed_fx_rate_source, payment_security to proper homes
+│   ├── 046_populate_portfolio_base_data.sql           # Phase 10.9: CBE portfolio population — parent_contract_id, legal entities, counterparties, 33 projects, contracts, amendments
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │

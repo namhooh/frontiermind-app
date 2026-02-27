@@ -348,15 +348,25 @@ FROM (
 
   SELECT
     'fields',
-    'contract.payment_security_details',
+    'clause.security_package',
     CASE
-      WHEN (SELECT payment_security_required FROM con) IS TRUE
-       AND COALESCE(NULLIF((SELECT payment_security_details FROM con), ''), NULL) IS NULL THEN 'FAIL'
-      WHEN (SELECT payment_security_required FROM con) IS TRUE THEN 'PASS'
+      WHEN EXISTS (
+        SELECT 1 FROM clause cl
+        JOIN clause_category cc ON cc.id = cl.clause_category_id
+        JOIN ctx ON cl.contract_id IN (SELECT c.id FROM contract c WHERE c.project_id = ctx.project_id)
+        WHERE cc.code = 'SECURITY_PACKAGE' AND cl.is_current = true
+      ) THEN 'PASS'
       ELSE 'WARN'
     END,
-    COALESCE((SELECT payment_security_details FROM con), 'NULL'),
-    'required when payment_security_required=true'
+    COALESCE((
+      SELECT cl.normalized_payload->>'details'
+      FROM clause cl
+      JOIN clause_category cc ON cc.id = cl.clause_category_id
+      JOIN ctx ON cl.contract_id IN (SELECT c.id FROM contract c WHERE c.project_id = ctx.project_id)
+      WHERE cc.code = 'SECURITY_PACKAGE' AND cl.is_current = true
+      LIMIT 1
+    ), 'NULL'),
+    'SECURITY_PACKAGE clause present when payment security applies'
 
   UNION ALL
 
@@ -570,9 +580,7 @@ SELECT
   c.name,
   c.contract_term_years,
   c.effective_date,
-  c.end_date,
-  c.payment_security_required,
-  c.payment_security_details
+  c.end_date
 FROM contract c
 JOIN project p ON p.id = c.project_id
 WHERE p.external_project_id = :'external_project_id'

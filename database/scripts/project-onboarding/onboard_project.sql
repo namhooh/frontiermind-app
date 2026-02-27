@@ -307,7 +307,7 @@ ON CONFLICT (counterparty_type_id, LOWER(name)) DO UPDATE SET
 INSERT INTO project (
   organization_id, name, external_project_id, sage_id, country,
   cod_date, installed_dc_capacity_kwp, installed_ac_capacity_kw,
-  installation_location_url
+  installation_location_url, technical_specs
 )
 SELECT
   s.organization_id,
@@ -318,7 +318,10 @@ SELECT
   s.cod_date,
   s.installed_dc_capacity_kwp,
   s.installed_ac_capacity_kw,
-  s.installation_location_url
+  s.installation_location_url,
+  CASE WHEN s.interconnection_voltage_kv IS NOT NULL
+       THEN jsonb_build_object('interconnection_voltage_kv', s.interconnection_voltage_kv)
+       ELSE '{}'::jsonb END
 FROM stg_project_core s
 ON CONFLICT (organization_id, external_project_id)
   WHERE external_project_id IS NOT NULL
@@ -328,7 +331,8 @@ DO UPDATE SET
   installed_ac_capacity_kw = EXCLUDED.installed_ac_capacity_kw,
   sage_id = EXCLUDED.sage_id,
   country = EXCLUDED.country,
-  installation_location_url = EXCLUDED.installation_location_url;
+  installation_location_url = EXCLUDED.installation_location_url,
+  technical_specs = project.technical_specs || EXCLUDED.technical_specs;
 
 -- 4.3 Contract
 INSERT INTO contract (
@@ -336,9 +340,6 @@ INSERT INTO contract (
   contract_type_id, contract_status_id,
   name, effective_date, end_date,
   external_contract_id, contract_term_years,
-  interconnection_voltage_kv,
-  payment_security_required, payment_security_details,
-  agreed_fx_rate_source,
   payment_terms, ppa_confirmed_uploaded, has_amendments,
   extraction_metadata
 )
@@ -353,10 +354,6 @@ SELECT
   s.end_date,
   s.external_contract_id,
   s.contract_term_years,
-  s.interconnection_voltage_kv,
-  s.payment_security_required,
-  s.payment_security_details,
-  s.agreed_fx_rate_source,
   s.payment_terms,
   s.ppa_confirmed_uploaded,
   s.has_amendments,
@@ -373,10 +370,6 @@ DO UPDATE SET
   effective_date = COALESCE(EXCLUDED.effective_date, contract.effective_date),
   end_date = COALESCE(EXCLUDED.end_date, contract.end_date),
   contract_term_years = EXCLUDED.contract_term_years,
-  interconnection_voltage_kv = EXCLUDED.interconnection_voltage_kv,
-  payment_security_required = EXCLUDED.payment_security_required,
-  payment_security_details = EXCLUDED.payment_security_details,
-  agreed_fx_rate_source = EXCLUDED.agreed_fx_rate_source,
   payment_terms = EXCLUDED.payment_terms,
   ppa_confirmed_uploaded = COALESCE(EXCLUDED.ppa_confirmed_uploaded, contract.ppa_confirmed_uploaded),
   has_amendments = COALESCE(EXCLUDED.has_amendments, contract.has_amendments),
@@ -410,7 +403,8 @@ INSERT INTO clause_tariff (
   tariff_type_id, energy_sale_type_id, escalation_type_id,
   currency_id, market_ref_currency_id,
   base_rate, unit, valid_from, valid_to,
-  logic_parameters, is_active
+  logic_parameters, is_active,
+  agreed_fx_rate_source
 )
 SELECT
   p.id,
@@ -434,7 +428,8 @@ SELECT
     'escalation_value', stl.escalation_value,
     'grp_method', stl.grp_method
   ) || stl.logic_parameters_extra,
-  true
+  true,
+  spc.agreed_fx_rate_source
 FROM stg_tariff_lines stl
 JOIN stg_project_core spc ON stl.external_project_id = spc.external_project_id
 JOIN project p ON p.organization_id = spc.organization_id AND p.external_project_id = stl.external_project_id
@@ -454,6 +449,7 @@ DO UPDATE SET
   tariff_type_id = EXCLUDED.tariff_type_id,
   energy_sale_type_id = EXCLUDED.energy_sale_type_id,
   escalation_type_id = EXCLUDED.escalation_type_id,
+  agreed_fx_rate_source = EXCLUDED.agreed_fx_rate_source,
   updated_at = NOW();
 
 -- 4.6 Customer Contact
@@ -479,6 +475,31 @@ DO UPDATE SET
   full_name = EXCLUDED.full_name,
   phone = EXCLUDED.phone,
   updated_at = NOW();
+
+-- 4.6b Payment Security Clause (SECURITY_PACKAGE)
+-- Inserts a clause record when staging has payment_security data.
+INSERT INTO clause (
+  contract_id, clause_category_id,
+  section_ref, name,
+  normalized_payload, is_current
+)
+SELECT
+  c.id,
+  cc.id,
+  'SEC-001',
+  'Payment Security',
+  jsonb_build_object(
+    'required', COALESCE(spc.payment_security_required, false),
+    'details', spc.payment_security_details
+  ),
+  true
+FROM stg_project_core spc
+JOIN project p ON p.organization_id = spc.organization_id AND p.external_project_id = spc.external_project_id
+JOIN contract c ON c.project_id = p.id AND c.external_contract_id = spc.external_contract_id
+CROSS JOIN clause_category cc
+WHERE cc.code = 'SECURITY_PACKAGE'
+  AND (spc.payment_security_required = true OR spc.payment_security_details IS NOT NULL)
+ON CONFLICT DO NOTHING;
 
 -- 4.7 Production Forecast (12 months)
 INSERT INTO production_forecast (

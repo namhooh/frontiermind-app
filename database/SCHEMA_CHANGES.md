@@ -1927,3 +1927,110 @@ per-meter performance detail, and restructured frontend tabs.
   - Added Legal Entity, Legal Entity Code, and Industry display fields
 
 ---
+
+### v10.8 - 2026-02-27 (Relocate Misplaced Contract Columns)
+
+**Description:** Clean up contract table by relocating columns that were added during onboarding (migration 033) but don't belong on the contract table: `interconnection_voltage_kv` (site-level spec → project), `agreed_fx_rate_source` (tariff data → clause_tariff), and `payment_security_*` (clause terms → clause table).
+
+**Migrations:**
+- `database/migrations/045_relocate_contract_columns.sql`
+
+**New Columns:**
+| Table | Column | Type | Description |
+|-------|--------|------|-------------|
+| `project` | `technical_specs` | JSONB DEFAULT '{}' | Technical specifications bag (interconnection_voltage_kv, etc.) |
+| `clause_tariff` | `agreed_fx_rate_source` | VARCHAR(255) | Agreed FX rate determination method |
+
+**Data Migrations:**
+- `contract.interconnection_voltage_kv` → `project.technical_specs` JSONB key
+- `contract.agreed_fx_rate_source` → `clause_tariff.agreed_fx_rate_source` (all is_current=true tariffs)
+- `contract.payment_security_required` + `payment_security_details` → `clause` records with category `SECURITY_PACKAGE`
+
+**Dropped Columns:**
+| Table | Column | Replacement |
+|-------|--------|-------------|
+| `contract` | `interconnection_voltage_kv` | `project.technical_specs->>'interconnection_voltage_kv'` |
+| `contract` | `payment_security_required` | `clause` with `SECURITY_PACKAGE` category |
+| `contract` | `payment_security_details` | `clause.normalized_payload->>'details'` |
+| `contract` | `agreed_fx_rate_source` | `clause_tariff.agreed_fx_rate_source` |
+
+**Onboarding Script Changes:**
+- `database/scripts/project-onboarding/onboard_project.sql`:
+  - Step 4.2: Project upsert now writes `technical_specs` JSONB from staging `interconnection_voltage_kv`
+  - Step 4.3: Contract upsert no longer writes the 4 relocated columns
+  - Step 4.5: Tariff upsert now writes `agreed_fx_rate_source` from staging
+  - New Step 4.6b: Inserts `SECURITY_PACKAGE` clause from staging payment security data
+
+**Backend Changes:**
+- `python-backend/api/entities.py`:
+  - Removed `payment_security_details`, `agreed_fx_rate_source`, `interconnection_voltage_kv` from `ContractPatch`
+  - Added `ts_interconnection_voltage_kv` to `ProjectPatch` (JSONB prefix `ts_` → `technical_specs`)
+  - Added `agreed_fx_rate_source` to `TariffPatch`
+  - Added `"ts_": "technical_specs"` to `_JSONB_PREFIX_MAP`
+
+**Frontend Changes:**
+- `app/projects/components/TechnicalTab.tsx`: Reads interconnection voltage from `project.technical_specs` JSONB instead of contract
+- `app/projects/components/PricingTariffsTab.tsx`: Reads/edits `agreed_fx_rate_source` from tariff instead of contract
+
+**Validation Changes:**
+- `database/scripts/project-onboarding/validate_onboarding_project.sql`: Updated payment security validation to query `clause` table for `SECURITY_PACKAGE` clause
+
+---
+
+### v10.9 - 2026-02-27 (CBE Portfolio Data Population)
+
+**Description:** Populates the database with CBE's full customer contract portfolio: 33 projects from Customer Summary spreadsheet and metadata from 62 contract PDFs. Adds `parent_contract_id` hierarchy for ancillary documents, makes `amendment_date` nullable for unknown signing dates, and seeds all reference data (legal entities, counterparties, contracts, amendments). Deletes placeholder projects (Solar Farm, Travis County). Preserves existing MOH01 data.
+
+**Migration:** `database/migrations/046_populate_portfolio_base_data.sql`
+
+**Reference:** `CBE_data_extracts/CBE_TO_FRONTIERMIND_MAPPING.md` — Complete mapping reference
+
+**Schema Changes:**
+
+**New Column: contract.parent_contract_id**
+- `parent_contract_id` - BIGINT REFERENCES contract(id) — links ancillary documents to their primary contract
+- `chk_contract_no_self_parent` CHECK constraint — prevents self-reference
+- `idx_contract_parent` — partial index WHERE parent_contract_id IS NOT NULL
+- `trg_contract_same_project_parent` trigger — validates parent belongs to same project
+
+**Nullable Column: contract_amendment.amendment_date**
+- Was NOT NULL, now nullable — 5 amendments have unknown signing dates (QMM01 RESA 1st/2nd, UNSOS 2nd)
+
+**New Currencies:**
+- MGA (Malagasy Ariary), SOS (Somali Shilling), ZWL (Zimbabwean Dollar)
+
+**New Legal Entities (8):**
+- KEN0, MAD0, MAD2, NIG0, SL02, SOM0, MOZ0, ZIM0
+
+**Deleted Projects:**
+- Solar Farm (org=1) — 1 orphan meter deleted
+- Travis County (org=2) — no child data
+
+**Seed Data:**
+- ~22 new counterparties (all OFFTAKER type)
+- ~32 new projects (MOH01 excluded)
+- ~28 primary contracts (parent_contract_id = NULL), with `file_location` set for ~27
+- ~13 ancillary contracts (parent_contract_id = primary), with `file_location` set for all
+- ~18 new amendments (MOH01 amendment excluded), with `file_path` set for all
+
+**Data Quality Fixes:**
+- `project.country` uses physical site location, not legal entity jurisdiction (GC01→Kenya, ZO01→Sierra Leone, TBC→DRC)
+- ZO01 now has primary ESA contract + ancillary loan agreement (2 PDFs found)
+- Amendment numbering preserves source document numbering (NBL02: #2, UNSOS: #2/#3)
+- Normalized Sage IDs tracked via `extraction_metadata.source_sage_customer_id` (GC001→GC01, ZL01→ZO01, XF-AB/BV/L01/SS→XF-AB)
+
+**Backend Changes:**
+- `python-backend/api/billing.py` (~line 264): Added `AND c.parent_contract_id IS NULL` to contract JOIN — prevents billing from picking ancillary documents
+- `python-backend/api/billing.py` (~line 27-40): Added 8 country codes to `_COUNTRY_NAME_TO_CODE` (EG, MG, SL, SO, MZ, ZW, CD, RW) — resolves all portfolio countries for tax rule lookup
+- `python-backend/api/entities.py` (~line 728): Changed ORDER BY to `c.parent_contract_id NULLS FIRST, c.effective_date` — ensures primary contract sorts first for dashboard display
+
+**Design Notes:**
+- Primary contracts have `parent_contract_id = NULL`; ancillary docs reference the primary
+- Projects TBC, ZL02 have no contract rows (no PDFs available)
+- Contract effective_date set to COD date as proxy where exact signing date unavailable
+- `contract.file_location` and `contract_amendment.file_path` store relative paths to PDFs in `CBE_data_extracts/Customer Offtake Agreements/`
+- All inserts use code-based lookups (not hardcoded IDs) for FK resolution
+- All inserts are idempotent (ON CONFLICT DO NOTHING or DO UPDATE)
+- Post-load assertions verify MOH01 integrity and minimum record counts
+
+---
