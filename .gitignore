@@ -65,6 +65,9 @@ env/
 logs/
 .env*.local
 
+# SQL session files
+*.session.sql
+
 # CBE data extracts (keep only .md files)
 CBE_data_extracts/**
 !CBE_data_extracts/**/*.md
