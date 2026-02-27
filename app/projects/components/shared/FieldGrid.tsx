@@ -20,11 +20,11 @@ export type FieldDef = [string, unknown] | [string, unknown, EditConfig]
 export function FieldGrid({ fields, onSaved, editMode }: { fields: FieldDef[]; onSaved?: () => void; editMode?: boolean }) {
   return (
     <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-2">
-      {fields.map((def) => {
+      {fields.map((def, i) => {
         const [label, value] = def
         const editConfig = def.length === 3 ? def[2] : undefined
         return (
-          <div key={label as string} className="flex flex-col py-1">
+          <div key={`${label}-${i}`} className="flex flex-col py-1">
             <dt className="text-xs text-slate-400">{label as string}</dt>
             <dd className="text-sm text-slate-900">
               {editConfig && editMode ? (

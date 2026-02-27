@@ -15,7 +15,7 @@ BEGIN;
 
 UPDATE project
 SET country = 'Ghana'
-WHERE external_project_id = 'MOH01'
+WHERE external_project_id = 'GH 22015'
   AND (country IS NULL OR country != 'Ghana');
 
 -- ============================================================================
@@ -37,7 +37,7 @@ FROM (
      project p
 WHERE c.id = cl.contract_id
   AND p.id = c.project_id
-  AND p.external_project_id = 'MOH01'
+  AND p.external_project_id = 'GH 22015'
   AND cl.contract_line_number = mapping.line_no
   AND cl.is_active = true;
 
@@ -47,7 +47,7 @@ SET external_line_id = NULL
 FROM contract c
 JOIN project p ON p.id = c.project_id
 WHERE c.id = cl.contract_id
-  AND p.external_project_id = 'MOH01'
+  AND p.external_project_id = 'GH 22015'
   AND cl.energy_category = 'available'
   AND cl.is_active = true
   AND cl.external_line_id IS NOT NULL;
@@ -66,7 +66,7 @@ CROSS JOIN (
         ('%BBM2%'::text,   8001, 'Available Energy (EAvailable) - BBM2')
 ) AS mapping(meter_pattern, line_no, "desc")
 JOIN meter m ON m.project_id = p.id AND m.name ILIKE mapping.meter_pattern
-WHERE p.external_project_id = 'MOH01'
+WHERE p.external_project_id = 'GH 22015'
 ON CONFLICT (contract_id, contract_line_number) DO NOTHING;
 
 -- ============================================================================
@@ -80,7 +80,7 @@ SET clause_tariff_id = ct.id,
 FROM clause_tariff ct, contract c, project p
 WHERE c.id = cl.contract_id
   AND p.id = c.project_id
-  AND p.external_project_id = 'MOH01'
+  AND p.external_project_id = 'GH 22015'
   AND ct.project_id = p.id
   AND ct.is_current = true
   AND cl.energy_category = 'metered'
@@ -93,7 +93,7 @@ SET clause_tariff_id = ct.id,
 FROM clause_tariff ct, contract c, project p
 WHERE c.id = cl.contract_id
   AND p.id = c.project_id
-  AND p.external_project_id = 'MOH01'
+  AND p.external_project_id = 'GH 22015'
   AND ct.project_id = p.id
   AND ct.is_current = true
   AND cl.energy_category = 'available'
@@ -122,7 +122,7 @@ SELECT
 FROM project p
 JOIN contract c ON c.project_id = p.id
 JOIN clause_tariff ct ON ct.project_id = p.id AND ct.is_current = true
-WHERE p.external_project_id = 'MOH01'
+WHERE p.external_project_id = 'GH 22015'
   AND NOT EXISTS (
       SELECT 1 FROM contract_line cl2
       WHERE cl2.contract_id = c.id AND cl2.contract_line_number = 3000
@@ -158,7 +158,7 @@ SET logic_parameters = COALESCE(ct.logic_parameters, '{}')::jsonb || '{
 }'::jsonb
 FROM project p
 WHERE ct.project_id = p.id
-  AND p.external_project_id = 'MOH01'
+  AND p.external_project_id = 'GH 22015'
   AND ct.is_current = true;
 
 -- ============================================================================
@@ -206,7 +206,7 @@ WHERE NOT EXISTS (
 WITH
   proj AS (
     SELECT id AS project_id, organization_id
-    FROM project WHERE external_project_id = 'MOH01'
+    FROM project WHERE external_project_id = 'GH 22015'
     LIMIT 1
   ),
   bp AS (
@@ -285,7 +285,7 @@ WHERE source_system = 'fixture_moh01_dec2025'
       SELECT cl.id FROM contract_line cl
       JOIN contract c ON c.id = cl.contract_id
       JOIN project p ON p.id = c.project_id
-      WHERE p.external_project_id = 'MOH01'
+      WHERE p.external_project_id = 'GH 22015'
         AND cl.energy_category = 'available'
   );
 
@@ -295,7 +295,7 @@ WHERE source_system = 'fixture_moh01_dec2025'
 WITH
   proj AS (
     SELECT id AS project_id, organization_id
-    FROM project WHERE external_project_id = 'MOH01'
+    FROM project WHERE external_project_id = 'GH 22015'
     LIMIT 1
   ),
   bp AS (
@@ -377,7 +377,7 @@ FROM project p,
     ('2025-11-01'::date, '2025-11-30'::date),
     ('2025-12-01'::date, '2025-12-31'::date)
   ) AS m(period_start, period_end)
-WHERE p.external_project_id = 'MOH01'
+WHERE p.external_project_id = 'GH 22015'
   AND NOT EXISTS (
       SELECT 1 FROM reference_price rp
       WHERE rp.project_id = p.id
@@ -418,7 +418,7 @@ SELECT
 FROM project p
 JOIN production_forecast pf ON pf.project_id = p.id AND pf.forecast_month = '2025-12-01'
 JOIN billing_period bp ON bp.start_date = '2025-12-01' AND bp.end_date = '2025-12-31'
-WHERE p.external_project_id = 'MOH01'
+WHERE p.external_project_id = 'GH 22015'
   AND NOT EXISTS (
       SELECT 1 FROM plant_performance pp
       WHERE pp.project_id = p.id AND pp.billing_month = '2025-12-01'

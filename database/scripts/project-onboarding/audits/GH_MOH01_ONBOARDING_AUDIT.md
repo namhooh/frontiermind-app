@@ -14,8 +14,8 @@
 
 | Field | Value |
 |-------|-------|
-| `external_project_id` | GH-MOH01 |
-| `name` | GH-MOH01 |
+| `external_project_id` | GH 22015 |
+| `name` | Mohinani Group |
 | `country` | Ghana |
 | `cod_date` | 2025-09-01 |
 | `installed_dc_capacity_kwp` | 2,616.705 |

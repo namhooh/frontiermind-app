@@ -1877,3 +1877,53 @@ per-meter performance detail, and restructured frontend tabs.
   - **F13:** Expanded detail rows use persisted invoice line items when available, fall back to `qty * rate`
 
 ---
+
+### v10.7 - 2026-02-26 (Customer Summary Cross-Check: Legal Entity & MOH01 Fixes)
+
+**Description:** New `legal_entity` table for CBE SPVs with Sage company codes, `counterparty.industry` column, and MOH01 data corrections from Customer Summary spreadsheet cross-check.
+
+**Migrations:**
+- `database/migrations/044_legal_entity_industry_and_moh01_fixes.sql`
+
+**New Tables:**
+| Table | Description |
+|-------|-------------|
+| `legal_entity` | CBE legal entities (SPVs) with Sage company codes, org-scoped with RLS |
+
+**New Columns:**
+| Table | Column | Type | Description |
+|-------|--------|------|-------------|
+| `project` | `legal_entity_id` | BIGINT FK | Links project to its CBE legal entity |
+| `counterparty` | `industry` | VARCHAR(100) | Customer industry classification |
+
+**COMMENT Corrections:**
+- `project.sage_id`: Updated to "Sage Customer ID (e.g., MOH01, GBL01). Maps to Sage customer identifier."
+
+**Seed Data:**
+- Three CBE legal entities: CBCH (Mauritius), EGY0 (Egypt), GHA0 (Ghana)
+
+**Data Fixes (MOH01 → GH 22015):**
+- `project.external_project_id`: `MOH01` → `GH 22015`
+- `project.name`: `Mohinani` → `Mohinani Group`
+- `project.sage_id`: NULL → `MOH01`
+- `project.legal_entity_id`: set to GHA0 legal entity
+- `clause_tariff.energy_sale_type_id`: `FIXED_SOLAR` → `FLOATING_GRID`
+- `counterparty.industry`: NULL → `Consumer Products` (Polytanks Ghana Limited)
+
+**RLS Policies:**
+- `legal_entity_select_policy` — org members can read
+- `legal_entity_admin_modify_policy` — org admins can modify
+- `legal_entity_service_policy` — service role full access
+
+**Backend Changes:**
+- `python-backend/api/entities.py`:
+  - Added `legal_entity_id` to `ProjectPatch` model
+  - Added `legal_entity_name`, `legal_entity_code` to project_data CTE (via LEFT JOIN legal_entity)
+  - Added `counterparty_industry` to contracts_data CTE
+
+**Frontend Changes:**
+- `app/projects/components/ProjectOverviewTab.tsx`:
+  - Renamed `Sage ID` → `Sage Customer ID`
+  - Added Legal Entity, Legal Entity Code, and Industry display fields
+
+---

@@ -113,6 +113,7 @@ class ProjectGroupedItem(BaseModel):
     id: int
     name: str
     external_project_id: Optional[str] = None
+    sage_id: Optional[str] = None
     organization_id: int
     organization_name: str
 
@@ -161,6 +162,7 @@ class ProjectPatch(BaseModel):
     installed_dc_capacity_kwp: Optional[float] = None
     installed_ac_capacity_kw: Optional[float] = None
     installation_location_url: Optional[str] = None
+    legal_entity_id: Optional[int] = None
 
 
 class ContractPatch(BaseModel):
@@ -539,7 +541,7 @@ async def list_projects_grouped() -> ProjectsGroupedResponse:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    SELECT p.id, p.name, p.external_project_id,
+                    SELECT p.id, p.name, p.external_project_id, p.sage_id,
                            p.organization_id, o.name AS organization_name
                     FROM project p
                     JOIN organization o ON o.id = p.organization_id
@@ -552,6 +554,7 @@ async def list_projects_grouped() -> ProjectsGroupedResponse:
                         id=row['id'],
                         name=row['name'],
                         external_project_id=row.get('external_project_id'),
+                        sage_id=row.get('sage_id'),
                         organization_id=row['organization_id'],
                         organization_name=row['organization_name'],
                     )
@@ -698,9 +701,12 @@ async def get_project_dashboard(
                 cursor.execute(
                     """
                     WITH project_data AS (
-                        SELECT p.*, o.name AS organization_name
+                        SELECT p.*, o.name AS organization_name,
+                               le.name AS legal_entity_name,
+                               le.external_legal_entity_id AS legal_entity_code
                         FROM project p
                         JOIN organization o ON o.id = p.organization_id
+                        LEFT JOIN legal_entity le ON le.id = p.legal_entity_id
                         WHERE p.id = %(pid)s
                     ),
                     contracts_data AS (
@@ -711,7 +717,8 @@ async def get_project_dashboard(
                                cp.registered_name AS counterparty_registered_name,
                                cp.registration_number AS counterparty_registration_number,
                                cp.registered_address AS counterparty_registered_address,
-                               cp.tax_pin AS counterparty_tax_pin
+                               cp.tax_pin AS counterparty_tax_pin,
+                               cp.industry AS counterparty_industry
                         FROM contract c
                         LEFT JOIN contract_type ct ON ct.id = c.contract_type_id
                         LEFT JOIN contract_status cs ON cs.id = c.contract_status_id

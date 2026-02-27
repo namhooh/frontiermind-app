@@ -66,7 +66,7 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject }: ProjectSi
                   : 'text-slate-700 hover:bg-slate-100'
               }`}
             >
-              {p.external_project_id ? `${p.external_project_id} - ${p.name}` : p.name}
+              {p.sage_id ? `${p.sage_id} - ${p.name}` : p.name}
             </button>
           </li>
         ))}

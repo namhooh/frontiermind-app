@@ -27,7 +27,7 @@ from services.onboarding.normalizer import extract_billing_product_code
 TEMPLATE_PATH = Path(__file__).resolve().parent.parent.parent / "CBE_data_extracts" / "AM Onboarding Template 2025_MOH01_Mohinani Group.xlsx"
 
 ORGANIZATION_ID = 1
-EXTERNAL_PROJECT_ID = "MOH01"
+EXTERNAL_PROJECT_ID = "GH 22015"
 EXTERNAL_CONTRACT_ID = "CONGHA00-2025-00005"
 
 

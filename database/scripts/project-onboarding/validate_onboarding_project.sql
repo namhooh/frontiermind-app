@@ -5,7 +5,7 @@
 -- Usage examples:
 --   psql "$DATABASE_URL" -f database/scripts/project-onboarding/validate_onboarding_project.sql
 --   psql "$DATABASE_URL" \
---     -v external_project_id=GH-MOH01 \
+--     -v external_project_id=GH 22015 \
 --     -v expected_forecast_rows=12 \
 --     -v expected_guarantee_rows=20 \
 --     -v expected_meter_rows=5 \
@@ -14,7 +14,7 @@
 
 \if :{?external_project_id}
 \else
-\set external_project_id GH-MOH01
+\set external_project_id GH 22015
 \endif
 
 \if :{?expected_forecast_rows}

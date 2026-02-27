@@ -3,7 +3,7 @@
 
 Quick links: [Directory Structure](#directory-structure) | [Workflows](#common-workflows) | [Scripts](#scripts-reference) | [Troubleshooting](#troubleshooting)
 
-Last updated: 2026-02-24
+Last updated: 2026-02-26
 
 ---
 
@@ -84,6 +84,7 @@ database/
 │   ├── 041_multi_meter_billing_and_performance.sql    # Phase 10.4: contract_line, plant_performance, meter_aggregate enhancements, meter names, dedup index fix, external_line_id unique index
 │   ├── 042_invoice_generation_prerequisites.sql       # Phase 10.5: clean dedup index, billing_tax_rule (GiST), invoice header versioning, line item audit/sign, new line item types
 │   ├── 043_billing_gap_analysis_fixes.sql              # Phase 10.6: org-scoped billing_tax_rule RLS
+│   ├── 044_legal_entity_industry_and_moh01_fixes.sql  # Phase 10.7: legal_entity table, counterparty.industry, MOH01 data fixes
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │

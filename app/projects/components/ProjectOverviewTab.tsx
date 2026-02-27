@@ -29,7 +29,7 @@ interface ProjectOverviewTabProps {
 }
 
 export function ProjectOverviewTab({ data, contractColumns, projectId, onSaved, editMode, contacts, contactColumns, onAddContact, onRemoveContact }: ProjectOverviewTabProps) {
-  const { project, contracts, clauses, lookups } = data
+  const { project, contracts, tariffs, clauses, lookups } = data
   const pid = project.id as number
 
   // Merge DB contacts with required role slots so every title always appears
@@ -77,15 +77,16 @@ export function ProjectOverviewTab({ data, contractColumns, projectId, onSaved, 
             <FieldGrid onSaved={onSaved} editMode={editMode} fields={[
               ['Project ID', project.external_project_id, { fieldKey: 'external_project_id', entity: 'projects', entityId: pid, type: 'text' }],
               ['Contract ID', primaryContract?.external_contract_id, ...(cid != null ? [{ fieldKey: 'external_contract_id', entity: 'contracts' as const, entityId: cid, projectId: pid, type: 'text' as const }] : [])],
-              ...(cid != null ? [['Contract Name', primaryContract?.name, { fieldKey: 'name', entity: 'contracts' as const, entityId: cid, projectId: pid, type: 'text' as const }] as FieldDef] : []),
-              ...(cid != null ? [['Contract Type', primaryContract?.contract_type_name, { fieldKey: 'contract_type_id', entity: 'contracts' as const, entityId: cid, projectId: pid, type: 'select' as const, options: contractTypeOpts, selectValue: primaryContract?.contract_type_id }] as FieldDef] : []),
-              ['Sage ID', project.sage_id, { fieldKey: 'sage_id', entity: 'projects', entityId: pid, type: 'text' }],
               ['Project Name', project.name, { fieldKey: 'name', entity: 'projects', entityId: pid, type: 'text' }],
+              ...(cid != null ? [['Contract Type', primaryContract?.contract_type_name, { fieldKey: 'contract_type_id', entity: 'contracts' as const, entityId: cid, projectId: pid, type: 'select' as const, options: contractTypeOpts, selectValue: primaryContract?.contract_type_id }] as FieldDef] : []),
+              ['Sage Customer ID', project.sage_id, { fieldKey: 'sage_id', entity: 'projects', entityId: pid, type: 'text' }],
+              ['Legal Entity', project.legal_entity_name],
+              ['Legal Entity Code', project.legal_entity_code],
               ['Country of Operation', project.country, { fieldKey: 'country', entity: 'projects', entityId: pid, type: 'text' }],
               ['Customer Registered Name', primaryContract?.counterparty_registered_name ?? primaryContract?.counterparty_name],
+              ['Industry', primaryContract?.counterparty_industry],
               ['Company Registration Number', primaryContract?.counterparty_registration_number],
               ['Registered Address', primaryContract?.counterparty_registered_address],
-              ['Tax PIN/Number', primaryContract?.counterparty_tax_pin],
             ] as FieldDef[]} />
           )
         })()}
@@ -95,10 +96,14 @@ export function ProjectOverviewTab({ data, contractColumns, projectId, onSaved, 
         {(() => {
           const primaryContract = contracts[0] as Record<string, unknown> | undefined
           const cid = primaryContract?.id as number | undefined
+          const primaryTariff = tariffs[0] as Record<string, unknown> | undefined
           return (
             <FieldGrid onSaved={onSaved} editMode={editMode} fields={[
               ['COD', project.cod_date, { fieldKey: 'cod_date', entity: 'projects' as const, entityId: pid, type: 'date' as const }],
               ...(cid != null ? [['Contract Term (years)', primaryContract?.contract_term_years, { fieldKey: 'contract_term_years', entity: 'contracts' as const, entityId: cid, projectId: pid, type: 'number' as const }] as FieldDef] : []),
+              ['Installed Capacity (kWp)', project.installed_dc_capacity_kwp, { fieldKey: 'installed_dc_capacity_kwp', entity: 'projects' as const, entityId: pid, type: 'number' as const }],
+              ['Energy Sales Type', primaryTariff?.energy_sale_type_name],
+              ['Billing Currency', primaryTariff?.currency_code],
             ] as FieldDef[]} />
           )
         })()}
