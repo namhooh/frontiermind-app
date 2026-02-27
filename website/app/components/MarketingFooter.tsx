@@ -7,7 +7,7 @@ const footerLinks = [
 export default function MarketingFooter() {
   return (
     <footer className="bg-[#030213] border-t border-white/10">
-      <div className="mx-auto max-w-6xl px-6 py-12">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 py-12">
         <div className="flex flex-col sm:flex-row items-center justify-between gap-6">
           <div className="flex flex-col items-center sm:items-start gap-2">
             <span
@@ -24,7 +24,7 @@ export default function MarketingFooter() {
             </a>
           </div>
 
-          <nav className="flex items-center gap-6">
+          <nav className="flex flex-wrap items-center gap-4 sm:gap-6">
             {footerLinks.map((link) => (
               <a
                 key={link.label}
