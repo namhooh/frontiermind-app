@@ -64,3 +64,7 @@ env/
 *.log
 logs/
 .env*.local
+
+# CBE data extracts (keep only .md files)
+CBE_data_extracts/**
+!CBE_data_extracts/**/*.md
