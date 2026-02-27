@@ -1552,9 +1552,12 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
     label: bp.code ? `${bp.code} - ${bp.name}` : bp.name,
   }))
 
-  // Derive hard (USD) and billing currency codes from tariff_rates
+  // Derive hard (USD), billing, and local currency codes from tariff_rates
   const hardCurrencyCode = ((tariff_rates ?? []) as R[]).find((tr) => tr.hard_currency_code != null)?.hard_currency_code as string | undefined
   const billingCurrencyCode = ((tariff_rates ?? []) as R[]).find((tr) => tr.billing_currency_code != null)?.billing_currency_code as string | undefined
+  const localCurrencyCode = ((tariff_rates ?? []) as R[]).find((tr) => tr.local_currency_code != null)?.local_currency_code as string | undefined
+  // For FX table: show the non-USD currency relevant to this project
+  const projectFxCurrency = billingCurrencyCode && billingCurrencyCode !== 'USD' ? billingCurrencyCode : localCurrencyCode
 
   // Top-level first tariff/LP for GRP section (independent of contracts loop)
   const grpFirstTariff = (() => {
@@ -1765,9 +1768,13 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
         )}
       </CollapsibleSection>
 
-      {/* Exchange Rates */}
-      {(exchange_rates ?? []).length > 0 && (
-        <CollapsibleSection title="Exchange Rates">
+      {/* Exchange Rates — filtered to project's currency */}
+      {(() => {
+        const filteredRates = projectFxCurrency
+          ? (exchange_rates ?? []).filter((er) => er.currency_code === projectFxCurrency)
+          : (exchange_rates ?? [])
+        return filteredRates.length > 0 && (
+        <CollapsibleSection title={`Exchange Rates${projectFxCurrency ? ` (USD → ${projectFxCurrency})` : ''}`}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
@@ -1781,7 +1788,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
               </thead>
               <tbody>
                 {(() => {
-                  const sorted = [...(exchange_rates ?? [])].sort(
+                  const sorted = [...filteredRates].sort(
                     (a, b) => String(b.rate_date ?? '').localeCompare(String(a.rate_date ?? ''))
                   )
                   return sorted.map((er, idx) => {
@@ -1838,7 +1845,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
             </table>
           </div>
         </CollapsibleSection>
-      )}
+      )})()}
 
       {contracts.map((c, i) => {
         const cid = c.id as number

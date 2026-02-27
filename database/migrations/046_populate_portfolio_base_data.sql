@@ -3,7 +3,7 @@
 -- =============================================================================
 -- Populates the FrontierMind database with CBE's full customer contract
 -- portfolio: 33 projects, ~28 primary contracts, ~12 ancillary documents,
--- and ~18 amendments.
+-- ~18 amendments, and exchange rates for all project currencies.
 --
 -- Source data:
 --   - CBE_data_extracts/Customer summary.xlsx (33 deduplicated projects)
@@ -74,7 +74,8 @@ ALTER TABLE contract_amendment ALTER COLUMN amendment_date DROP NOT NULL;
 INSERT INTO currency (code, name) VALUES
   ('MGA', 'Malagasy Ariary'),
   ('SOS', 'Somali Shilling'),
-  ('ZWL', 'Zimbabwean Dollar')
+  ('ZWL', 'Zimbabwean Dollar'),
+  ('CDF', 'Congolese Franc')
 ON CONFLICT (code) DO NOTHING;
 
 
@@ -722,6 +723,186 @@ BEGIN
   RAISE NOTICE 'Ancillary contracts:  %', v_ancillary;
   RAISE NOTICE 'Amendments:           %', v_amend_count;
 END $$;
+
+
+-- =============================================================================
+-- STEP 9: EXCHANGE RATES (xe.com mid-market, Jan 2025 – Feb 2026)
+-- =============================================================================
+-- Sources: xe.com currency tables (1st of each month)
+-- Rate = USD → Local (1 USD = X local currency units)
+-- GHS rates (bog_manual) are NOT touched — only new currencies populated
+-- ZWL: xe.com renamed to ZWG (Zimbabwe Gold) after Apr 2024 currency reform;
+--       ZWG rates used for ZWL currency_id in our database
+
+-- KES - Kenyan Shilling
+INSERT INTO exchange_rate (organization_id, currency_id, rate_date, rate, source)
+SELECT 1, c.id, d.rate_date, d.rate, 'xe.com'
+FROM currency c
+CROSS JOIN (VALUES
+  ('2025-01-01'::date, 129.3950), ('2025-02-01'::date, 129.2866),
+  ('2025-03-01'::date, 129.4869), ('2025-04-01'::date, 129.2473),
+  ('2025-05-01'::date, 129.6003), ('2025-06-01'::date, 129.3686),
+  ('2025-07-01'::date, 129.2555), ('2025-08-01'::date, 129.2086),
+  ('2025-09-01'::date, 129.1699), ('2025-10-01'::date, 129.2400),
+  ('2025-11-01'::date, 129.2422), ('2025-12-01'::date, 129.2610),
+  ('2026-01-01'::date, 129.0122), ('2026-02-01'::date, 129.0012)
+) AS d(rate_date, rate)
+WHERE c.code = 'KES'
+ON CONFLICT (organization_id, currency_id, rate_date)
+DO UPDATE SET rate = EXCLUDED.rate, source = EXCLUDED.source;
+
+-- NGN - Nigerian Naira
+INSERT INTO exchange_rate (organization_id, currency_id, rate_date, rate, source)
+SELECT 1, c.id, d.rate_date, d.rate, 'xe.com'
+FROM currency c
+CROSS JOIN (VALUES
+  ('2025-01-01'::date, 1543.2754), ('2025-02-01'::date, 1480.9433),
+  ('2025-03-01'::date, 1498.8748), ('2025-04-01'::date, 1536.8936),
+  ('2025-05-01'::date, 1605.3237), ('2025-06-01'::date, 1585.1389),
+  ('2025-07-01'::date, 1533.9913), ('2025-08-01'::date, 1532.0928),
+  ('2025-09-01'::date, 1530.2605), ('2025-10-01'::date, 1484.1700),
+  ('2025-11-01'::date, 1438.8593), ('2025-12-01'::date, 1446.2972),
+  ('2026-01-01'::date, 1445.8991), ('2026-02-01'::date, 1385.3128)
+) AS d(rate_date, rate)
+WHERE c.code = 'NGN'
+ON CONFLICT (organization_id, currency_id, rate_date)
+DO UPDATE SET rate = EXCLUDED.rate, source = EXCLUDED.source;
+
+-- SLE - Sierra Leonean Leone
+INSERT INTO exchange_rate (organization_id, currency_id, rate_date, rate, source)
+SELECT 1, c.id, d.rate_date, d.rate, 'xe.com'
+FROM currency c
+CROSS JOIN (VALUES
+  ('2025-01-01'::date, 22.7575), ('2025-02-01'::date, 22.7200),
+  ('2025-03-01'::date, 22.8101), ('2025-04-01'::date, 22.7821),
+  ('2025-05-01'::date, 22.8050), ('2025-06-01'::date, 22.7951),
+  ('2025-07-01'::date, 22.7650), ('2025-08-01'::date, 22.6798),
+  ('2025-09-01'::date, 22.7249), ('2025-10-01'::date, 22.8000),
+  ('2025-11-01'::date, 22.6805), ('2025-12-01'::date, 22.8301),
+  ('2026-01-01'::date, 22.8249), ('2026-02-01'::date, 22.9206)
+) AS d(rate_date, rate)
+WHERE c.code = 'SLE'
+ON CONFLICT (organization_id, currency_id, rate_date)
+DO UPDATE SET rate = EXCLUDED.rate, source = EXCLUDED.source;
+
+-- EGP - Egyptian Pound
+INSERT INTO exchange_rate (organization_id, currency_id, rate_date, rate, source)
+SELECT 1, c.id, d.rate_date, d.rate, 'xe.com'
+FROM currency c
+CROSS JOIN (VALUES
+  ('2025-01-01'::date, 50.8386), ('2025-02-01'::date, 50.2282),
+  ('2025-03-01'::date, 50.6538), ('2025-04-01'::date, 50.5727),
+  ('2025-05-01'::date, 50.9692), ('2025-06-01'::date, 49.6949),
+  ('2025-07-01'::date, 49.4555), ('2025-08-01'::date, 48.6700),
+  ('2025-09-01'::date, 48.5535), ('2025-10-01'::date, 47.8600),
+  ('2025-11-01'::date, 47.1283), ('2025-12-01'::date, 47.5229),
+  ('2026-01-01'::date, 47.6900), ('2026-02-01'::date, 47.1217)
+) AS d(rate_date, rate)
+WHERE c.code = 'EGP'
+ON CONFLICT (organization_id, currency_id, rate_date)
+DO UPDATE SET rate = EXCLUDED.rate, source = EXCLUDED.source;
+
+-- MGA - Malagasy Ariary
+INSERT INTO exchange_rate (organization_id, currency_id, rate_date, rate, source)
+SELECT 1, c.id, d.rate_date, d.rate, 'xe.com'
+FROM currency c
+CROSS JOIN (VALUES
+  ('2025-01-01'::date, 4712.3213), ('2025-02-01'::date, 4690.5522),
+  ('2025-03-01'::date, 4721.4475), ('2025-04-01'::date, 4670.1784),
+  ('2025-05-01'::date, 4537.9023), ('2025-06-01'::date, 4547.3083),
+  ('2025-07-01'::date, 4375.9529), ('2025-08-01'::date, 4431.3447),
+  ('2025-09-01'::date, 4404.3381), ('2025-10-01'::date, 4437.8600),
+  ('2025-11-01'::date, 4505.6221), ('2025-12-01'::date, 4468.9285),
+  ('2026-01-01'::date, 4590.9246), ('2026-02-01'::date, 4452.2724)
+) AS d(rate_date, rate)
+WHERE c.code = 'MGA'
+ON CONFLICT (organization_id, currency_id, rate_date)
+DO UPDATE SET rate = EXCLUDED.rate, source = EXCLUDED.source;
+
+-- RWF - Rwandan Franc
+INSERT INTO exchange_rate (organization_id, currency_id, rate_date, rate, source)
+SELECT 1, c.id, d.rate_date, d.rate, 'xe.com'
+FROM currency c
+CROSS JOIN (VALUES
+  ('2025-01-01'::date, 1390.2541), ('2025-02-01'::date, 1388.7660),
+  ('2025-03-01'::date, 1400.2571), ('2025-04-01'::date, 1418.3686),
+  ('2025-05-01'::date, 1418.7624), ('2025-06-01'::date, 1414.3279),
+  ('2025-07-01'::date, 1435.9375), ('2025-08-01'::date, 1439.7290),
+  ('2025-09-01'::date, 1446.9146), ('2025-10-01'::date, 1448.3300),
+  ('2025-11-01'::date, 1452.4079), ('2025-12-01'::date, 1453.7088),
+  ('2026-01-01'::date, 1456.9038), ('2026-02-01'::date, 1454.5567)
+) AS d(rate_date, rate)
+WHERE c.code = 'RWF'
+ON CONFLICT (organization_id, currency_id, rate_date)
+DO UPDATE SET rate = EXCLUDED.rate, source = EXCLUDED.source;
+
+-- SOS - Somali Shilling
+INSERT INTO exchange_rate (organization_id, currency_id, rate_date, rate, source)
+SELECT 1, c.id, d.rate_date, d.rate, 'xe.com'
+FROM currency c
+CROSS JOIN (VALUES
+  ('2025-01-01'::date, 571.4534), ('2025-02-01'::date, 571.2518),
+  ('2025-03-01'::date, 571.4686), ('2025-04-01'::date, 570.3855),
+  ('2025-05-01'::date, 573.1461), ('2025-06-01'::date, 571.4564),
+  ('2025-07-01'::date, 570.2310), ('2025-08-01'::date, 571.4565),
+  ('2025-09-01'::date, 569.8395), ('2025-10-01'::date, 571.4400),
+  ('2025-11-01'::date, 577.2458), ('2025-12-01'::date, 569.9218),
+  ('2026-01-01'::date, 569.4862), ('2026-02-01'::date, 569.0201)
+) AS d(rate_date, rate)
+WHERE c.code = 'SOS'
+ON CONFLICT (organization_id, currency_id, rate_date)
+DO UPDATE SET rate = EXCLUDED.rate, source = EXCLUDED.source;
+
+-- MZN - Mozambican Metical
+INSERT INTO exchange_rate (organization_id, currency_id, rate_date, rate, source)
+SELECT 1, c.id, d.rate_date, d.rate, 'xe.com'
+FROM currency c
+CROSS JOIN (VALUES
+  ('2025-01-01'::date, 63.8552), ('2025-02-01'::date, 63.5738),
+  ('2025-03-01'::date, 63.5735), ('2025-04-01'::date, 63.8848),
+  ('2025-05-01'::date, 63.7339), ('2025-06-01'::date, 63.8994),
+  ('2025-07-01'::date, 63.8848), ('2025-08-01'::date, 63.8834),
+  ('2025-09-01'::date, 63.8910), ('2025-10-01'::date, 63.9000),
+  ('2025-11-01'::date, 63.8000), ('2025-12-01'::date, 63.9032),
+  ('2026-01-01'::date, 63.8307), ('2026-02-01'::date, 63.8843)
+) AS d(rate_date, rate)
+WHERE c.code = 'MZN'
+ON CONFLICT (organization_id, currency_id, rate_date)
+DO UPDATE SET rate = EXCLUDED.rate, source = EXCLUDED.source;
+
+-- ZWL - Zimbabwean Dollar (using ZWG rates from xe.com)
+INSERT INTO exchange_rate (organization_id, currency_id, rate_date, rate, source)
+SELECT 1, c.id, d.rate_date, d.rate, 'xe.com'
+FROM currency c
+CROSS JOIN (VALUES
+  ('2025-01-01'::date, 25.4754), ('2025-02-01'::date, 26.7493),
+  ('2025-03-01'::date, 26.5388), ('2025-04-01'::date, 27.2712),
+  ('2025-05-01'::date, 26.8410), ('2025-06-01'::date, 26.9122),
+  ('2025-07-01'::date, 26.9594), ('2025-08-01'::date, 26.8107),
+  ('2025-09-01'::date, 26.7909), ('2025-10-01'::date, 26.7400),
+  ('2025-11-01'::date, 26.2969), ('2025-12-01'::date, 26.3728),
+  ('2026-01-01'::date, 25.9862), ('2026-02-01'::date, 25.5833)
+) AS d(rate_date, rate)
+WHERE c.code = 'ZWL'
+ON CONFLICT (organization_id, currency_id, rate_date)
+DO UPDATE SET rate = EXCLUDED.rate, source = EXCLUDED.source;
+
+-- CDF - Congolese Franc
+INSERT INTO exchange_rate (organization_id, currency_id, rate_date, rate, source)
+SELECT 1, c.id, d.rate_date, d.rate, 'xe.com'
+FROM currency c
+CROSS JOIN (VALUES
+  ('2025-01-01'::date, 2856.3453), ('2025-02-01'::date, 2839.7200),
+  ('2025-03-01'::date, 2859.5901), ('2025-04-01'::date, 2906.0900),
+  ('2025-05-01'::date, 2901.4306), ('2025-06-01'::date, 2856.6901),
+  ('2025-07-01'::date, 2909.6428), ('2025-08-01'::date, 2910.3937),
+  ('2025-09-01'::date, 2903.2983), ('2025-10-01'::date, 2551.7100),
+  ('2025-11-01'::date, 2253.0379), ('2025-12-01'::date, 2280.7500),
+  ('2026-01-01'::date, 2282.4931), ('2026-02-01'::date, 2136.5260)
+) AS d(rate_date, rate)
+WHERE c.code = 'CDF'
+ON CONFLICT (organization_id, currency_id, rate_date)
+DO UPDATE SET rate = EXCLUDED.rate, source = EXCLUDED.source;
 
 
 -- Cleanup temp tables

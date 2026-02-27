@@ -1997,7 +1997,7 @@ per-meter performance detail, and restructured frontend tabs.
 - Was NOT NULL, now nullable — 5 amendments have unknown signing dates (QMM01 RESA 1st/2nd, UNSOS 2nd)
 
 **New Currencies:**
-- MGA (Malagasy Ariary), SOS (Somali Shilling), ZWL (Zimbabwean Dollar)
+- MGA (Malagasy Ariary), SOS (Somali Shilling), ZWL (Zimbabwean Dollar), CDF (Congolese Franc)
 
 **New Legal Entities (8):**
 - KEN0, MAD0, MAD2, NIG0, SL02, SOM0, MOZ0, ZIM0
@@ -2023,6 +2023,15 @@ per-meter performance detail, and restructured frontend tabs.
 - `python-backend/api/billing.py` (~line 264): Added `AND c.parent_contract_id IS NULL` to contract JOIN — prevents billing from picking ancillary documents
 - `python-backend/api/billing.py` (~line 27-40): Added 8 country codes to `_COUNTRY_NAME_TO_CODE` (EG, MG, SL, SO, MZ, ZW, CD, RW) — resolves all portfolio countries for tax rule lookup
 - `python-backend/api/entities.py` (~line 728): Changed ORDER BY to `c.parent_contract_id NULLS FIRST, c.effective_date` — ensures primary contract sorts first for dashboard display
+
+**Exchange Rates (Step 9):**
+- 140 rows: 10 currencies × 14 months (Jan 2025 – Feb 2026, 1st of each month)
+- Source: xe.com mid-market rates, stored with `source = 'xe.com'`
+- Currencies: KES, NGN, SLE, EGP, MGA, RWF, SOS, MZN, ZWL, CDF
+- GHS rates (6 rows, `source = 'bog_manual'`) are NOT modified
+- ZWL: xe.com renamed to ZWG (Zimbabwe Gold) after Apr 2024 currency reform; ZWG rates used
+- All inserts use dynamic currency code lookups (not hardcoded IDs)
+- ON CONFLICT upsert ensures idempotency
 
 **Design Notes:**
 - Primary contracts have `parent_contract_id = NULL`; ancillary docs reference the primary
