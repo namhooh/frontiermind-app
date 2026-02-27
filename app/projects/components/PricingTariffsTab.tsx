@@ -1552,12 +1552,33 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
     label: bp.code ? `${bp.code} - ${bp.name}` : bp.name,
   }))
 
-  // Derive hard (USD), billing, and local currency codes from tariff_rates
+  // Derive hard (USD) and billing currency codes from tariff_rates
   const hardCurrencyCode = ((tariff_rates ?? []) as R[]).find((tr) => tr.hard_currency_code != null)?.hard_currency_code as string | undefined
   const billingCurrencyCode = ((tariff_rates ?? []) as R[]).find((tr) => tr.billing_currency_code != null)?.billing_currency_code as string | undefined
-  const localCurrencyCode = ((tariff_rates ?? []) as R[]).find((tr) => tr.local_currency_code != null)?.local_currency_code as string | undefined
-  // For FX table: show the non-USD currency relevant to this project
-  const projectFxCurrency = billingCurrencyCode && billingCurrencyCode !== 'USD' ? billingCurrencyCode : localCurrencyCode
+
+  // Determine the local currency for this project's exchange rate display.
+  // Fallback chain: tariff_rates → contract extraction_metadata → country lookup
+  const projectFxCurrency: string | undefined = (() => {
+    // 1. From tariff_rates (only populated for fully-onboarded projects like MOH01)
+    const fromTariffLocal = ((tariff_rates ?? []) as R[]).find((tr) => tr.local_currency_code != null)?.local_currency_code as string | undefined
+    const fromTariffBilling = billingCurrencyCode && billingCurrencyCode !== 'USD' ? billingCurrencyCode : undefined
+    if (fromTariffLocal) return fromTariffLocal
+    if (fromTariffBilling) return fromTariffBilling
+
+    // 2. From contract extraction_metadata.billing_currency (set by migration 046)
+    const primaryContract = contracts.find((c) => c.parent_contract_id == null)
+    const metaCurrency = (primaryContract?.extraction_metadata as Record<string, unknown> | undefined)?.billing_currency as string | undefined
+    if (metaCurrency && metaCurrency !== 'USD') return metaCurrency
+
+    // 3. Country → local currency mapping (final fallback)
+    const countryToCurrency: Record<string, string> = {
+      'Ghana': 'GHS', 'Kenya': 'KES', 'Nigeria': 'NGN', 'Sierra Leone': 'SLE',
+      'Egypt': 'EGP', 'Madagascar': 'MGA', 'Rwanda': 'RWF', 'Somalia': 'SOS',
+      'Mozambique': 'MZN', 'Zimbabwe': 'ZWL', 'DRC': 'CDF',
+    }
+    const country = data.project.country as string | undefined
+    return country ? countryToCurrency[country] : undefined
+  })()
 
   // Top-level first tariff/LP for GRP section (independent of contracts loop)
   const grpFirstTariff = (() => {
