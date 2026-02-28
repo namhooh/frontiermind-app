@@ -1,0 +1,154 @@
+{
+  "contract_id": "MOH01_SSA",
+  "contract_type": "SSA",
+  "source_file": null,
+  "annotator": "domain_expert_1",
+  "annotation_date": "2026-02-28",
+  "clauses": [
+    {
+      "clause_id": "clause_001",
+      "section_reference": "4.1",
+      "clause_name": "Energy Tariff",
+      "category": "PRICING",
+      "category_confidence": 0.95,
+      "raw_text": "The Buyer shall pay the Seller for each kWh of Metered Energy delivered at the Tariff Rate specified in Schedule 1.",
+      "raw_text_snippet": "The Buyer shall pay the Seller for each kWh",
+      "summary": "Defines the energy tariff rate payable per kWh of metered energy",
+      "responsible_party": "Buyer",
+      "beneficiary_party": "Seller",
+      "normalized_payload": {
+        "rate_type": "per_kwh",
+        "reference": "Schedule 1"
+      },
+      "extraction_confidence": 0.90,
+      "notes": "Tariff rate details in Schedule 1"
+    },
+    {
+      "clause_id": "clause_002",
+      "section_reference": "5.1",
+      "clause_name": "Payment Terms",
+      "category": "PAYMENT_TERMS",
+      "category_confidence": 0.95,
+      "raw_text": "The Buyer shall pay each invoice within thirty (30) days of receipt. Late payments shall accrue interest at a rate of 2% per month.",
+      "raw_text_snippet": "The Buyer shall pay each invoice within thirty",
+      "summary": "30-day payment terms with 2% monthly late interest",
+      "responsible_party": "Buyer",
+      "beneficiary_party": "Seller",
+      "normalized_payload": {
+        "payment_days": 30,
+        "payment_basis": "NET",
+        "late_interest_rate": 0.02,
+        "late_interest_period": "monthly"
+      },
+      "extraction_confidence": 0.95
+    },
+    {
+      "clause_id": "clause_003",
+      "section_reference": "6.1",
+      "clause_name": "System Availability",
+      "category": "AVAILABILITY",
+      "category_confidence": 0.90,
+      "raw_text": "The Seller shall ensure the System achieves a minimum annual Availability of ninety-five percent (95%), measured on a calendar year basis.",
+      "raw_text_snippet": "The Seller shall ensure the System achieves a minimum",
+      "summary": "95% annual availability guarantee",
+      "responsible_party": "Seller",
+      "beneficiary_party": "Buyer",
+      "normalized_payload": {
+        "threshold_percent": 95.0,
+        "measurement_period": "annual",
+        "excused_events": ["force_majeure", "grid_curtailment"]
+      },
+      "extraction_confidence": 0.90
+    },
+    {
+      "clause_id": "clause_004",
+      "section_reference": "7.1",
+      "clause_name": "Maintenance Obligations",
+      "category": "MAINTENANCE",
+      "category_confidence": 0.90,
+      "raw_text": "The Seller shall be responsible for all routine and preventive maintenance of the System in accordance with the manufacturer's recommended maintenance schedule.",
+      "raw_text_snippet": "The Seller shall be responsible for all routine",
+      "summary": "Seller responsible for all routine and preventive maintenance",
+      "responsible_party": "Seller",
+      "beneficiary_party": "Buyer",
+      "normalized_payload": {
+        "maintenance_type": "routine_and_preventive",
+        "standard": "manufacturer_recommended"
+      },
+      "extraction_confidence": 0.85
+    },
+    {
+      "clause_id": "clause_005",
+      "section_reference": "8.1",
+      "clause_name": "Events of Default",
+      "category": "DEFAULT",
+      "category_confidence": 0.85,
+      "raw_text": "An Event of Default shall occur if either Party fails to perform any material obligation under this Agreement and such failure continues for a period of thirty (30) days after written notice.",
+      "raw_text_snippet": "An Event of Default shall occur if either Party",
+      "summary": "Default triggered by 30-day uncured material breach",
+      "responsible_party": "Both",
+      "normalized_payload": {
+        "cure_period_days": 30,
+        "notice_required": true
+      },
+      "extraction_confidence": 0.85
+    },
+    {
+      "clause_id": "clause_006",
+      "section_reference": "9.1",
+      "clause_name": "Termination",
+      "category": "TERMINATION",
+      "category_confidence": 0.90,
+      "raw_text": "Either Party may terminate this Agreement upon the occurrence of an Event of Default by the other Party, subject to the cure period specified in Clause 8.",
+      "raw_text_snippet": "Either Party may terminate this Agreement upon",
+      "summary": "Termination right upon uncured default",
+      "responsible_party": "Both",
+      "normalized_payload": {
+        "trigger": "event_of_default",
+        "cure_reference": "Clause 8"
+      },
+      "extraction_confidence": 0.85
+    },
+    {
+      "clause_id": "clause_007",
+      "section_reference": "10.1",
+      "clause_name": "Force Majeure",
+      "category": "FORCE_MAJEURE",
+      "category_confidence": 0.95,
+      "raw_text": "Neither Party shall be liable for failure to perform its obligations to the extent such failure is caused by a Force Majeure Event, including but not limited to acts of God, war, terrorism, epidemic, and government actions.",
+      "raw_text_snippet": "Neither Party shall be liable for failure to perform",
+      "summary": "Standard force majeure relief clause",
+      "responsible_party": "Both",
+      "normalized_payload": {
+        "examples": ["acts_of_god", "war", "terrorism", "epidemic", "government_actions"],
+        "notice_required": true
+      },
+      "extraction_confidence": 0.90
+    },
+    {
+      "clause_id": "clause_008",
+      "section_reference": "11.1",
+      "clause_name": "Insurance",
+      "category": "INSURANCE",
+      "category_confidence": 0.85,
+      "raw_text": "The Seller shall maintain comprehensive general liability insurance and property damage insurance covering the System for the duration of this Agreement.",
+      "raw_text_snippet": "The Seller shall maintain comprehensive general",
+      "summary": "Seller must maintain liability and property insurance",
+      "responsible_party": "Seller",
+      "normalized_payload": {
+        "insurance_types": ["general_liability", "property_damage"],
+        "duration": "agreement_term"
+      },
+      "extraction_confidence": 0.80
+    }
+  ],
+  "pii_entities": [],
+  "metadata": {
+    "total_pages": 25,
+    "language": "en",
+    "parties": {
+      "seller": "CrossBoundary Energy",
+      "buyer": "MOH01 Facility"
+    }
+  }
+}

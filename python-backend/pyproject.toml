@@ -1,0 +1,7 @@
+[tool.pytest.ini_options]
+testpaths = ["tests", "evals"]
+markers = [
+    "eval: mark test as evaluation test",
+    "slow: mark test as slow (requires API calls, e.g. LlamaParse + Claude)",
+]
+addopts = "--strict-markers"

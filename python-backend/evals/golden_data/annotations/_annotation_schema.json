@@ -1,0 +1,163 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "FrontierMind Golden Annotation",
+  "description": "Schema for contract clause ground truth annotations",
+  "type": "object",
+  "required": ["contract_id", "contract_type", "clauses"],
+  "properties": {
+    "contract_id": {
+      "type": "string",
+      "description": "Unique contract identifier (e.g., MOH01_SSA)"
+    },
+    "contract_type": {
+      "type": "string",
+      "enum": ["PPA", "ESA", "SSA", "O_M", "EPC", "VPPA"],
+      "description": "Contract type classification"
+    },
+    "source_file": {
+      "type": ["string", "null"],
+      "description": "Path to the source PDF file (for online_live evaluation)"
+    },
+    "annotator": {
+      "type": "string",
+      "description": "Primary annotator identifier"
+    },
+    "annotation_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Date of annotation"
+    },
+    "clauses": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/clause"
+      },
+      "minItems": 1,
+      "description": "Ground truth clause annotations"
+    },
+    "pii_entities": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/pii_entity"
+      },
+      "description": "Ground truth PII entities (optional)"
+    },
+    "metadata": {
+      "type": "object",
+      "description": "Additional annotation metadata",
+      "properties": {
+        "total_pages": {"type": "integer", "minimum": 1},
+        "language": {"type": "string"},
+        "parties": {
+          "type": "object",
+          "properties": {
+            "seller": {"type": "string"},
+            "buyer": {"type": "string"}
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "clause": {
+      "type": "object",
+      "required": ["section_reference", "clause_name", "category", "raw_text"],
+      "properties": {
+        "clause_id": {
+          "type": "string",
+          "pattern": "^clause_[0-9]{3}$",
+          "description": "Sequential ID (clause_001, clause_002, ...)"
+        },
+        "section_reference": {
+          "type": "string",
+          "description": "Section number (e.g., '4.1', 'Schedule 3')"
+        },
+        "clause_name": {
+          "type": "string",
+          "description": "Clause title/heading"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "AVAILABILITY", "PRICING", "PAYMENT_TERMS",
+            "PERFORMANCE_GUARANTEE", "LIQUIDATED_DAMAGES",
+            "DEFAULT", "TERMINATION", "FORCE_MAJEURE",
+            "INSURANCE", "MAINTENANCE", "CONDITIONS_PRECEDENT",
+            "CHANGE_IN_LAW", "GENERAL", "UNIDENTIFIED"
+          ],
+          "description": "Clause category from the 13-category taxonomy"
+        },
+        "category_confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Annotator confidence in category assignment"
+        },
+        "suggested_category": {
+          "type": "string",
+          "description": "For UNIDENTIFIED clauses, annotator's best guess"
+        },
+        "raw_text": {
+          "type": "string",
+          "minLength": 10,
+          "description": "Full clause text"
+        },
+        "raw_text_snippet": {
+          "type": "string",
+          "description": "First 50-100 chars for OCR verification"
+        },
+        "summary": {
+          "type": "string",
+          "description": "Brief clause summary"
+        },
+        "responsible_party": {
+          "type": "string",
+          "description": "Party responsible for this clause"
+        },
+        "beneficiary_party": {
+          "type": "string",
+          "description": "Party benefiting from this clause"
+        },
+        "normalized_payload": {
+          "type": "object",
+          "description": "Structured data for rules engine",
+          "additionalProperties": true
+        },
+        "extraction_confidence": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0,
+          "description": "Expected extraction confidence"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Annotator notes"
+        }
+      }
+    },
+    "pii_entity": {
+      "type": "object",
+      "required": ["entity_type", "start", "end"],
+      "properties": {
+        "entity_type": {
+          "type": "string",
+          "description": "Presidio entity type (EMAIL_ADDRESS, PERSON, etc.)"
+        },
+        "start": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Start character position"
+        },
+        "end": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "End character position"
+        },
+        "text": {
+          "type": "string",
+          "description": "The PII text detected"
+        }
+      }
+    }
+  }
+}

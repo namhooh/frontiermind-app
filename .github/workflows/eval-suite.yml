@@ -1,0 +1,92 @@
+name: Evaluation Suite
+
+on:
+  schedule:
+    - cron: '0 6 * * 1'  # Weekly Monday 6am UTC
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: 'Execution profile'
+        required: true
+        default: 'offline_deterministic'
+        type: choice
+        options:
+          - offline_deterministic
+          - online_live
+
+env:
+  PYTHON_VERSION: '3.12'
+
+jobs:
+  fast-evals:
+    name: Offline Deterministic Evals
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python-backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: python-backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run offline evals
+        run: python -m pytest evals/ -m "eval and not slow" -v --tb=short
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+          PYTHONPATH: ${{ github.workspace }}/python-backend:${{ github.workspace }}
+
+      - name: Upload eval reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-reports-offline
+          path: python-backend/evals/reports/
+          if-no-files-found: ignore
+
+  live-evals:
+    name: Online Live Evals
+    if: github.event.inputs.profile == 'online_live' || github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: python-backend
+    timeout-minutes: 30  # Budget guard
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: python-backend/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run live evals
+        run: python -m pytest evals/ -m "eval" -v --tb=short --run-profile=online_live
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          LLAMA_CLOUD_API_KEY: ${{ secrets.LLAMA_CLOUD_API_KEY }}
+          EVAL_MAX_CONTRACTS: '10'
+          PYTHONPATH: ${{ github.workspace }}/python-backend:${{ github.workspace }}
+
+      - name: Upload eval reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: eval-reports-live
+          path: |
+            python-backend/evals/reports/
+            python-backend/evals/runs/
+          if-no-files-found: ignore

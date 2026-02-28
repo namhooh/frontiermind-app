@@ -1,0 +1,140 @@
+# Formal mapping contract between SAGE ERP dimensions and FrontierMind schema.
+# All evaluations reference this for key resolution, filtering, and semantic classification.
+
+schema_version: "1.0"
+source: "SAGE ERP (CBE)"
+target: "FrontierMind canonical schema"
+
+# ─── Identity Keys ───────────────────────────────────────────────────
+identity_keys:
+  customer:
+    sage_field: CUSTOMER_NUMBER
+    fm_field: project.sage_id
+    cardinality: "many_sage_to_one_fm"  # XFlora: 4 SAGE → 1 FM
+    aliases:
+      GC001: GC01
+      TWG: TWG01
+      ZL01: ZO01
+      XFAB: XF-AB
+      XFBV: XF-AB
+      XFL01: XF-AB
+      XFSS: XF-AB
+    exclusions:  # SAGE customers NOT in FM (intentional)
+      - KGM01   # Rwanda, not in portfolio
+      - IA01    # Different ID than TBC
+      - IHS01   # Not in portfolio
+      - OGD01   # Not in portfolio
+      - UGA00   # Uganda
+      - AUS0    # Australia
+      - AUS1    # Australia
+      - RWI01   # Izuba, related to BNT01
+      - RWI02   # Izuba
+    internal_entities:  # CBE legal entities, not offtakers
+      pattern: "[A-Z]{3,4}0{1,2}"  # CBCH0, CBEH0, KEN00, GHA00, etc.
+      z_toc_pattern: "Z*TOC"        # Take-on customers
+
+  contract:
+    sage_field: CONTRACT_NUMBER
+    fm_field: contract.external_contract_id
+    cardinality: "many_sage_to_one_fm"  # KWH + RENTAL + OM → 1 primary FM contract
+    pattern: "CON{FACILITY}-{YEAR}-{SEQ}"
+
+  contract_line:
+    sage_field: CONTRACT_LINE_UNIQUE_ID
+    fm_field: contract_line.external_line_id
+    cardinality: "one_to_one"
+
+  meter_reading:
+    sage_field: METER_READING_UNIQUE_ID
+    fm_field: "meter_aggregate.source_metadata->>'external_reading_id'"
+    cardinality: "one_to_one"
+
+# ─── Source Filtering Policy ─────────────────────────────────────────
+filtering:
+  scd2:
+    current_record_field: DIM_CURRENT_RECORD
+    current_value: "1"  # NOTE: numeric string, not 'Y'
+  active:
+    active_field: ACTIVE  # 0 or 1
+    active_status_field: ACTIVE_STATUS  # on contract_line
+    required_value: "1"
+  date_validity:
+    start_field: EFFECTIVE_START_DATE
+    end_field: EFFECTIVE_END_DATE
+    # Sentinel: 1753-01-01 means "unknown/unbounded"
+    sentinel_date: "1753-01-01"
+
+# ─── Commercial Semantics ───────────────────────────────────────────
+commercial:
+  contract_category:
+    sage_field: CONTRACT_CATEGORY
+    values: [KWH, RENTAL, OM]
+    fm_scope: "migration 047 covers KWH+RENTAL primary; OM deferred to 048+"
+
+  payment_terms:
+    sage_field: PAYMENT_TERMS
+    fm_field: contract.payment_terms
+    codes: [30NET, 30EOM, 60NET, 75EOM, 90NET, 90EOM, 20NET]
+
+  currency:
+    sage_field: CONTRACT_CURRENCY
+    fm_field: "contract billing_currency (invoice-level)"
+    known_mismatches:  # SAGE=USD, FM=local tariff currency -- different domains
+      - {sage_id: XF-AB, sage_currency: USD, fm_currency: KES}
+      - {sage_id: QMM01, sage_currency: USD, fm_currency: MGA}
+      - {sage_id: ERG, sage_currency: USD, fm_currency: MGA}
+      - {sage_id: MIR01, sage_currency: USD, fm_currency: SLE}
+      - {sage_id: TWG01, sage_currency: USD, fm_currency: MZN}
+
+# ─── Operational Semantics ───────────────────────────────────────────
+operational:
+  product_classification:
+    sage_field: PRODUCT_DESC
+    metered_available_field: METERED_AVAILABLE
+    quantity_unit_field: QUANTITY_UNIT
+    categories:
+      metered_energy:
+        metered_available: ["metered"]
+        product_patterns:
+          - "Metered Energy*"
+          - "Generator (EMetered)*"
+          - "Grid (EMetered)*"
+          - "Loisaba*"
+          - "Powerhouse*"
+          - "Logistics*"
+          - "Green Metered*"
+      available_energy:
+        metered_available: ["available"]
+        product_patterns:
+          - "Available Energy*"
+          - "Generator (EAvailable)*"
+          - "Grid (EAvailable)*"
+          - "Green Available*"
+          - "Green Deemed*"
+      non_energy:  # These have METERED_AVAILABLE=N/A but are NOT available energy
+        metered_available: ["N/A", ""]
+        product_patterns:
+          - "Minimum Offtake*"
+          - "BESS Capacity*"
+          - "O&M Service*"
+          - "Equipment Lease*"
+          - "Diesel*"
+          - "Fixed Monthly Rental*"
+          - "ESA Lease*"
+          - "*Penalty*"
+          - "*Correction*"
+          - "Inverter Energy*"
+          - "Early Operating*"
+    # CRITICAL: cbe_billing_adapter.py:47 treats N/A as available energy.
+    # This is WRONG for non-energy products. Eval must detect this misclassification.
+
+# ─── Cardinality Rules ───────────────────────────────────────────────
+cardinality:
+  - "One SAGE CUSTOMER_NUMBER -> many SAGE contracts (KWH, RENTAL, OM)"
+  - "One FM project -> one primary contract (parent_contract_id IS NULL)"
+  - "One SAGE contract -> many SAGE contract_lines"
+  - "One FM contract -> many FM contract_lines"
+  - "billing.py:272 uses LIMIT 1 without ORDER BY -- nondeterministic for multi-contract projects"
+
+# ─── Versioned Exception Registry ────────────────────────────────────
+# See eval_exceptions.yaml for the full exception registry

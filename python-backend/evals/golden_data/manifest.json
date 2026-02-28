@@ -1,0 +1,37 @@
+{
+  "schema_version": "1.0",
+  "as_of_date": "2026-02-28",
+  "datasets": {
+    "annotations": {
+      "files": [
+        {
+          "name": "MOH01_SSA.json",
+          "contract_id": "MOH01_SSA",
+          "contract_type": "SSA",
+          "annotators": 2,
+          "adjudicated": false,
+          "clause_count": 8
+        }
+      ]
+    },
+    "fixtures": {
+      "files": [
+        {
+          "name": "sage_contracts_fixture.json",
+          "description": "Sanitized SAGE contract records for CI testing",
+          "row_count": 5
+        },
+        {
+          "name": "sage_readings_moh01.json",
+          "description": "Sanitized SAGE meter readings for MOH01",
+          "row_count": 3
+        },
+        {
+          "name": "moh01_clauses_fixture.json",
+          "description": "Expected clause extraction output for MOH01",
+          "row_count": 8
+        }
+      ]
+    }
+  }
+}
