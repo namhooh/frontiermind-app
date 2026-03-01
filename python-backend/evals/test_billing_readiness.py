@@ -53,10 +53,21 @@ class TestBillingReadiness:
 
         NOTE: rental/OM lines may legitimately have NULL meter_id.
         Only energy lines require meters.
+        Mother lines (site-level lines that have children) legitimately
+        have meter_id = NULL and are excluded from this check.
         """
+        # Identify mother lines: lines that other lines point to via parent_contract_line_id
+        mother_ids = {
+            cl["parent_contract_line_id"]
+            for cl in fm_contract_lines
+            if cl.get("parent_contract_line_id") is not None
+        }
+
         energy_lines = [
             cl for cl in fm_contract_lines
-            if cl.get("is_active") and cl.get("energy_category") in ("metered", "available")
+            if cl.get("is_active")
+            and cl.get("energy_category") in ("metered", "available")
+            and cl["id"] not in mother_ids
         ]
 
         orphans = [cl for cl in energy_lines if cl.get("meter_id") is None]

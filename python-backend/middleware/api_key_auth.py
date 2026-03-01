@@ -12,7 +12,7 @@ import hmac
 import logging
 from typing import Optional
 
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from db.integration_repository import IntegrationRepository
@@ -36,6 +36,7 @@ class APIKeyAuth:
 
     async def __call__(
         self,
+        request: Request,
         credentials: Optional[HTTPAuthorizationCredentials] = Security(_bearer_scheme),
     ) -> dict:
         """
@@ -83,6 +84,9 @@ class APIKeyAuth:
             credential_id=credential["id"],
             organization_id=credential["organization_id"],
         )
+
+        # Expose org_id for audit middleware
+        request.state.audit_org_id = credential["organization_id"]
 
         return {
             "organization_id": credential["organization_id"],

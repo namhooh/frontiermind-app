@@ -27,12 +27,22 @@ exceptions:
   - id: EXC-003
     description: "migration 047 excludes OM contracts -- intentional scope limitation"
     scope: "contract coverage"
-    expiry: "migration 048"
+    expiry: "next onboarding migration"
     added: "2026-02-28"
 
   - id: EXC-004
     description: "cbe_billing_adapter N/A classification includes non-energy products"
     scope: "ingestion accuracy"
-    details: "cbe_billing_adapter.py:47 AVAILABLE_CATEGORIES = {'available', 'n/a', 'N/A'} treats all N/A as available energy"
-    expiry: "code fix required before 048"
+    details: "RESOLVED — N/A removed from AVAILABLE_CATEGORIES; product-pattern matching added via NON_ENERGY_PATTERNS"
+    resolution: "cbe_billing_adapter.py _classify_energy_category() uses ontology-derived patterns"
+    resolved: "2026-02-28"
+    added: "2026-02-28"
+
+  - id: EXC-005
+    description: "MOH01 site-level available energy line was missing before 047-B"
+    scope: "decomposition health"
+    details: >
+      CONTRACT_LINE_UNIQUE_ID 11481428495164935368 had no matching
+      contract_line.external_line_id. Resolved by migration 047 Part B.
+    expiry: null
     added: "2026-02-28"

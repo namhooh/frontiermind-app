@@ -44,7 +44,23 @@ class CBEBillingAdapter:
     }
 
     # Energy categories derived from METERED_AVAILABLE field
-    AVAILABLE_CATEGORIES = {'available', 'n/a', 'N/A'}
+    AVAILABLE_CATEGORIES = {'available'}
+
+    # Non-energy product patterns (METERED_AVAILABLE=N/A but NOT available energy).
+    # Source: sage_to_fm_ontology.yaml operational.product_classification.non_energy
+    NON_ENERGY_PATTERNS = [
+        'minimum offtake',
+        'bess capacity',
+        'o&m service',
+        'equipment lease',
+        'diesel',
+        'fixed monthly rental',
+        'esa lease',
+        'penalty',
+        'correction',
+        'inverter energy',
+        'early operating',
+    ]
 
     # CBE-specific required fields (accept both SCREAMING_SNAKE and snake_case)
     REQUIRED_FIELDS = {'BILL_DATE', 'bill_date'}
@@ -170,12 +186,15 @@ class CBEBillingAdapter:
 
             # Determine energy category from METERED_AVAILABLE field
             metered_available = (mapped.get('metered_available') or '').strip().lower()
-            is_available = metered_available in self.AVAILABLE_CATEGORIES
+            energy_category = self._classify_energy_category(
+                metered_available, mapped.get('product_desc')
+            )
 
             # Route energy to the correct field based on category
-            energy_kwh = None if is_available else total_production
+            is_available = energy_category == 'available'
+            is_metered = energy_category == 'metered'
+            energy_kwh = total_production if is_metered else None
             available_energy_kwh = total_production if is_available else None
-            energy_category = 'available' if is_available else 'metered'
 
             # Build canonical record
             canonical = {
@@ -213,6 +232,29 @@ class CBEBillingAdapter:
             )
 
         return canonical_records
+
+    @classmethod
+    def _classify_energy_category(cls, metered_available: str, product_desc: Optional[str]) -> str:
+        """Classify a record's energy category using METERED_AVAILABLE + product pattern.
+
+        Returns 'metered', 'available', or 'test' (non-energy).
+        N/A records are classified by matching product_desc against known
+        non-energy patterns from the ontology.
+        """
+        if metered_available in cls.AVAILABLE_CATEGORIES:
+            return 'available'
+        if metered_available == 'metered':
+            return 'metered'
+        # N/A or empty — check product description against non-energy patterns
+        if product_desc:
+            desc_lower = product_desc.lower()
+            for pattern in cls.NON_ENERGY_PATTERNS:
+                if pattern in desc_lower:
+                    return 'test'
+        # Fallback: unknown N/A products default to 'test' (non-energy)
+        if metered_available in ('n/a', ''):
+            return 'test'
+        return 'metered'
 
     def _map_fields(self, record: Dict[str, Any]) -> Dict[str, Any]:
         """Map CBE SCREAMING_SNAKE_CASE fields to canonical snake_case."""

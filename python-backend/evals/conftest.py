@@ -264,7 +264,8 @@ def fm_contract_lines(db_conn) -> List[Dict[str, Any]]:
     with db_conn.cursor() as cur:
         cur.execute("""
             SELECT id, contract_id, external_line_id, meter_id, is_active,
-                   energy_category::text AS energy_category, clause_tariff_id, organization_id
+                   energy_category::text AS energy_category, clause_tariff_id,
+                   organization_id, parent_contract_line_id
             FROM contract_line
             WHERE organization_id = 1
         """)

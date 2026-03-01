@@ -476,7 +476,7 @@ class NotificationRepository:
                 query = """
                     SELECT ih.id, ih.invoice_number, ih.total_amount,
                            ih.status, ih.due_date, ih.invoice_date,
-                           ih.contract_id, ih.billing_period_id,
+                           ih.project_id, ih.contract_id, ih.billing_period_id,
                            c.name as contract_name,
                            cp.name as counterparty_name,
                            cp.id as counterparty_id,

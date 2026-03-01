@@ -99,10 +99,40 @@ class TestMappingIntegrity:
             sage_contract_lines_filtered, fm_contract_lines
         )
 
-        # MOH01 has 11 lines; other projects pending 048
+        # MOH01 has 11 lines; other projects pending onboarding
         assert layer.coverage >= 0.05, (
             f"Contract line coverage {layer.coverage:.3f} below threshold 0.05. "
             f"Matched={layer.matched}/{layer.total_source}"
+        )
+
+    # --- Parent-child decomposition health ---
+
+    def test_parent_child_decomposition_health(self, fm_contract_lines):
+        """Every mother line (site-level, no meter) must have >= 1 child with meter_id.
+
+        Mother lines are contract_lines with external_line_id set, meter_id NULL,
+        and parent_contract_line_id NULL. They represent site-level SAGE lines that
+        decompose into per-meter children via parent_contract_line_id.
+
+        If a mother exists with no metered children, the billing resolver will
+        silently drop all records for that SAGE line (Pass 2 finds no children).
+        """
+        health = mapping_metrics.compute_decomposition_health(fm_contract_lines)
+
+        if health.total_mothers == 0:
+            # No mothers yet — test passes vacuously
+            return
+
+        if health.children_without_meters > 0:
+            warnings.warn(
+                f"{health.children_without_meters} child contract_lines missing meter_id "
+                f"(non-blocking, but indicates incomplete setup)"
+            )
+
+        assert health.orphaned == 0, (
+            f"{health.orphaned}/{health.total_mothers} mother lines have no metered children. "
+            f"Orphaned IDs: {health.orphaned_mother_ids}. "
+            f"Details: {health.orphaned_mother_details}"
         )
 
     # --- Layer 4: Ambiguity detection ---
@@ -129,7 +159,7 @@ class TestMappingIntegrity:
             """)
             multi = [dict(row) for row in cur.fetchall()]
 
-        # This is a WARNING, not a hard failure (until 048 adds OM contracts)
+        # This is a WARNING, not a hard failure (until OM contracts are added)
         if multi:
             for row in multi:
                 warnings.warn(

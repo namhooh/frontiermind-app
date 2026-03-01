@@ -56,7 +56,7 @@ class TokenEstimator:
     def _count_tokens_api(self, text: str) -> int:
         """Count tokens using Anthropic API."""
         response = self.client.messages.count_tokens(
-            model="claude-3-5-haiku-20241022",
+            model="claude-haiku-4-5-20251001",
             messages=[{"role": "user", "content": text}]
         )
         return response.input_tokens

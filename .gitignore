@@ -71,3 +71,12 @@ logs/
 # CBE data extracts (keep only .md files)
 CBE_data_extracts/**
 !CBE_data_extracts/**/*.md
+
+# Evaluation harness (generated outputs, sensitive SAGE data)
+python-backend/evals/golden_data/sage/
+python-backend/evals/reports/*.json
+python-backend/evals/reports/pipeline_outputs/*.json
+python-backend/evals/runs/*.json
+!python-backend/evals/runs/.gitkeep
+!python-backend/evals/reports/.gitkeep
+!python-backend/evals/reports/pipeline_outputs/.gitkeep

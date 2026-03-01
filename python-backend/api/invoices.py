@@ -7,7 +7,7 @@ Provides REST API endpoints for invoice management including:
 """
 
 import logging
-from fastapi import APIRouter, HTTPException, status, Request
+from fastapi import APIRouter, BackgroundTasks, HTTPException, status, Request
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 from decimal import Decimal
@@ -16,6 +16,7 @@ from datetime import datetime
 from middleware.rate_limiter import limiter
 from db.database import init_connection_pool
 from db.invoice_repository import InvoiceRepository
+from services.audit_service import log_business_event
 
 logger = logging.getLogger(__name__)
 
@@ -171,7 +172,8 @@ class ErrorResponse(BaseModel):
 @limiter.limit("30/minute")
 async def create_invoice(
     request: Request,
-    body: CreateInvoiceRequest
+    background_tasks: BackgroundTasks,
+    body: CreateInvoiceRequest,
 ) -> CreateInvoiceResponse:
     """
     Create an invoice from workflow data.
@@ -272,6 +274,21 @@ async def create_invoice(
         message = f"Invoice created successfully with {len(line_items)} line items"
         if events_created > 0:
             message += f" and {events_created} default events"
+
+        log_business_event(
+            background_tasks, request,
+            action="CREATE",
+            resource_type="invoice",
+            resource_id=str(invoice_id),
+            organization_id=body.organization_id,
+            compliance_relevant=True,
+            details={
+                "project_id": body.project_id,
+                "contract_id": body.contract_id,
+                "line_items": len(line_items),
+                "events_created": events_created,
+            },
+        )
 
         return CreateInvoiceResponse(
             success=True,

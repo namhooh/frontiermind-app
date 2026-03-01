@@ -83,6 +83,14 @@ app = FastAPI(
 # Setup rate limiting (before other middleware)
 setup_rate_limiting(app)
 
+# Setup audit logging middleware (after rate limiter, before CORS)
+try:
+    from middleware.audit_middleware import AuditMiddleware
+    app.add_middleware(AuditMiddleware)
+    logger.info("Audit logging middleware enabled")
+except Exception as e:
+    logger.warning(f"Audit middleware failed to initialize: {e}")
+
 # Configure CORS for Vercel frontend and local development
 # Note: allow_origins doesn't support wildcards, so we use allow_origin_regex for Vercel
 app.add_middleware(

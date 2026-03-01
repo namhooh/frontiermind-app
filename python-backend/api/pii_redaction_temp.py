@@ -10,12 +10,13 @@ import os
 import uuid
 from pathlib import Path
 
-from fastapi import APIRouter, UploadFile, File, HTTPException, Request, status
+from fastapi import APIRouter, BackgroundTasks, UploadFile, File, HTTPException, Request, status
 from pydantic import BaseModel
 from typing import Dict, List, Optional
 
 from llama_parse import LlamaParse
 from services.pii_detector import PIIDetector, PIIDetectionError, PIIAnonymizationError
+from services.audit_service import log_business_event
 
 logger = logging.getLogger(__name__)
 
@@ -70,7 +71,7 @@ class PIIRedactionResponse(BaseModel):
 
 
 @router.post("/process", response_model=PIIRedactionResponse)
-async def process_pii_redaction(request: Request, file: UploadFile = File(...)):
+async def process_pii_redaction(request: Request, background_tasks: BackgroundTasks, file: UploadFile = File(...)):
     """
     Process a document for PII redaction.
 
@@ -139,6 +140,17 @@ async def process_pii_redaction(request: Request, file: UploadFile = File(...)):
             ))
 
         processing_time = time.time() - start_time
+
+        log_business_event(
+            background_tasks, request,
+            action="PII_ACCESS",
+            resource_type="document",
+            resource_name=file.filename,
+            organization_id=org_id,
+            compliance_relevant=True,
+            data_classification="restricted",
+            details={"entities_detected": len(pii_entities), "entities_by_type": entities_by_type},
+        )
 
         return PIIRedactionResponse(
             success=True,

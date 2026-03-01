@@ -6,7 +6,7 @@ Phase 1 implementation focuses on in-memory processing without database persiste
 """
 
 import logging
-from fastapi import APIRouter, UploadFile, File, Form, HTTPException, status, Query, Request
+from fastapi import APIRouter, BackgroundTasks, UploadFile, File, Form, HTTPException, status, Query, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
@@ -23,6 +23,7 @@ from models.contract import ExtractedClause, ContractParseResult
 from db.contract_repository import ContractRepository
 from db.database import init_connection_pool
 from db.lookup_service import LookupService
+from services.audit_service import log_business_event
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +179,7 @@ class ErrorResponse(BaseModel):
 @limit_upload  # Rate limit: 10 requests/minute for expensive file upload operations
 async def parse_contract(
     request: Request,  # Required for rate limiting
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(
         ...,
         description="Contract file to parse (PDF or DOCX)",
@@ -385,6 +387,22 @@ async def parse_contract(
             f"Contract parsing completed: {file.filename} - "
             f"{len(result.clauses)} clauses, {result.pii_anonymized} PII redacted, "
             f"{result.processing_time:.2f}s"
+        )
+
+        log_business_event(
+            background_tasks, request,
+            action="CONTRACT_PARSE",
+            resource_type="contract",
+            resource_id=str(result.contract_id),
+            resource_name=file.filename,
+            organization_id=organization_id_int,
+            details={
+                "clauses_extracted": len(result.clauses),
+                "pii_detected": result.pii_detected,
+                "pii_anonymized": result.pii_anonymized,
+                "processing_time_s": result.processing_time,
+            },
+            compliance_relevant=True,
         )
 
         return response

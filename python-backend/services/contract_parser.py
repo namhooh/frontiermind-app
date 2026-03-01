@@ -128,13 +128,13 @@ CONTRACT_TYPE_PROFILES = {
 # targeted=16000, enrichment=12000, validation=16000
 
 TOKEN_BUDGETS = {
-    "main_extraction": 8000,       # Haiku limit (Sonnet: 32000)
-    "discovery": 8000,             # Haiku limit (Sonnet: 24000)
-    "categorization": 8000,        # Haiku limit (Sonnet: 32000)
-    "targeted": 8000,              # Haiku limit (Sonnet: 16000)
-    "enrichment": 8000,            # Haiku limit (Sonnet: 12000)
-    "validation": 8000,            # Haiku limit (Sonnet: 16000)
-    "metadata": 2000,              # Contract metadata extraction (lightweight)
+    "main_extraction": 32000,      # Sonnet 4.5
+    "discovery": 24000,            # Sonnet 4.5
+    "categorization": 32000,       # Sonnet 4.5
+    "targeted": 16000,             # Sonnet 4.5
+    "enrichment": 12000,           # Sonnet 4.5
+    "validation": 16000,           # Sonnet 4.5
+    "metadata": 4000,              # Contract metadata extraction
 }
 
 
@@ -754,7 +754,7 @@ class ContractParser:
 
                 # Call Claude API with streaming to avoid timeout
                 response = self._call_claude_streaming(
-                    model="claude-3-5-haiku-20241022",
+                    model="claude-sonnet-4-5-20250929",
                     max_tokens=TOKEN_BUDGETS["main_extraction"],
                     system=prompts['system'],
                     messages=[{"role": "user", "content": prompts['user']}],
@@ -912,7 +912,7 @@ class ContractParser:
                 )
 
                 response = self._call_claude_streaming(
-                    model="claude-3-5-haiku-20241022",
+                    model="claude-sonnet-4-5-20250929",
                     max_tokens=TOKEN_BUDGETS["discovery"],
                     system=prompts['system'],
                     messages=[{"role": "user", "content": prompts['user']}],
@@ -964,7 +964,7 @@ class ContractParser:
                 )
 
                 response = self._call_claude_streaming(
-                    model="claude-3-5-haiku-20241022",
+                    model="claude-sonnet-4-5-20250929",
                     max_tokens=TOKEN_BUDGETS["categorization"],
                     system=prompts['system'],
                     messages=[{"role": "user", "content": prompts['user']}],
@@ -1122,13 +1122,47 @@ class ContractParser:
         if "```json" in response_text:
             json_start = response_text.find("```json") + 7
             json_end = response_text.find("```", json_start)
+            if json_end == -1:
+                json_end = len(response_text)
             response_text = response_text[json_start:json_end].strip()
         elif "```" in response_text:
             json_start = response_text.find("```") + 3
             json_end = response_text.find("```", json_start)
+            if json_end == -1:
+                json_end = len(response_text)
             response_text = response_text[json_start:json_end].strip()
 
-        data = json.loads(response_text)
+        # Try to parse, with repair for truncated JSON (output token limit may truncate response)
+        try:
+            data = json.loads(response_text)
+        except json.JSONDecodeError as e:
+            logger.warning(f"Discovery JSON parse error: {e}. Attempting repair...")
+            try:
+                # Find the JSON object start anchored to "discovered_clauses" key
+                json_start = response_text.find('{"discovered_clauses"')
+                if json_start < 0:
+                    # Try without opening brace
+                    key_pos = response_text.find('"discovered_clauses"')
+                    if key_pos >= 0:
+                        json_start = response_text.rfind('{', 0, key_pos)
+
+                if json_start >= 0:
+                    json_text = response_text[json_start:]
+                    # Find last complete clause object (ends with '},')
+                    last_valid = json_text.rfind('},')
+                    if last_valid > 0:
+                        repaired = json_text[:last_valid + 1] + ']}'
+                        data = json.loads(repaired)
+                        logger.info(f"Discovery JSON repaired successfully ({len(data.get('discovered_clauses', []))} clauses recovered)")
+                    else:
+                        raise e
+                else:
+                    raise e
+            except json.JSONDecodeError:
+                logger.error(f"Discovery JSON repair failed. Response text (first 200 chars): {response_text[:200]}")
+                logger.error(f"Discovery JSON repair failed. Response text (last 500 chars): {response_text[-500:]}")
+                raise
+
         return data.get("discovered_clauses", [])
 
     def _parse_categorization_response(self, response) -> tuple[List[ExtractedClause], ExtractionSummary]:
@@ -1150,25 +1184,31 @@ class ContractParser:
                 json_end = len(response_text)
             response_text = response_text[json_start:json_end].strip()
 
-        # Try to repair truncated JSON
+        # Try to repair truncated JSON (output token limit may truncate response)
         try:
             data = json.loads(response_text)
         except json.JSONDecodeError as e:
-            logger.warning(f"JSON parse error: {e}. Attempting repair...")
-            # Try to find the last complete clause
+            logger.warning(f"Categorization JSON parse error: {e}. Attempting repair...")
             try:
-                # Find last complete object by looking for balanced braces
-                last_valid = response_text.rfind('},')
-                if last_valid > 0:
-                    repaired = response_text[:last_valid + 1] + ']}'
-                    # Try with categorized_clauses wrapper
-                    repaired = '{"categorized_clauses": [' + repaired.lstrip('{').lstrip('"categorized_clauses"').lstrip(':').lstrip('[')
-                    data = json.loads(repaired)
-                    logger.info(f"JSON repaired successfully")
+                json_start = response_text.find('{"categorized_clauses"')
+                if json_start < 0:
+                    key_pos = response_text.find('"categorized_clauses"')
+                    if key_pos >= 0:
+                        json_start = response_text.rfind('{', 0, key_pos)
+
+                if json_start >= 0:
+                    json_text = response_text[json_start:]
+                    last_valid = json_text.rfind('},')
+                    if last_valid > 0:
+                        repaired = json_text[:last_valid + 1] + ']}'
+                        data = json.loads(repaired)
+                        logger.info(f"Categorization JSON repaired successfully")
+                    else:
+                        raise e
                 else:
                     raise e
-            except Exception:
-                logger.error(f"JSON repair failed. Response text (last 500 chars): {response_text[-500:]}")
+            except json.JSONDecodeError:
+                logger.error(f"Categorization JSON repair failed. Response text (last 500 chars): {response_text[-500:]}")
                 raise
 
         # Convert to ExtractedClause objects
@@ -1293,7 +1333,7 @@ class ContractParser:
 
                         # Call Claude API with streaming
                         response = self._call_claude_streaming(
-                            model="claude-3-5-haiku-20241022",
+                            model="claude-sonnet-4-5-20250929",
                             max_tokens=TOKEN_BUDGETS["targeted"],
                             system=prompts['system'],
                             messages=[{"role": "user", "content": prompts['user']}],
@@ -1369,7 +1409,7 @@ class ContractParser:
 
                     # Call Claude API with streaming
                     response = self._call_claude_streaming(
-                        model="claude-3-5-haiku-20241022",
+                        model="claude-sonnet-4-5-20250929",
                         max_tokens=TOKEN_BUDGETS["enrichment"],
                         system=prompts['system'],
                         messages=[{"role": "user", "content": prompts['user']}],
@@ -1413,7 +1453,7 @@ class ContractParser:
 
                 # Call Claude API with streaming
                 response = self._call_claude_streaming(
-                    model="claude-3-5-haiku-20241022",
+                    model="claude-sonnet-4-5-20250929",
                     max_tokens=TOKEN_BUDGETS["validation"],
                     system=prompts['system'],
                     messages=[{"role": "user", "content": prompts['user']}],
@@ -1584,7 +1624,7 @@ class ContractParser:
 
             # Call Claude API with streaming
             response = self._call_claude_streaming(
-                model="claude-3-5-haiku-20241022",
+                model="claude-sonnet-4-5-20250929",
                 max_tokens=TOKEN_BUDGETS["metadata"],
                 system=prompts['system'],
                 messages=[{"role": "user", "content": prompts['user']}],

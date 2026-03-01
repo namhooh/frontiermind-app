@@ -158,7 +158,7 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject }: ProjectSi
                 <button
                   type="button"
                   onClick={() => toggleGroup(group)}
-                  className="w-full flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-slate-700 hover:text-slate-700 transition-colors"
+                  className="w-full flex items-center gap-1 px-3 py-1.5 text-xs font-bold text-slate-600 hover:text-slate-700 transition-colors"
                 >
                   {isCollapsed ? (
                     <ChevronRight className="h-3.5 w-3.5 shrink-0" />

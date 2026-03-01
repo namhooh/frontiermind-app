@@ -86,9 +86,11 @@ def shutdown():
 async def _process_due_schedules():
     """Job: process all due notification schedules."""
     try:
+        from db.database import init_connection_pool
         from db.notification_repository import NotificationRepository
         from services.email.notification_service import NotificationService
 
+        init_connection_pool()  # no-op if already initialized
         repo = NotificationRepository()
         service = NotificationService(repo)
         sent = await asyncio.to_thread(service.process_due_schedules)
@@ -101,8 +103,10 @@ async def _process_due_schedules():
 async def _expire_stale_tokens():
     """Job: expire submission tokens past their expiry."""
     try:
+        from db.database import init_connection_pool
         from db.notification_repository import NotificationRepository
 
+        init_connection_pool()  # no-op if already initialized
         repo = NotificationRepository()
         count = await asyncio.to_thread(repo.expire_stale_tokens)
         if count > 0:

@@ -87,6 +87,8 @@ database/
 │   ├── 044_legal_entity_industry_and_moh01_fixes.sql  # Phase 10.7: legal_entity table, counterparty.industry, MOH01 data fixes
 │   ├── 045_relocate_contract_columns.sql              # Phase 10.8: Relocate interconnection_voltage_kv, agreed_fx_rate_source, payment_security to proper homes
 │   ├── 046_populate_portfolio_base_data.sql           # Phase 10.9: CBE portfolio population — parent_contract_id, legal entities, counterparties, 33 projects, contracts, amendments, exchange rates (10 currencies × 14 months from xe.com)
+│   ├── 047_populate_sage_contract_ids.sql             # Phase 10.10: SAGE contract IDs + parent_contract_line_id hierarchy + MOH01 mother line 1000
+│   ├── 049_pilot_project_data_population.sql          # Phase 10.11: Pilot data — contract_lines, clause_tariffs, meter_aggregates for KAS01, NBL01, LOI01
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -1116,6 +1118,26 @@ database/
 - Billing API: per-meter available energy mode, country-scoped tax rules, configurable invoice direction, direction-aware reads
 - Performance API: per-meter `available_kwh` populated
 - Frontend: dynamic COD filtering, API-driven energy_category, persisted invoice amounts in expanded rows
+
+**v10.7 (Legal Entity & Industry)** - Complete
+- Migration: `044_legal_entity_industry_and_moh01_fixes.sql` — legal_entity table, counterparty.industry
+
+**v10.8 (Contract Column Relocation)** - Complete
+- Migration: `045_relocate_contract_columns.sql` — moved interconnection_voltage_kv, agreed_fx_rate_source, payment_security to proper tables
+
+**v10.9 (CBE Portfolio Data Population)** - Complete
+- Migration: `046_populate_portfolio_base_data.sql` — parent_contract_id hierarchy, 33 projects, contracts, amendments, exchange rates
+
+**v10.10 (SAGE Contract IDs & Parent-Child Hierarchy)** - Complete
+- Migration: `047_populate_sage_contract_ids.sql` — Part A: SAGE ERP contract numbers, payment terms, end dates for 27 contracts; Part B: `parent_contract_line_id` FK + MOH01 mother line 1000
+- Self-referential hierarchy mirrors `contract.parent_contract_id` pattern
+- Billing resolver detects mother lines (meter_id IS NULL) and resolves via child lines
+
+**v10.11 (Pilot Project Data Population)** - Complete
+- Migration: `049_pilot_project_data_population.sql` — Contract lines, clause tariffs, meter aggregates for 3 pilot projects (KAS01, NBL01, LOI01)
+- 15 contract_line rows, 4 clause_tariff placeholders, 94 meter_aggregate rows, 8 contract_billing_product junction rows
+- All `meter_id = NULL` (meters back-filled when actual meter data available)
+- Bug fix: EXC-004 resolved — `cbe_billing_adapter.py` N/A misclassification fixed with product-pattern matching
 
 ---
 

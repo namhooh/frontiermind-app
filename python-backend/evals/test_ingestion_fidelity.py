@@ -113,13 +113,14 @@ class TestIngestionFidelity:
     def test_semantic_classification_accuracy(self, ontology, sage_contract_lines_filtered):
         """Evaluate whether energy_category assignment matches ontology product classification.
 
-        Catches the cbe_billing_adapter.py:47 bug where N/A is treated as available_energy
-        for non-energy products (Minimum Offtake, O&M, BESS, Diesel, etc.).
+        EXC-004 resolved: adapter now uses _classify_energy_category() with product-pattern
+        matching. N/A records with non-energy products are correctly classified as 'test'.
+        This test verifies the fix holds — no non-energy products should be classified as 'available'.
         """
         product_rules = ontology["operational"]["product_classification"]["categories"]
 
-        # The adapter's AVAILABLE_CATEGORIES set (lowercase for comparison)
-        adapter_categories = {"available", "n/a"}
+        # Post-fix: adapter only treats 'available' as available (N/A excluded)
+        adapter_categories = {"available"}
 
         result = ingestion_metrics.compute_classification_accuracy(
             records=sage_contract_lines_filtered,
@@ -129,7 +130,7 @@ class TestIngestionFidelity:
 
         if result.misclassified:
             warnings.warn(
-                f"ADAPTER BUG: {len(result.misclassified)} non-energy products misclassified as 'available': "
+                f"CLASSIFICATION: {len(result.misclassified)} products may need review: "
                 f"{[m['product'] for m in result.misclassified[:5]]}"
             )
 
@@ -155,6 +156,20 @@ class TestIngestionFidelity:
                 f"Resolver: {diagnostics.resolved_count}/{diagnostics.total_records} resolved "
                 f"({diagnostics.resolution_rate:.1%}). "
                 f"Unresolved reasons: {diagnostics.reason_distribution}"
+            )
+
+        # With real SAGE data, assert contract_line_id isn't the dominant unresolved reason.
+        # This would have caught the MOH01 mother-line gap (EXC-005) — the resolver would
+        # have shown ~100% of records failing on contract_line_id.
+        using_real_data = bool(os.getenv("SAGE_DATA_DIR"))
+        if using_real_data and diagnostics.total_records > 0:
+            contract_line_unresolved = diagnostics.reason_distribution.get("contract_line_id", 0)
+            rate = contract_line_unresolved / diagnostics.total_records
+            assert rate <= 0.20, (
+                f"contract_line_id unresolved rate {rate:.1%} exceeds 20% threshold. "
+                f"{contract_line_unresolved}/{diagnostics.total_records} records failed on "
+                f"contract_line_id FK — likely missing contract_line rows in FM. "
+                f"Full distribution: {diagnostics.reason_distribution}"
             )
 
     def test_dedup_key_correctness(self, fm_meter_aggregates):

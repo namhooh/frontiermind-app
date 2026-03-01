@@ -2043,3 +2043,134 @@ per-meter performance detail, and restructured frontend tabs.
 - Post-load assertions verify MOH01 integrity and minimum record counts
 
 ---
+
+### v10.10 - 2026-02-28 (SAGE Contract IDs & Parent-Child Contract Line Hierarchy)
+
+**Description:** Combined migration with two parts. **Part A** populates `external_contract_id` (SAGE ERP contract number), `payment_terms`, and `end_date` for 27 primary contracts using data from CBE's SAGE ERP contract extract. **Part B** adds `parent_contract_line_id` self-referential FK to `contract_line`, mirroring the `contract.parent_contract_id` pattern, and inserts MOH01 line 1000 as a "mother" site-level contract line linked to per-meter children.
+
+**Migration:** `database/migrations/047_populate_sage_contract_ids.sql`
+
+**Reference:** `CBE_data_extracts/CBE_TO_FRONTIERMIND_MAPPING.md` Sections 18–19
+
+**Source Data:** `CBE_data_extracts/Data Extracts/FrontierMind Extracts_dim_finance_contract.csv` (DIM_CURRENT_RECORD=1 rows only)
+
+**Part A — Schema Changes:** None — data-only
+
+**Part A — Data Updates (27 contracts):**
+
+| Field | Scope | Pattern |
+|-------|-------|---------|
+| `contract.external_contract_id` | 26 contracts (MOH01 already set) | SAGE contract number, e.g. `CONCBCH0-2021-00001` |
+| `contract.payment_terms` | 26 contracts (MOH01 already set) | SAGE payment term code: 30NET, 30EOM, 60NET, 75EOM, 90NET, 90EOM |
+| `contract.end_date` | 27 contracts (including MOH01) | SAGE END_DATE from current contract record |
+
+**Payment Terms Breakdown:**
+
+| Term | Count | Projects |
+|------|-------|----------|
+| 30NET | 14 | IVL01, AR01, MB01, MF01, MP01, MP02, NC02, NC03, TBM01, ERG, MIR01, UNSOS, CAL01, MOH01 |
+| 30EOM | 8 | GC01, KAS01, LOI01, XF-AB, AMP01, TWG01, JAB01, QMM01→75EOM |
+| 60NET | 3 | GBL01, NBL01, NBL02 |
+| 75EOM | 1 | QMM01 |
+| 90NET | 1 | UGL01 |
+| 90EOM | 1 | UTK01 |
+
+**Contracts Without SAGE Data (3 — not modified):**
+- ABI01 (contract 42) — no SAGE contract record
+- BNT01 (contract 43) — no SAGE contract record
+- ZO01 (contract 56) — SAGE ZL01 contracts reassigned to ZL02 entity
+
+**Part B — Schema Changes:**
+- `contract_line.parent_contract_line_id` — BIGINT FK to `contract_line(id)`, self-referential
+- `chk_contract_line_no_self_parent` — CHECK constraint preventing self-parent
+- `idx_contract_line_parent` — Partial index on `parent_contract_line_id WHERE IS NOT NULL`
+- `trg_contract_line_same_contract_parent` — Trigger enforcing parent belongs to same contract
+- **Dropped:** `line_decomposition` table (from prior version)
+
+**Part B — Data Changes (MOH01):**
+- Cleared `external_line_id = '11481428495164935368'` from per-meter available lines (was incorrectly set previously)
+- Inserted mother line 1000: `energy_category = 'available'`, `meter_id = NULL`, `external_line_id = '11481428495164935368'`
+- Linked 5 child lines (4001, 5001, 6001, 7001, 8001) via `parent_contract_line_id`
+
+**Design Notes:**
+- Uses `project.sage_id` joins instead of hardcoded `contract.id` — environment-stable across dev/staging/prod
+- SAGE contract numbers follow pattern `CON{FACILITY}-{YEAR}-{SEQ}` (e.g., `CONKEN00-2023-00009`)
+- XF-AB: SAGE has 4 sub-contracts (XFAB, XFBV, XFL01, XFSS); primary `CONKEN00-2021-00003` (XFAB) used as `external_contract_id`
+- TWG01: FM uses `TWG01`, SAGE uses `TWG` — mapping handled via `project.sage_id`
+- MOH01: only `end_date` updated (external_contract_id and payment_terms already populated)
+- Post-load assertions verify minimum counts and MOH01 integrity
+
+**Code Changes:**
+- `data-ingestion/processing/billing_resolver.py` — Pass 2 now detects mother lines (meter_id IS NULL) and resolves via `parent_contract_line_id` children instead of `line_decomposition`
+- `python-backend/api/billing.py` — Added `AND cl.parent_contract_line_id IS NULL` filter to exclude mother lines from invoice generation
+- `python-backend/evals/conftest.py` — Added `parent_contract_line_id` to `fm_contract_lines` fixture SELECT
+- `python-backend/evals/metrics/mapping_metrics.py` — Removed `fm_line_decompositions` parameter; mother line has `external_line_id` set directly
+- `python-backend/evals/test_billing_readiness.py` — Excluded mother lines from `meter_id` assertion
+
+**Mapping Doc:** See `CBE_TO_FRONTIERMIND_MAPPING.md` Sections 18–19 for full documentation.
+
+---
+
+### v4.2 - 2026-02-28 (Pilot Project Data Population)
+
+**Description:** Populates contract_line, clause_tariff, meter_aggregate, and contract_billing_product for 3 pilot projects: KAS01 (Ghana), NBL01 (Nigeria), LOI01 (Kenya).
+
+**Migrations:**
+- `database/migrations/049_pilot_project_data_population.sql`
+
+**Source Data:**
+- `CBE_data_extracts/Data Extracts/FrontierMind Extracts_dim_finance_contract_line.csv` (DIM_CURRENT_RECORD=1)
+- `CBE_data_extracts/Data Extracts/FrontierMind Extracts_meter readings.csv`
+
+**Data Changes:**
+
+**Section A — Contract Lines (15 rows):**
+
+| Project | Contract | Lines | Active | Inactive |
+|---------|----------|-------|--------|----------|
+| KAS01 | CONGHA00-2021-00002 | 1000, 2000, 3000, 4000 | 3 (1000 metered P1, 2000 available, 4000 metered P2) | 1 (3000 Inverter Energy, test) |
+| NBL01 | CONNIG00-2021-00002 | 1000, 3000, 4000, 5000, 6000, 7000, 9000, 10000 | 3 (6000 gen metered P1, 7000 gen available, 10000 gen metered P2) | 5 (legacy grid + early operating) |
+| LOI01 | CONKEN00-2021-00002 | 1000, 2000, 3000 | 3 (1000 HQ metered, 2000 Camp metered, 3000 BESS capacity test) | 0 |
+
+- All lines have `meter_id = NULL` (meters not yet available)
+- `external_line_id` set from CBE `CONTRACT_LINE_UNIQUE_ID`
+- `energy_category`: metered/available from METERED_AVAILABLE field; N/A non-energy products → test
+
+**Section B — Clause Tariffs (4 placeholder rows):**
+
+| Project | Tariff Group Key | Currency | Base Rate | Notes |
+|---------|-----------------|----------|-----------|-------|
+| KAS01 | CONGHA00-2021-00002-MAIN | GHS | NULL | Populated after PPA parsing |
+| NBL01 | CONNIG00-2021-00002-MAIN | NGN | NULL | Populated after PPA parsing |
+| LOI01 | CONKEN00-2021-00002-MAIN | USD | NULL | Populated after PPA parsing |
+| LOI01 | CONKEN00-2021-00002-BESS | USD | NULL | BESS capacity charge |
+
+- Linked to contract_lines via `clause_tariff_id` FK update
+
+**Section C — Meter Aggregates (94 rows):**
+
+| Project | Months | Lines with Readings | Total Rows |
+|---------|--------|-------------------|------------|
+| KAS01 | Jan-Dec 2025 | 1000, 2000, 3000 (Jan only), 4000 (Feb-Dec) | 36 |
+| NBL01 | Jan-Dec 2025 | 6000, 7000 (Mar-Dec), 10000 | 34 |
+| LOI01 | Jan-Dec 2025 | 1000, 2000 | 24 |
+
+- `meter_id = NULL`, `contract_line_id` resolved via `external_line_id` join
+- `billing_period_id` resolved via `end_date` match
+- `source_metadata` contains `external_reading_id` for CBE traceability
+
+**Section D — Contract Billing Products (8 junction rows):**
+- KAS01: Metered Energy + Available Energy
+- NBL01: Generator (EMetered) + Generator (EAvailable)
+- LOI01: Loisaba HQ + Loisaba Camp + BESS Capacity
+
+**Bug Fixes:**
+- EXC-004: `cbe_billing_adapter.py` — Removed `n/a`/`N/A` from `AVAILABLE_CATEGORIES`; added `_classify_energy_category()` with product-pattern matching from ontology
+
+**New Scripts:**
+- `python-backend/scripts/batch_parse_ppas.py` — Batch PPA parsing for pilot projects
+
+**New Documentation:**
+- `CBE_data_extracts/PROJECT_SOURCE_INVENTORY.md` — Project × document matrix for all 32 projects
+
+---

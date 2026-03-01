@@ -298,6 +298,11 @@ class BillingResolver:
         CBE CONTRACT_LINE_UNIQUE_ID is stored as external_line_id on contract_line
         and as tariff_group_key on clause_tariff — same value is used for both lookups.
 
+        Two-pass resolution:
+        1. Direct match: external_line_id on contract_line (1-to-1)
+        2. Parent-child fallback: For mother lines (meter_id IS NULL), query
+           children via parent_contract_line_id to find a child with a valid meter.
+
         Returns dict mapping external_line_id → {id, meter_id, energy_category}.
         """
         result: Dict[str, dict] = {}
@@ -306,6 +311,7 @@ class BillingResolver:
 
         with get_db_connection() as conn:
             with conn.cursor() as cur:
+                # Pass 1: Direct external_line_id match
                 cur.execute(
                     """
                     SELECT external_line_id, id, meter_id, energy_category::text
@@ -322,6 +328,60 @@ class BillingResolver:
                         "meter_id": row[2],
                         "energy_category": row[3],
                     }
+
+                # Pass 2: For mother lines (meter_id IS NULL), resolve via
+                # first active child with a meter
+                mother_ids = {
+                    ext_id: info
+                    for ext_id, info in result.items()
+                    if info.get("meter_id") is None
+                }
+                if mother_ids:
+                    mother_db_ids = [info["id"] for info in mother_ids.values()]
+                    cur.execute(
+                        """
+                        SELECT DISTINCT ON (cl.parent_contract_line_id)
+                            cl.parent_contract_line_id,
+                            cl.id, cl.meter_id, cl.energy_category::text
+                        FROM contract_line cl
+                        WHERE cl.parent_contract_line_id = ANY(%s)
+                          AND cl.is_active = true
+                          AND cl.meter_id IS NOT NULL
+                        ORDER BY cl.parent_contract_line_id, cl.id
+                        """,
+                        (mother_db_ids,),
+                    )
+                    # Build reverse map: mother DB id → external_line_id
+                    mother_db_to_ext = {
+                        info["id"]: ext_id for ext_id, info in mother_ids.items()
+                    }
+                    for row in cur.fetchall():
+                        parent_id = row[0]
+                        ext_id = mother_db_to_ext.get(parent_id)
+                        if ext_id:
+                            result[ext_id] = {
+                                "id": row[1],
+                                "meter_id": row[2],
+                                "energy_category": row[3],
+                            }
+                    resolved_mothers = sum(
+                        1 for ext_id in mother_ids
+                        if result.get(ext_id, {}).get("meter_id") is not None
+                    )
+                    if resolved_mothers:
+                        logger.info(
+                            "Resolved %d mother line(s) via parent-child fallback",
+                            resolved_mothers,
+                        )
+                    unresolved_mothers = [
+                        ext_id for ext_id in mother_ids
+                        if result.get(ext_id, {}).get("meter_id") is None
+                    ]
+                    if unresolved_mothers:
+                        logger.warning(
+                            "Mother line(s) with meter_id=NULL had no children: %s",
+                            unresolved_mothers[:5],
+                        )
 
         unresolved = set(external_line_ids) - set(result.keys())
         if unresolved:

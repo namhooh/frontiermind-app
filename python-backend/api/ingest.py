@@ -18,11 +18,12 @@ from typing import List, Optional
 
 import boto3
 from botocore.exceptions import ClientError
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile, File, Form, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, UploadFile, File, Form, status
 from pydantic import BaseModel, Field
 
 from middleware.rate_limiter import limiter, limit_default
 from middleware.api_key_auth import require_api_key
+from services.audit_service import log_business_event
 
 from db.database import init_connection_pool
 from db.integration_repository import IntegrationRepository
@@ -267,6 +268,7 @@ async def generate_presigned_url(
 @limiter.limit("30/minute")
 async def ingest_meter_data(
     http_request: Request,
+    background_tasks: BackgroundTasks,
     request: MeterDataBatchRequest,
     auth: dict = Depends(require_api_key),
 ) -> IngestionResultResponse:
@@ -299,7 +301,7 @@ async def ingest_meter_data(
         credential_id=auth.get("credential_id"),
     )
 
-    return IngestionResultResponse(
+    resp = IngestionResultResponse(
         ingestion_id=result.ingestion_id,
         status=IngestionStatus(result.status),
         rows_accepted=result.rows_accepted,
@@ -311,6 +313,17 @@ async def ingest_meter_data(
         message=result.message,
     )
 
+    log_business_event(
+        background_tasks, http_request,
+        action="IMPORT",
+        resource_type="meter_data",
+        organization_id=organization_id,
+        records_affected=result.rows_accepted,
+        details={"source_type": request.source_type.value, "rows_rejected": result.rows_rejected},
+    )
+
+    return resp
+
 
 @router.post(
     "/upload",
@@ -321,6 +334,7 @@ async def ingest_meter_data(
 @limiter.limit("10/minute")
 async def upload_meter_data(
     request: Request,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(..., description="CSV, JSON, or Parquet file"),
     source_type: str = Query("manual", description="Data source type"),
     auth: dict = Depends(require_api_key),
@@ -372,7 +386,7 @@ async def upload_meter_data(
         credential_id=auth.get("credential_id"),
     )
 
-    return IngestionResultResponse(
+    resp = IngestionResultResponse(
         ingestion_id=result.ingestion_id,
         status=IngestionStatus(result.status),
         rows_accepted=result.rows_accepted,
@@ -383,6 +397,17 @@ async def upload_meter_data(
         data_end=result.data_end,
         message=result.message,
     )
+
+    log_business_event(
+        background_tasks, request,
+        action="IMPORT",
+        resource_type="meter_data",
+        organization_id=organization_id,
+        records_affected=result.rows_accepted,
+        details={"source_type": src.value, "filename": file.filename, "rows_rejected": result.rows_rejected},
+    )
+
+    return resp
 
 
 # ============================================================================
@@ -400,6 +425,7 @@ async def upload_meter_data(
 @limiter.limit("30/minute")
 async def ingest_billing_reads(
     http_request: Request,
+    background_tasks: BackgroundTasks,
     request: BillingReadsBatchRequest,
     auth: dict = Depends(require_api_key),
 ) -> IngestionResultResponse:
@@ -432,7 +458,7 @@ async def ingest_billing_reads(
         credential_id=auth.get("credential_id"),
     )
 
-    return IngestionResultResponse(
+    resp = IngestionResultResponse(
         ingestion_id=result.ingestion_id,
         status=IngestionStatus(result.status),
         rows_accepted=result.rows_accepted,
@@ -443,6 +469,17 @@ async def ingest_billing_reads(
         data_end=result.data_end,
         message=result.message,
     )
+
+    log_business_event(
+        background_tasks, http_request,
+        action="IMPORT",
+        resource_type="billing_reads",
+        organization_id=organization_id,
+        records_affected=result.rows_accepted,
+        details={"source_type": request.source_type.value, "rows_rejected": result.rows_rejected},
+    )
+
+    return resp
 
 
 # ============================================================================
@@ -874,6 +911,8 @@ async def create_credential(
     description="Generate a new API key for client data ingestion. The plaintext key is returned only once.",
 )
 async def generate_api_key(
+    request: Request,
+    background_tasks: BackgroundTasks,
     body: GenerateAPIKeyRequest,
     organization_id: int = Query(..., description="Organization ID"),
 ) -> GenerateAPIKeyResponse:
@@ -894,6 +933,16 @@ async def generate_api_key(
             auth_type="api_key",
             credentials={"api_key": plaintext_key},
             label=body.label,
+        )
+
+        log_business_event(
+            background_tasks, request,
+            action="API_KEY_CREATED",
+            resource_type="integration_credential",
+            resource_id=str(result["id"]),
+            organization_id=organization_id,
+            severity="WARNING",
+            details={"data_source_id": body.data_source_id, "label": body.label},
         )
 
         return GenerateAPIKeyResponse(
@@ -1009,6 +1058,8 @@ async def update_credential(
     description="Delete an integration credential and all associated sites.",
 )
 async def delete_credential(
+    request: Request,
+    background_tasks: BackgroundTasks,
     credential_id: int,
     organization_id: int = Query(..., description="Organization ID"),
 ) -> None:
@@ -1029,6 +1080,15 @@ async def delete_credential(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Credential not found",
         )
+
+    log_business_event(
+        background_tasks, request,
+        action="API_KEY_REVOKED",
+        resource_type="integration_credential",
+        resource_id=str(credential_id),
+        organization_id=organization_id,
+        severity="WARNING",
+    )
 
 
 # ============================================================================

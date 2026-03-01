@@ -42,7 +42,18 @@ identity_keys:
   contract_line:
     sage_field: CONTRACT_LINE_UNIQUE_ID
     fm_field: contract_line.external_line_id
-    cardinality: "one_to_one"
+    cardinality: "one_to_one_or_one_to_many_via_parent"
+    decomposition:
+      pattern: "parent_contract_line_id"
+      description: >
+        Site-level SAGE lines map to FM mother lines (meter_id NULL)
+        that decompose into per-meter children. Billing resolver Pass 2
+        handles this via parent_contract_line_id lookup.
+      mother_properties:
+        meter_id: null
+        parent_contract_line_id: null
+        external_line_id: "set to SAGE CONTRACT_LINE_UNIQUE_ID"
+      child_requirement: "at least one active child with meter_id IS NOT NULL"
 
   meter_reading:
     sage_field: METER_READING_UNIQUE_ID
@@ -125,8 +136,8 @@ operational:
           - "*Correction*"
           - "Inverter Energy*"
           - "Early Operating*"
-    # CRITICAL: cbe_billing_adapter.py:47 treats N/A as available energy.
-    # This is WRONG for non-energy products. Eval must detect this misclassification.
+    # RESOLVED (EXC-004): cbe_billing_adapter.py now uses _classify_energy_category()
+    # with product-pattern matching. N/A records are classified as 'test' (non-energy).
 
 # ─── Cardinality Rules ───────────────────────────────────────────────
 cardinality:

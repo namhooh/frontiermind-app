@@ -15,11 +15,12 @@ from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Path, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, UploadFile, File, Path, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from db.database import get_db_connection, init_connection_pool
+from services.audit_service import log_business_event
 
 logger = logging.getLogger(__name__)
 
@@ -240,6 +241,8 @@ def _round_d(val: Decimal, precision: int = 2, mode: str = 'ROUND_HALF_UP') -> D
     summary="Generate expected invoice for a billing month",
 )
 async def generate_expected_invoice(
+    request: Request,
+    background_tasks: BackgroundTasks,
     project_id: int = Path(..., description="Project ID"),
     body: GenerateInvoiceRequest = ...,
 ) -> dict:
@@ -302,6 +305,7 @@ async def generate_expected_invoice(
                     FROM contract_line cl
                     LEFT JOIN meter m ON m.id = cl.meter_id
                     WHERE cl.contract_id = %(cid)s AND cl.is_active = true
+                      AND cl.parent_contract_line_id IS NULL
                     ORDER BY cl.contract_line_number
                 """, {"cid": contract_id})
                 contract_lines = cur.fetchall()
@@ -798,7 +802,7 @@ async def generate_expected_invoice(
                         "cl_id": li["contract_line_id"],
                     })
 
-                return {
+                result = {
                     "success": True,
                     "header_id": header_id,
                     "version_no": new_version,
@@ -813,6 +817,18 @@ async def generate_expected_invoice(
                     "line_count": len(line_items),
                     "currency_code": currency_code,
                 }
+
+                log_business_event(
+                    background_tasks, request,
+                    action="CREATE",
+                    resource_type="expected_invoice",
+                    resource_id=str(header_id),
+                    organization_id=org_id,
+                    compliance_relevant=True,
+                    details={"project_id": project_id, "billing_month": body.billing_month, "version": new_version},
+                )
+
+                return result
 
     except HTTPException:
         raise
@@ -1536,6 +1552,7 @@ async def get_meter_billing(
                     JOIN contract c ON c.id = cl.contract_id
                     LEFT JOIN meter m ON m.id = cl.meter_id
                     WHERE c.project_id = %(pid)s AND cl.is_active = true
+                      AND cl.parent_contract_line_id IS NULL
                     ORDER BY cl.contract_line_number
                 """, {"pid": project_id})
                 cl_rows = cur.fetchall()

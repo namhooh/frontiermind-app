@@ -38,6 +38,78 @@ class IdentityChainReport:
     has_ambiguity: bool = False
 
 
+@dataclass
+class DecompositionHealth:
+    """Health of parent-child contract line decompositions."""
+    total_mothers: int = 0
+    healthy: int = 0
+    orphaned: int = 0
+    children_without_meters: int = 0
+    orphaned_mother_ids: List[int] = field(default_factory=list)
+    orphaned_mother_details: List[Dict[str, Any]] = field(default_factory=list)
+
+
+def compute_decomposition_health(
+    fm_contract_lines: List[Dict[str, Any]],
+    max_orphan_details: int = 20,
+) -> DecompositionHealth:
+    """Check that every mother line has at least one child with a meter.
+
+    Mother lines are identified as: external_line_id IS NOT NULL,
+    meter_id IS NULL, parent_contract_line_id IS NULL, is_active = True.
+
+    A mother is "healthy" if it has >= 1 active child (via parent_contract_line_id)
+    with meter_id IS NOT NULL. Otherwise it is "orphaned" — meaning it exists
+    in FM but has no metered children to decompose billing into.
+
+    Operates entirely on the fm_contract_lines list (no DB queries).
+    """
+    health = DecompositionHealth()
+
+    # Build children lookup: parent_contract_line_id -> [child lines]
+    children_by_parent: Dict[int, List[Dict[str, Any]]] = {}
+    for cl in fm_contract_lines:
+        parent_id = cl.get("parent_contract_line_id")
+        if parent_id is not None:
+            children_by_parent.setdefault(parent_id, []).append(cl)
+
+    # Identify mother lines
+    for cl in fm_contract_lines:
+        if (
+            cl.get("external_line_id")
+            and cl.get("meter_id") is None
+            and cl.get("parent_contract_line_id") is None
+            and cl.get("is_active")
+        ):
+            health.total_mothers += 1
+            mother_id = cl.get("id")
+            children = children_by_parent.get(mother_id, [])
+
+            children_with_meter = [
+                c for c in children if c.get("meter_id") is not None
+            ]
+            children_missing_meter = [
+                c for c in children if c.get("meter_id") is None
+            ]
+            health.children_without_meters += len(children_missing_meter)
+
+            if children_with_meter:
+                health.healthy += 1
+            else:
+                health.orphaned += 1
+                health.orphaned_mother_ids.append(mother_id)
+                if len(health.orphaned_mother_details) < max_orphan_details:
+                    health.orphaned_mother_details.append({
+                        "id": mother_id,
+                        "external_line_id": cl.get("external_line_id"),
+                        "contract_id": cl.get("contract_id"),
+                        "total_children": len(children),
+                        "children_with_meter": 0,
+                    })
+
+    return health
+
+
 def compute_customer_coverage(
     sage_customers: List[Dict[str, Any]],
     fm_projects: Dict[str, Any],
@@ -156,13 +228,19 @@ def compute_contract_line_coverage(
     fm_contract_lines: List[Dict[str, Any]],
     max_unmatched: int = 20,
 ) -> LayerCoverage:
-    """Layer 3: CONTRACT_LINE_UNIQUE_ID → contract_line.external_line_id."""
+    """Layer 3: CONTRACT_LINE_UNIQUE_ID → contract_line.external_line_id.
+
+    Mother lines (parent_contract_line_id IS NULL, meter_id IS NULL) now have
+    external_line_id set directly, so direct matching covers site-level lines
+    without needing a separate decomposition lookup.
+    """
     layer = LayerCoverage(
         layer_name="contract_line_to_external_line_id",
         source_key="CONTRACT_LINE_UNIQUE_ID",
         target_key="contract_line.external_line_id",
     )
 
+    # Direct matches: external_line_id on contract_line
     fm_line_ids = {
         (cl.get("external_line_id") or "").strip()
         for cl in fm_contract_lines

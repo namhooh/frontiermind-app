@@ -225,6 +225,7 @@ Verifies identity chain coverage at each layer of the SAGE → FM mapping.
 | `test_sage_customer_exclusions_not_in_fm` | 1 | Validates exclusion list correctness (warns if excluded customers appear in FM) | Warning only |
 | `test_contract_number_mapping` | 2 | CONTRACT_NUMBER → contract.external_contract_id. Applies exceptions for PDF-only projects. | Coverage >= 0.50 (with real data) |
 | `test_contract_line_mapping` | 3 | CONTRACT_LINE_UNIQUE_ID → contract_line.external_line_id. | Coverage >= 0.05 |
+| `test_parent_child_decomposition_health` | 3+ | Every mother line (site-level, no meter) has >= 1 child with meter_id. Catches silent billing resolver drops. | 0 orphaned |
 | `test_no_ambiguous_contract_mapping` | 4 | No project has > 1 primary contract with external_contract_id set. | 0 ambiguous |
 | `test_billing_contract_determinism` | 4 | Flags projects where billing.py `LIMIT 1` without `ORDER BY` is nondeterministic. | Warning only |
 | `test_identity_chain_report` | All | Aggregates layers 1-3. Reports overall coverage (min across layers). | Overall >= 0.05 |
@@ -242,7 +243,7 @@ Tests data transformation accuracy, resolver outcomes, semantic classification, 
 | `test_completeness` | FM has readings for expected unique {CONTRACT_LINE_UNIQUE_ID, BILL_DATE} pairs from SAGE. | Completeness >= 0.80 (bronze) |
 | `test_value_accuracy_post_transform` | CBEBillingAdapter roundtrip: validate() + transform() preserves SAGE values for UTILIZED_READING, OPENING_READING, CLOSING_READING, DISCOUNT_READING, SOURCED_ENERGY. | Accuracy >= 0.99 |
 | `test_semantic_classification_accuracy` | Energy category assignment matches ontology product classification. **Detects the N/A misclassification bug.** | Warning with misclassification count |
-| `test_resolver_unresolved_distribution` | Runs BillingResolver on SAGE data, categorizes unresolved FK reasons (billing_period_id, contract_line_id, meter_id). | Warning with distribution |
+| `test_resolver_unresolved_distribution` | Runs BillingResolver on SAGE data, categorizes unresolved FK reasons. With real SAGE data (`SAGE_DATA_DIR`), asserts contract_line_id unresolved rate <= 20%. | Warning + conditional assert |
 | `test_dedup_key_correctness` | Dedup uses full composite key (organization_id, meter_id, billing_period_id, contract_line_id), not just (meter_id, billing_period_id). | 0 duplicates |
 | `test_contract_line_energy_category_populated` | Active contract_lines have non-null energy_category. | Warning if missing |
 
@@ -380,6 +381,7 @@ Measures coverage at each layer of the SAGE → FM identity chain.
 | `compute_contract_coverage(sage, fm_contracts, ontology, exceptions)` | 2 | `LayerCoverage` |
 | `compute_contract_line_coverage(sage, fm_lines)` | 3 | `LayerCoverage` |
 | `compute_meter_reading_coverage(sage, fm_aggregates)` | 4 | `LayerCoverage` |
+| `compute_decomposition_health(fm_lines)` | 3+ | `DecompositionHealth` (mothers, healthy, orphaned) |
 | `detect_ambiguous_mappings(fm_contracts)` | — | `dict[project_id, count]` |
 | `build_identity_chain_report(layers)` | All | `IdentityChainReport` (overall = min coverage) |
 
@@ -437,7 +439,7 @@ contract:
 contract_line:
   sage_field: CONTRACT_LINE_UNIQUE_ID
   fm_field: contract_line.external_line_id
-  cardinality: one_to_one
+  cardinality: one_to_one_or_one_to_many_via_parent  # See "Parent-Child Contract Line Pattern"
 
 meter_reading:
   sage_field: METER_READING_UNIQUE_ID
@@ -487,8 +489,9 @@ Known deviations that should not cause test failures. Each has a scope, descript
 |----|-------|-------------|--------|
 | EXC-001 | contract mapping | ABI01, BNT01, ZO01 have no SAGE contracts (PDF-only projects) | Permanent |
 | EXC-002 | currency validation | 5 currency mismatches (SAGE=USD, FM=local) are domain differences | 2026-06-01 |
-| EXC-003 | contract coverage | Migration 047 excludes OM contracts (intentional scope) | migration 048 |
-| EXC-004 | ingestion accuracy | cbe_billing_adapter N/A classification includes non-energy products | Code fix required before 048 |
+| EXC-003 | contract coverage | Migration 047 excludes OM contracts (intentional scope) | Next onboarding migration |
+| EXC-004 | ingestion accuracy | cbe_billing_adapter N/A classification includes non-energy products | Code fix required before next migration |
+| EXC-005 | decomposition health | MOH01 site-level available energy line was missing before 047-B (resolved) | Permanent (historical) |
 
 Usage in test code:
 
@@ -498,6 +501,31 @@ from evals.conftest import load_exceptions
 exceptions = load_exceptions("contract mapping", exceptions_registry)
 # Returns list of exception dicts for the given scope
 ```
+
+---
+
+## Parent-Child Contract Line Pattern
+
+Some SAGE `CONTRACT_LINE_UNIQUE_ID` values represent **site-level** lines that span multiple physical meters (e.g., MOH01 available energy). In FrontierMind, these map to a **mother line** that decomposes into per-meter children:
+
+```
+SAGE: CONTRACT_LINE_UNIQUE_ID = 11481428495164935368 (site-level available energy)
+  │
+  └─► FM mother line: external_line_id = '11481428495164935368', meter_id = NULL
+       ├─► Child line 1: parent_contract_line_id = <mother.id>, meter_id = 101
+       ├─► Child line 2: parent_contract_line_id = <mother.id>, meter_id = 102
+       └─► Child line N: parent_contract_line_id = <mother.id>, meter_id = N
+```
+
+**Why Layer 3 alone is insufficient**: `compute_contract_line_coverage()` checks that the SAGE line exists in FM (set intersection on `external_line_id`). But a mother line can exist in FM with no children — Layer 3 says "matched" while the billing resolver silently drops every record because Pass 2 finds no metered children.
+
+**How `test_parent_child_decomposition_health` fills the gap**: It checks the structural integrity *within* FM — every mother line must have at least one active child with `meter_id IS NOT NULL`. This catches:
+
+- Mother lines inserted by migration but missing child decomposition
+- Children that exist but lack `meter_id` assignment
+- Forward regressions if child lines are accidentally deactivated
+
+**Resolver-side guard**: `test_resolver_unresolved_distribution` now asserts (with real SAGE data) that `contract_line_id` isn't the dominant unresolved FK. This catches the gap from the other direction — even if the structural check passes, the resolver assertion catches cases where the FK lookup itself fails at scale.
 
 ---
 

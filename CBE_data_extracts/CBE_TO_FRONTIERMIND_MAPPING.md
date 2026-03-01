@@ -4,13 +4,16 @@ This document maps CBE's data architecture to FrontierMind's canonical schema an
 
 **Sources:** AM Onboarding Template (Excel), PPA Contract PDFs, Utility Invoices (GRP — Grid Reference Price), Snowflake data warehouse, Operations Plant Performance Workbook, Operating Revenue Masterfile.
 
-**Schema version:** v10.9 (migration 046)
+**Schema version:** v10.11 (migration 049)
 
 **Companion documentation:**
 - [`contract-digitization/docs/IMPLEMENTATION_GUIDE.md`](../contract-digitization/docs/IMPLEMENTATION_GUIDE.md) — Full contract digitization pipeline (OCR, PII, clause extraction, ontology)
 - [`contract-digitization/docs/POWER_PURCHASE_ONTOLOGY_FRAMEWORK.md`](../contract-digitization/docs/POWER_PURCHASE_ONTOLOGY_FRAMEWORK.md) — Ontology concepts, clause categories, relationship types
 - [`database/scripts/project-onboarding/audits/`](../database/scripts/project-onboarding/audits/) — Per-project onboarding audit trail
 - [`database/migrations/046_populate_portfolio_base_data.sql`](../database/migrations/046_populate_portfolio_base_data.sql) — Full portfolio population (Section 17)
+- [`database/migrations/047_populate_sage_contract_ids.sql`](../database/migrations/047_populate_sage_contract_ids.sql) — SAGE contract IDs, payment terms, end dates (Section 18) + parent-child contract line hierarchy (Section 19)
+- [`database/migrations/049_pilot_project_data_population.sql`](../database/migrations/049_pilot_project_data_population.sql) — Pilot data: contract lines, tariffs, meter aggregates for KAS01, NBL01, LOI01 (Section 20)
+- [`contract-digitization/docs/DATA_POPULATION_WORKFLOW.md`](../contract-digitization/docs/DATA_POPULATION_WORKFLOW.md) — End-to-end data population workflow
 
 ---
 
@@ -674,7 +677,7 @@ Migration 041. Bridge between CBE Snowflake contract line data and the FrontierM
 - `metered` → `meter_aggregate.energy_kwh`
 - `available` → `meter_aggregate.available_energy_kwh`
 
-**MOH01 seed data** (contract_id=7, 8 lines): 5 metered lines (PPL1, PPL2, Bottles, BBM1, BBM2 at line codes 4000-8000) + 3 available energy lines (PPL1, PPL2, BBM1 at line codes 4001, 5001, 7001).
+**MOH01 seed data** (contract_id=7, 12 lines): 5 metered lines (PPL1, PPL2, Bottles, BBM1, BBM2 at line codes 4000-8000) + 1 mother available energy line (line 1000, site-level, `meter_id = NULL`, `external_line_id = '11481428495164935368'`) + 5 child available energy lines (PPL1, PPL2, Bottles, BBM1, BBM2 at line codes 4001, 5001, 6001, 7001, 8001, linked via `parent_contract_line_id`) + 1 test energy line (3000). See Section 19 for the parent-child contract line hierarchy pattern.
 
 ---
 
@@ -1888,3 +1891,358 @@ Primary contracts have `parent_contract_id = NULL`. Ancillary documents referenc
 | `python-backend/api/billing.py` (~line 264) | Added `AND c.parent_contract_id IS NULL` to contract JOIN | Prevent billing from picking ancillary doc |
 | `python-backend/api/billing.py` (~line 27-40) | Added 8 country codes to `_COUNTRY_NAME_TO_CODE`: EG, MG, SL, SO, MZ, ZW, CD, RW | `_country_to_code()` now resolves all portfolio countries |
 | `python-backend/api/entities.py` (~line 728) | Changed ORDER BY to `c.parent_contract_id NULLS FIRST, c.effective_date` | Ensure `contracts[0]` is always the primary contract |
+
+---
+
+## 18. SAGE ERP Contract Number Mapping (Migration 047, Part A)
+
+**Migration:** `database/migrations/047_populate_sage_contract_ids.sql` (Part A)
+
+**Source:** `CBE_data_extracts/Data Extracts/FrontierMind Extracts_dim_finance_contract.csv` — SAGE ERP finance contract dimension extract with SCD Type 2 versioning. Only `DIM_CURRENT_RECORD=1` rows used.
+
+### Purpose
+
+Cross-references SAGE ERP contract records with FrontierMind's `contract` table to populate three fields that are critical for invoice verification:
+
+| FM Column | SAGE Source Column | Purpose |
+|---|---|---|
+| `contract.external_contract_id` | `CONTRACT_NUMBER` | SAGE contract identifier (e.g., `CONKEN00-2023-00009`); displayed as "Contract ID" on Overview tab |
+| `contract.payment_terms` | `PAYMENT_TERMS` | Payment term code (e.g., `30NET`, `90EOM`); determines invoice due dates |
+| `contract.end_date` | `END_DATE` | Contract expiration date; used for contract validity checks |
+
+### SAGE Contract Number Pattern
+
+Format: `CON{FACILITY}-{YEAR}-{SEQ}`
+
+| Component | Description | Example |
+|---|---|---|
+| `CON` | Fixed prefix | — |
+| `{FACILITY}` | CBE legal entity facility code | `KEN00`, `GHA00`, `CBCH0`, `MAD00` |
+| `{YEAR}` | Year contract was created in SAGE | `2021`, `2023`, `2024` |
+| `{SEQ}` | 5-digit sequential ID within facility/year | `00001`, `00013` |
+
+### Complete Mapping: project.sage_id -> SAGE Contract
+
+| FM sage_id | SAGE Contract Number | SAGE Customer | SAGE Facility | Category | Payment Terms | Start Date | End Date | Active |
+|---|---|---|---|---|---|---|---|---|
+| GC01 | CONCBCH0-2021-00001 | GC001 | CBCH0 | KWH | 30EOM | 2021-01-01 | 2030-02-28 | 1 |
+| IVL01 | CONEGY00-2023-00001 | IVL01 | EGY00 | KWH | 30NET | 2023-10-01 | 2048-08-30 | 1 |
+| UGL01 | CONGHA00-2021-00001 | UGL01 | GHA00 | KWH | 90NET | 2021-01-01 | 2035-12-31 | 1 |
+| KAS01 | CONGHA00-2021-00002 | KAS01 | GHA00 | KWH | 30EOM | 2021-01-01 | 2030-02-28 | 1 |
+| GBL01 | CONGHA00-2021-00004 | GBL01 | GHA00 | KWH | 60NET | 2021-03-01 | 2047-05-31 | 1 |
+| MOH01 | CONGHA00-2025-00005 | MOH01 | GHA00 | KWH | 30NET | 2025-08-15 | 2045-12-31 | 1 |
+| UTK01 | CONKEN00-2021-00001 | UTK01 | KEN00 | KWH | 90EOM | 2021-04-01 | 2036-06-30 | 1 |
+| LOI01 | CONKEN00-2021-00002 | LOI01 | KEN00 | KWH | 30EOM | 2021-04-01 | 2037-05-31 | 1 |
+| XF-AB | CONKEN00-2021-00003 | XFAB | KEN00 | KWH | 30EOM | 2021-04-01 | 2047-05-31 | 1 |
+| TBM01 | CONKEN00-2023-00007 | TBM01 | KEN00 | KWH | 30NET | 2023-02-01 | 2042-02-01 | 1 |
+| AR01 | CONKEN00-2023-00008 | AR01 | KEN00 | RENTAL | 30NET | 2023-11-01 | 2035-11-01 | 1 |
+| MB01 | CONKEN00-2023-00009 | MB01 | KEN00 | KWH | 30NET | 2023-11-01 | 2044-12-31 | 1 |
+| NC02 | CONKEN00-2023-00010 | NC02 | KEN00 | KWH | 30NET | 2023-11-01 | 2043-11-01 | 1 |
+| MF01 | CONKEN00-2023-00011 | MF01 | KEN00 | KWH | 30NET | 2023-11-01 | 2043-11-01 | 1 |
+| MP02 | CONKEN00-2024-00012 | MP02 | KEN00 | KWH | 30NET | 2024-02-01 | 2044-02-29 | 1 |
+| NC03 | CONKEN00-2024-00013 | NC03 | KEN00 | KWH | 30NET | 2024-03-01 | 2044-02-29 | 1 |
+| MP01 | CONKEN00-2024-00014 | MP01 | KEN00 | KWH | 30NET | 2024-02-01 | 2044-03-31 | 1 |
+| AMP01 | CONKEN00-2025-00013 | AMP01 | KEN00 | KWH | 30EOM | 2025-01-01 | 2032-03-31 | 1 |
+| UNSOS | CONKUBE0-2024-00001 | UNSOS | KUBE0 | KWH | 30NET | 2024-03-01 | 2028-12-31 | 1 |
+| QMM01 | CONMAD00-2023-00001 | QMM01 | MAD00 | KWH | 75EOM | 2023-02-01 | 2043-05-03 | 1 |
+| ERG | CONMAD02-2023-00001 | ERG | MAD02 | KWH | 30NET | 2023-11-01 | 2043-11-13 | 1 |
+| TWG01 | CONMOZ00-2023-00003 | TWG | MOZ00 | RENTAL | 30EOM | 2023-11-01 | 2033-11-01 | 1 |
+| JAB01 | CONNIG00-2021-00001 | JAB01 | NIG00 | KWH | 30EOM | 2021-01-01 | 2033-02-28 | 1 |
+| NBL01 | CONNIG00-2021-00002 | NBL01 | NIG00 | KWH | 60NET | 2021-02-01 | 2036-03-31 | 1 |
+| NBL02 | CONNIG00-2023-00003 | NBL02 | NIG00 | KWH | 60NET | 2023-02-01 | 2038-03-01 | 1 |
+| MIR01 | CONSLL02-2023-00002 | MIR01 | SLL02 | KWH | 30NET | 2022-10-01 | 2029-10-01 | 1 |
+| CAL01 | CONZIM00-2025-00002 | CAL01 | ZIM00 | KWH | 30NET | 2025-04-01 | 2041-12-31 | 1 |
+
+### XFlora Sub-Contract Mapping
+
+SAGE has 4 separate contracts for XFlora sub-farms, all under KEN00 facility. FrontierMind consolidates these into a single project `XF-AB` with `CONKEN00-2021-00003` (XFAB) as the primary `external_contract_id`:
+
+| SAGE Customer | SAGE Contract | FM Project | Notes |
+|---|---|---|---|
+| XFAB | CONKEN00-2021-00003 | XF-AB | Primary — used as `external_contract_id` |
+| XFBV | CONKEN00-2021-00004 | XF-AB | Sub-contract (Bloom Valley) |
+| XFL01 | CONKEN00-2021-00005 | XF-AB | Sub-contract (Xpressions Flora) |
+| XFSS | CONKEN00-2021-00006 | XF-AB | Sub-contract (Sojanmi Spring) |
+
+All 4 SAGE contracts share the same terms (30EOM) and end date (2047-05-31 for KEN00 records). The sub-contract numbers are stored in `extraction_metadata.sage_sub_contracts` for audit purposes.
+
+### SAGE ID Mismatches
+
+| FM sage_id | SAGE CUSTOMER_NUMBER | Resolution |
+|---|---|---|
+| GC01 | GC001 | FM normalized to GC01; original tracked in `extraction_metadata.source_sage_customer_id` |
+| TWG01 | TWG | FM uses TWG01 for consistency; SAGE has TWG. Mapping via `project.sage_id` handles this. |
+
+### Contracts Not in SAGE (3 FM projects)
+
+| FM sage_id | FM contract_id | Reason |
+|---|---|---|
+| ABI01 | 42 | No SAGE contract record — project sourced from contract PDFs only |
+| BNT01 | 43 | No SAGE contract record — project sourced from contract PDFs only |
+| ZO01 | 56 | SAGE `ZL01` contracts reassigned to `ZL02` entity; ZO01 has ESA from PDF |
+
+### Payment Terms Codes
+
+SAGE payment term codes encode both the number of days and the calculation basis:
+
+| Code | Days | Basis | Meaning |
+|---|---|---|---|
+| 30NET | 30 | Net | Due 30 days from invoice date |
+| 30EOM | 30 | End of Month | Due 30 days from end of invoice month |
+| 60NET | 60 | Net | Due 60 days from invoice date |
+| 75EOM | 75 | End of Month | Due 75 days from end of invoice month |
+| 90NET | 90 | Net | Due 90 days from invoice date |
+| 90EOM | 90 | End of Month | Due 90 days from end of invoice month |
+
+These are stored as raw VARCHAR in `contract.payment_terms`. Parsing into structured attributes (days, is_eom) is deferred until the billing engine consumes payment terms for due-date calculation.
+
+### Verification Query
+
+```sql
+SELECT p.sage_id, c.external_contract_id, c.payment_terms, c.end_date
+FROM contract c
+JOIN project p ON p.id = c.project_id
+WHERE c.parent_contract_id IS NULL
+  AND c.organization_id = 1
+ORDER BY p.sage_id;
+-- Expected: 27 rows with non-NULL external_contract_id, payment_terms, end_date
+-- 3 rows (ABI01, BNT01, ZO01) with all NULL
+```
+
+## 19. Parent-Child Contract Line Hierarchy (Migration 047, Part B)
+
+### Problem
+
+CBE models certain contract lines at the **site level** — a single line covers all meters for an energy category. FrontierMind's billing engine operates **per-meter**, requiring each meter to have its own `contract_line` row. This creates a 1-to-many mapping that the standard identity chain (Layer 3: `CONTRACT_LINE_UNIQUE_ID → contract_line.external_line_id`) cannot represent with a simple 1-to-1 match.
+
+**Example — MOH01 Available Energy:**
+
+| System | Line | Description | Scope | parent_contract_line_id |
+|--------|------|-------------|-------|------------------------|
+| **CBE** | 1000 | Available Energy (EAvailable) | Site-level, all meters | — |
+| **FrontierMind** | 1000 | Available Energy (EAvailable) - Site Level | Mother (meter_id NULL) | NULL |
+| **FrontierMind** | 4001 | Available Energy (EAvailable) - PPL1 | Per-meter (PPL1) | → 1000 |
+| **FrontierMind** | 5001 | Available Energy (EAvailable) - PPL2 | Per-meter (PPL2) | → 1000 |
+| **FrontierMind** | 6001 | Available Energy (EAvailable) - Bottles | Per-meter (Bottles) | → 1000 |
+| **FrontierMind** | 7001 | Available Energy (EAvailable) - BBM1 | Per-meter (BBM1) | → 1000 |
+| **FrontierMind** | 8001 | Available Energy (EAvailable) - BBM2 | Per-meter (BBM2) | → 1000 |
+
+CBE `CONTRACT_LINE_UNIQUE_ID = '11481428495164935368'` is stored as `external_line_id` on the mother line 1000. Children link via `parent_contract_line_id`.
+
+### Solution: `parent_contract_line_id` Self-Referential FK
+
+Migration 047 (Part B) adds a self-referential FK to `contract_line`, mirroring the existing `contract.parent_contract_id` pattern:
+
+```sql
+ALTER TABLE contract_line
+    ADD COLUMN parent_contract_line_id BIGINT REFERENCES contract_line(id);
+
+-- No self-parent
+ALTER TABLE contract_line
+    ADD CONSTRAINT chk_contract_line_no_self_parent
+        CHECK (parent_contract_line_id <> id);
+
+-- Trigger: parent must belong to same contract
+CREATE TRIGGER trg_contract_line_same_contract_parent
+    BEFORE INSERT OR UPDATE OF parent_contract_line_id ON contract_line
+    FOR EACH ROW EXECUTE FUNCTION contract_line_same_contract_parent();
+```
+
+**Mother line properties:**
+- `meter_id = NULL` (site-level, no specific meter)
+- `external_line_id` set to CBE `CONTRACT_LINE_UNIQUE_ID` (for Layer 3 traceability)
+- `parent_contract_line_id = NULL` (it IS the parent)
+- Excluded from invoice generation via `AND cl.parent_contract_line_id IS NULL` filters
+
+### How the Billing Resolver Uses It
+
+`billing_resolver._bulk_resolve_contract_lines()` does **two-pass resolution**:
+
+1. **Pass 1 — Direct match:** `contract_line.external_line_id = ANY(ids)` (existing 1-to-1 logic)
+2. **Pass 2 — Parent-child fallback:** For matched lines with `meter_id IS NULL` (mother lines), query children via `parent_contract_line_id` to find the first active child with a valid `meter_id`
+
+The parent-child fallback returns `DISTINCT ON (parent_contract_line_id)` — the first child line. Downstream meter routing (via the billing record's `FACILITY` / `device_id` field) assigns the correct meter.
+
+### How the Eval Harness Handles It
+
+`mapping_metrics.compute_contract_line_coverage()` uses direct `external_line_id` matching only. The mother line has `external_line_id` set, so Layer 3 coverage works without any special decomposition logic.
+
+`test_billing_readiness.test_contract_line_meter_fk()` excludes mother lines (where `parent_contract_line_id IS None`) from the `meter_id` assertion, since mother lines legitimately have `meter_id = NULL`.
+
+### CBE Fields NOT Mapped to `contract_line`
+
+The following CBE fields from `dim_finance_contract_line` are intentionally excluded:
+
+| CBE Field | Reason | Where It Belongs |
+|-----------|--------|-----------------|
+| `PRICE_ADJUST_DATE` | Tariff escalation trigger date (1753-01-01 = SQL Server NULL) | `clause_tariff.logic_parameters.escalation_start_date` |
+| `IND_USE_CPI_INFLATION` | Escalation rule indicator | `clause_tariff.logic_parameters.escalation_rules` |
+| `DIM_START_DATE` | SCD2 audit metadata (not a business date) | Not used — CBE internal |
+| `DIM_END_DATE` | SCD2 audit metadata (not a business date) | Not used — CBE internal |
+| `EXTRACTED_AT` | SCD2 extraction timestamp | Not used — CBE internal |
+| `UPDATED_AT` / `UPDATED_BY` | SCD2 audit fields | Not used — CBE internal |
+| `DIM_CURRENT_RECORD` | SCD2 current-version flag | Not used — FrontierMind uses `is_active` |
+
+Use `EFFECTIVE_START_DATE` and `EFFECTIVE_END_DATE` (the business dates) for `contract_line.effective_start_date` / `effective_end_date`.
+
+### When to Apply This Pattern
+
+Apply parent-child contract line hierarchy when **all** of these conditions are true:
+
+1. CBE has a **site-level** contract line (no meter association, or `METERED_AVAILABLE = 'N/A'`)
+2. FrontierMind has **per-meter** lines for the same energy category
+3. The CBE line's `CONTRACT_LINE_UNIQUE_ID` does not already match a direct `external_line_id`
+
+**Steps for new projects:**
+1. During onboarding, identify site-level CBE lines (typically line 1000 for available, line 2000 for metered)
+2. Insert a mother `contract_line` with the CBE `CONTRACT_LINE_UNIQUE_ID` as `external_line_id`, `meter_id = NULL`
+3. Create per-meter child lines as usual (line X001 per meter)
+4. Set `parent_contract_line_id` on each child to the mother line's `id`
+5. Verify with the Layer 3 coverage check
+
+### Verification Query
+
+```sql
+-- Check parent-child hierarchy for a project
+SELECT
+    cl.contract_line_number,
+    cl.product_desc,
+    cl.parent_contract_line_id,
+    cl.meter_id,
+    cl.external_line_id,
+    m.name AS meter_name
+FROM contract_line cl
+JOIN contract c ON c.id = cl.contract_id
+LEFT JOIN meter m ON m.id = cl.meter_id
+WHERE c.external_contract_id = 'CONGHA00-2025-00005'
+  AND cl.energy_category = 'available'
+ORDER BY cl.contract_line_number;
+-- Expected: line 1000 has NULL parent, NULL meter, external_line_id set
+-- Lines 4001-8001 have parent_contract_line_id pointing to line 1000's id
+```
+
+---
+
+## 20. Pilot Project Data Population (Migration 049)
+
+Migration 049 populates contract_line, clause_tariff, meter_aggregate, and contract_billing_product for 3 pilot projects, establishing the end-to-end data population pattern for the remaining 28 projects.
+
+### 20.1 Pilot Projects
+
+| Project | Sage ID | Country | Currency | Tariff Type | Why Selected |
+|---------|---------|---------|----------|-------------|-------------|
+| Kasapreko | KAS01 | Ghana | GHS | Floating grid | Same country as MOH01, validates Ghana pattern |
+| Nigerian Breweries Ibadan | NBL01 | Nigeria | NGN | Floating generator | Different tariff type, different currency |
+| Loisaba | LOI01 | Kenya | USD | Fixed solar + BESS | Fixed tariff, different geography, non-energy product (BESS) |
+
+### 20.2 Contract Line Mapping
+
+**Source:** `dim_finance_contract_line.csv` (DIM_CURRENT_RECORD=1)
+
+| CBE Field | FrontierMind Field | Notes |
+|-----------|--------------------|-------|
+| CONTRACT_LINE_UNIQUE_ID | `contract_line.external_line_id` | Unique identifier from SAGE |
+| CONTRACT_LINE | `contract_line.contract_line_number` | Integer line number (1000, 2000, etc.) |
+| PRODUCT_DESC | `contract_line.product_desc` | Free-text product description |
+| METERED_AVAILABLE | `contract_line.energy_category` | metered→metered, available→available, N/A→test |
+| ACTIVE_STATUS | `contract_line.is_active` | 1→true, 0→false |
+| EFFECTIVE_START_DATE | `contract_line.effective_start_date` | |
+| EFFECTIVE_END_DATE | `contract_line.effective_end_date` | |
+
+**Energy Category Classification (EXC-004 fix):**
+
+The `METERED_AVAILABLE` field alone is insufficient for classification. N/A records must be cross-referenced against product descriptions using the ontology (`sage_to_fm_ontology.yaml` operational.product_classification):
+
+- `METERED_AVAILABLE = metered` → `energy_category = metered` (energy products)
+- `METERED_AVAILABLE = available` → `energy_category = available` (energy products)
+- `METERED_AVAILABLE = N/A` + product matches non-energy pattern → `energy_category = test`
+- `METERED_AVAILABLE = N/A` + no pattern match → `energy_category = test` (fallback)
+
+Non-energy patterns: minimum offtake, bess capacity, o&m service, equipment lease, diesel, fixed monthly rental, esa lease, penalty, correction, inverter energy, early operating.
+
+### 20.3 Pilot Contract Line Details
+
+**KAS01 (4 lines):**
+
+| Line | Product | METERED_AVAILABLE | energy_category | Active | Notes |
+|------|---------|-------------------|-----------------|--------|-------|
+| 1000 | Metered Energy (EMetered) - Phase 1 | metered | metered | Yes | Original phase |
+| 2000 | Available Energy (EAvailable) Combined | available | available | Yes | Site-level available |
+| 3000 | Inverter Energy - Phase 2 | N/A | test | No | Replaced by line 4000 |
+| 4000 | Metered Energy (EMetered) - Phase 2 | metered | metered | Yes | From Feb 2025 |
+
+**NBL01 (8 lines):**
+
+| Line | Product | METERED_AVAILABLE | energy_category | Active | Notes |
+|------|---------|-------------------|-----------------|--------|-------|
+| 1000 | Grid (EMetered) | metered | metered | No | Legacy grid |
+| 3000 | Grid (EAvailable) | available | available | No | Legacy grid |
+| 4000 | Grid (EMetered) | metered | metered | No | Very short lived (Feb-Mar 2021) |
+| 5000 | Grid (EAvailable) | available | available | No | Very short lived |
+| 6000 | Generator (EMetered) Phase 1 | metered | metered | Yes | Active generator |
+| 7000 | Generator (EAvailable) Combined Facility | available | available | Yes | Active available |
+| 9000 | Early Operating Energy Phase 2 | N/A | test | No | Non-energy, pre-COD |
+| 10000 | Generator (EMetered) Phase 2 | metered | metered | Yes | From Jan 2025 |
+
+**LOI01 (3 lines on active contract CONKEN00-2021-00002):**
+
+| Line | Product | METERED_AVAILABLE | energy_category | Active | Notes |
+|------|---------|-------------------|-----------------|--------|-------|
+| 1000 | Loisaba HQ (EMetered) | metered | metered | Yes | CPI escalation |
+| 2000 | Loisaba Camp (EMetered) | metered | metered | Yes | CPI escalation |
+| 3000 | BESS Capacity Charge | N/A | test | Yes | Non-energy, monthly capacity fee |
+
+LOI01 also has a legacy contract (CONCBEH0-2021-00002, ACTIVE=0) with 3 lines — excluded from migration.
+
+### 20.4 Meter Aggregate Mapping
+
+**Source:** `meter readings.csv`
+
+| CBE Field | FrontierMind Field | Notes |
+|-----------|--------------------|-------|
+| BILL_DATE | `billing_period_id` (via end_date join) | e.g. 2025/01/31 → billing_period id 14 |
+| CONTRACT_LINE_UNIQUE_ID | `contract_line_id` (via external_line_id join) | FK to contract_line |
+| OPENING_READING | `meter_aggregate.opening_reading` | |
+| CLOSING_READING | `meter_aggregate.closing_reading` | |
+| UTILIZED_READING | `meter_aggregate.utilized_reading` + `total_production` | |
+| DISCOUNT_READING | `meter_aggregate.discount_reading` | LOI01 HQ has non-zero values in Apr-May 2025 |
+| SOURCED_ENERGY | `meter_aggregate.sourced_energy` | NBL01 Phase 2 has non-zero values |
+| METER_READING_UNIQUE_ID | `source_metadata->>'external_reading_id'` | CBE traceability |
+
+**Energy routing based on contract_line.energy_category:**
+- `metered` lines → `energy_kwh = utilized_reading`
+- `available` lines → `available_energy_kwh = utilized_reading`
+- `test` lines → both NULL (total_production still set)
+
+### 20.5 Coverage Summary
+
+| Table | Before 049 | After 049 | Delta |
+|-------|-----------|----------|-------|
+| contract_line | 12 (MOH01) | 27 | +15 |
+| clause_tariff | 2 (MOH01) | 6 | +4 |
+| meter_aggregate | 10 (MOH01) | 104 | +94 |
+| contract_billing_product | varies | +8 | +8 |
+
+### 20.6 Known Gaps (Post-Pilot)
+
+1. **meter_id = NULL** on all pilot contract_lines and meter_aggregates — meters not yet available from source data
+2. **clause_tariff.base_rate = NULL** — populated after PPA parsing (`batch_parse_ppas.py`)
+3. **No tariff_rate records** — annual rate schedule populated after PPA parsing
+4. **LOI01 BESS line 3000** has no meter readings — capacity charge, not metered energy
+5. **NBL01 line 7000** has zero readings for some months (May-Jul 2025) — normal for available energy
+
+### Verification
+
+```sql
+-- Count pilot data
+SELECT p.sage_id,
+       COUNT(DISTINCT cl.id) AS contract_lines,
+       COUNT(DISTINCT ma.id) AS meter_aggregates
+FROM project p
+JOIN contract c ON c.project_id = p.id
+LEFT JOIN contract_line cl ON cl.contract_id = c.id
+LEFT JOIN meter_aggregate ma ON ma.contract_line_id = cl.id
+WHERE p.sage_id IN ('KAS01', 'NBL01', 'LOI01')
+GROUP BY p.sage_id;
+-- Expected: KAS01 (4 lines, 36 aggregates), NBL01 (8 lines, 34 aggregates), LOI01 (3 lines, 24 aggregates)
+```

@@ -10,7 +10,7 @@ import logging
 from typing import Optional
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import ValidationError
 
 from middleware.api_key_auth import require_api_key
@@ -22,6 +22,7 @@ from models.onboarding import (
 )
 from db.database import init_connection_pool
 from services.onboarding.onboarding_service import OnboardingError, OnboardingService
+from services.audit_service import log_business_event
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +94,8 @@ async def preview_onboarding(
 
 @router.post("/commit", response_model=OnboardingCommitResponse)
 async def commit_onboarding(
+    http_request: Request,
+    background_tasks: BackgroundTasks,
     request: OnboardingCommitRequest,
     auth: dict = Depends(require_api_key),
 ):
@@ -110,6 +113,16 @@ async def commit_onboarding(
             preview_id=request.preview_id,
             overrides=request.overrides,
         )
+
+        log_business_event(
+            background_tasks, http_request,
+            action="CREATE",
+            resource_type="onboarding",
+            resource_id=str(request.preview_id),
+            organization_id=organization_id,
+            records_affected=getattr(result, "records_created", None),
+        )
+
         return result
     except OnboardingError as e:
         logger.error(f"Commit failed: {e}", exc_info=True)
