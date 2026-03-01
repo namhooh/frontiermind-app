@@ -114,6 +114,7 @@ class ProjectGroupedItem(BaseModel):
     name: str
     external_project_id: Optional[str] = None
     sage_id: Optional[str] = None
+    country: Optional[str] = None
     organization_id: int
     organization_name: str
 
@@ -543,7 +544,7 @@ async def list_projects_grouped() -> ProjectsGroupedResponse:
                 cursor.execute(
                     """
                     SELECT p.id, p.name, p.external_project_id, p.sage_id,
-                           p.organization_id, o.name AS organization_name
+                           p.country, p.organization_id, o.name AS organization_name
                     FROM project p
                     JOIN organization o ON o.id = p.organization_id
                     ORDER BY o.name, p.name
@@ -556,6 +557,7 @@ async def list_projects_grouped() -> ProjectsGroupedResponse:
                         name=row['name'],
                         external_project_id=row.get('external_project_id'),
                         sage_id=row.get('sage_id'),
+                        country=row.get('country'),
                         organization_id=row['organization_id'],
                         organization_name=row['organization_name'],
                     )
@@ -814,7 +816,8 @@ async def get_project_dashboard(
                     contract_lines_data AS (
                         SELECT cl.id, cl.contract_id, cl.billing_product_id,
                                cl.meter_id, m.name AS meter_name,
-                               cl.contract_line_number, cl.energy_category::text AS energy_category
+                               cl.contract_line_number, cl.energy_category::text AS energy_category,
+                               cl.parent_contract_line_id
                         FROM contract_line cl
                         JOIN contract c ON c.id = cl.contract_id
                         LEFT JOIN meter m ON m.id = cl.meter_id

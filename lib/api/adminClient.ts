@@ -84,6 +84,7 @@ export interface ProjectGroupedItem {
   name: string
   external_project_id: string | null
   sage_id: string | null
+  country: string | null
   organization_id: number
   organization_name: string
 }
