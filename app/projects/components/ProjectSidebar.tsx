@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { adminClient, type ProjectGroupedItem } from '@/lib/api/adminClient'
-import { ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
+import { BarChart3, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
 
 // TODO: Replace with value from auth context once user authentication is implemented.
 // Reset to null on logout.
@@ -13,9 +13,10 @@ type SortBy = 'name' | 'sage_id' | 'country'
 interface ProjectSidebarProps {
   selectedProjectId: number | null
   onSelectProject: (id: number) => void
+  onSelectHome?: () => void
 }
 
-export function ProjectSidebar({ selectedProjectId, onSelectProject }: ProjectSidebarProps) {
+export function ProjectSidebar({ selectedProjectId, onSelectProject, onSelectHome }: ProjectSidebarProps) {
   const [projects, setProjects] = useState<ProjectGroupedItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -87,10 +88,13 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject }: ProjectSi
 
   function renderProjectButton(p: ProjectGroupedItem) {
     return (
-      <button
-        type="button"
-        onClick={() => onSelectProject(p.id)}
-        className={`w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
+      <a
+        href={`/projects?id=${p.id}`}
+        onClick={(e) => {
+          e.preventDefault()
+          onSelectProject(p.id)
+        }}
+        className={`block w-full text-left px-3 py-2 rounded-md text-sm transition-colors ${
           selectedProjectId === p.id
             ? 'bg-blue-50 text-blue-700 font-medium'
             : 'text-slate-700 hover:bg-slate-100'
@@ -107,7 +111,7 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject }: ProjectSi
             <span className="truncate">{p.name}</span>
           </span>
         ) : p.name}
-      </button>
+      </a>
     )
   }
 
@@ -133,6 +137,25 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject }: ProjectSi
 
   return (
     <nav>
+      {/* Portfolio Dashboard link */}
+      {onSelectHome && (
+        <>
+          <button
+            type="button"
+            onClick={onSelectHome}
+            className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
+              selectedProjectId === null
+                ? 'bg-blue-700/70 text-white'
+                : 'bg-blue-100 text-slate-700 hover:bg-blue-200'
+            }`}
+          >
+            <BarChart3 className="h-4 w-4 shrink-0" />
+            Portfolio Dashboard
+          </button>
+          <div className="border-b border-slate-200 my-2" />
+        </>
+      )}
+
       <div className="px-3 pb-2 mb-1">
         <div className="flex items-center gap-2">
           <label htmlFor="sort-select" className="text-xs text-slate-500 shrink-0">Sort by</label>

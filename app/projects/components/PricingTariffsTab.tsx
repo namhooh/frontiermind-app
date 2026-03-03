@@ -68,6 +68,10 @@ function normalizeTariffComponent(v: unknown): string | undefined {
   return String(v).replace(/Tarrif/g, 'Tariff')
 }
 
+// Component tariff suffixes / patterns to exclude from display (keep only MAIN tariffs)
+const COMPONENT_SUFFIXES = ['-GRID_BASE', '-DISCOUNTED', '-FLOOR', '-CEILING']
+const COMPONENT_INFIX_RE = /_(Discounted|Floor|Ceiling|Current_Grid)_/
+
 const PAYMENT_TERMS_OPTS = [
   { value: '30EOM', label: '30EOM' },
   { value: '30NET', label: '30NET' },
@@ -1149,21 +1153,36 @@ function GRPSection({
 
       {/* Post-COD GRP Observations */}
       <CollapsibleSection title="Monthly GRP Observations (Post-COD)" defaultOpen={false}>
+          {(() => {
+            // Determine which columns have data across all observations
+            const allObs = [...monthlyObs, ...annualObs]
+            const hasCharges = allObs.some(o => o.total_variable_charges != null)
+            const hasKwh = allObs.some(o => o.total_kwh_invoiced != null)
+            const hasActions = monthlyObs.some(o => o.verification_status === 'pending' || o.verification_status === 'disputed')
+            const hasSource = monthlyObs.some(o => o.source_metadata?.entry_method != null)
+            const visibleColCount = 2 + (hasCharges ? 1 : 0) + (hasKwh ? 1 : 0) + (hasActions ? 1 : 0) + (hasSource ? 1 : 0)
+
+            return (
           <div className="space-y-4">
             {/* Annual GRP Cards */}
             {annualObs.map(obs => {
               const meta = obs.source_metadata?.aggregation as Record<string, unknown> | undefined
+              const cardFields: { label: string; value: string }[] = [
+                { label: 'GRP/kWh', value: grpFormatGRP(obs.calculated_grp_per_kwh) },
+              ]
+              if (hasCharges) cardFields.push({ label: 'Total Charges', value: grpFormatNumber(obs.total_variable_charges) })
+              if (hasKwh) cardFields.push({ label: 'Total kWh', value: grpFormatNumber(obs.total_kwh_invoiced) })
+              cardFields.push({ label: 'Months Included', value: meta?.months_included != null ? String(meta.months_included) : '-' })
               return (
                 <Card key={obs.id}>
                   <CardHeader className="pb-2">
                     <CardTitle className="text-sm font-semibold">Annual GRP &mdash; Operating Year {obs.operating_year}</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <div className="grid grid-cols-4 gap-4 text-sm">
-                      <div><span className="text-slate-500">GRP/kWh</span><p className="font-mono font-semibold">{grpFormatGRP(obs.calculated_grp_per_kwh)}</p></div>
-                      <div><span className="text-slate-500">Total Charges</span><p className="font-mono">{grpFormatNumber(obs.total_variable_charges)}</p></div>
-                      <div><span className="text-slate-500">Total kWh</span><p className="font-mono">{grpFormatNumber(obs.total_kwh_invoiced)}</p></div>
-                      <div><span className="text-slate-500">Months Included</span><p className="font-mono">{meta?.months_included != null ? String(meta.months_included) : '-'}</p></div>
+                    <div className={`grid gap-4 text-sm`} style={{ gridTemplateColumns: `repeat(${cardFields.length}, minmax(0, 1fr))` }}>
+                      {cardFields.map(f => (
+                        <div key={f.label}><span className="text-slate-500">{f.label}</span><p className={`font-mono${f.label === 'GRP/kWh' ? ' font-semibold' : ''}`}>{f.value}</p></div>
+                      ))}
                     </div>
                     <div className="flex items-center gap-2 mt-2">
                       <Badge variant={grpStatusBadge(obs.verification_status)}>{grpStatusLabel(obs.verification_status)}</Badge>
@@ -1186,9 +1205,10 @@ function GRPSection({
                     <tr>
                       <th className="text-left px-4 py-2.5 font-medium">Period</th>
                       <th className="text-right px-4 py-2.5 font-medium">GRP/kWh</th>
-                      <th className="text-right px-4 py-2.5 font-medium">Variable Charges</th>
-                      <th className="text-right px-4 py-2.5 font-medium">kWh Invoiced</th>
-                      <th className="text-right px-4 py-2.5 font-medium">Actions</th>
+                      {hasCharges && <th className="text-right px-4 py-2.5 font-medium">Variable Charges</th>}
+                      {hasKwh && <th className="text-right px-4 py-2.5 font-medium">kWh Invoiced</th>}
+                      {hasSource && <th className="text-right px-4 py-2.5 font-medium">Source</th>}
+                      {hasActions && <th className="text-right px-4 py-2.5 font-medium">Actions</th>}
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
@@ -1196,6 +1216,7 @@ function GRPSection({
                       const verificationLog = (obs.source_metadata?.verification_log as Array<{ status: string; notes: string; timestamp: string }>) ?? []
                       const lastDispute = verificationLog.filter(l => l.status === 'disputed').at(-1)
                       const isDisputed = obs.verification_status === 'disputed'
+                      const entryMethod = obs.source_metadata?.entry_method as string | undefined
                       return (
                         <Fragment key={obs.id}>
                           <tr className={`hover:bg-slate-50${isDisputed ? ' bg-red-50/50' : ''}`}>
@@ -1205,8 +1226,14 @@ function GRPSection({
                               onClick={editMode && !isDisputed ? () => openManualEntryFor(obs) : undefined}
                               title={editMode && !isDisputed ? 'Click to edit' : undefined}
                             >{grpFormatGRP(obs.calculated_grp_per_kwh)}</td>
-                            <td className={`px-4 py-2.5 text-right font-mono${isDisputed ? ' line-through text-slate-400' : ''}`}>{grpFormatNumber(obs.total_variable_charges)}</td>
-                            <td className={`px-4 py-2.5 text-right font-mono${isDisputed ? ' line-through text-slate-400' : ''}`}>{grpFormatNumber(obs.total_kwh_invoiced)}</td>
+                            {hasCharges && <td className={`px-4 py-2.5 text-right font-mono${isDisputed ? ' line-through text-slate-400' : ''}`}>{grpFormatNumber(obs.total_variable_charges)}</td>}
+                            {hasKwh && <td className={`px-4 py-2.5 text-right font-mono${isDisputed ? ' line-through text-slate-400' : ''}`}>{grpFormatNumber(obs.total_kwh_invoiced)}</td>}
+                            {hasSource && (
+                              <td className="px-4 py-2.5 text-right">
+                                <span className="text-xs text-slate-400">{entryMethod === 'excel_import' ? 'Excel' : entryMethod === 'manual' ? 'Manual' : entryMethod === 'invoice_extraction' ? 'Invoice' : entryMethod ?? '-'}</span>
+                              </td>
+                            )}
+                            {hasActions && (
                             <td className="px-4 py-2.5 text-right">
                               {obs.verification_status === 'pending' && (
                                 <div className="flex items-center justify-end gap-1">
@@ -1241,10 +1268,11 @@ function GRPSection({
                                 </div>
                               )}
                             </td>
+                            )}
                           </tr>
                           {isDisputed && lastDispute && (
                             <tr className="bg-red-50/30">
-                              <td colSpan={5} className="px-4 py-2">
+                              <td colSpan={visibleColCount} className="px-4 py-2">
                                 <div className="flex items-start gap-2 text-xs">
                                   <AlertTriangle className="h-3.5 w-3.5 text-red-500 mt-0.5 shrink-0" />
                                   <div>
@@ -1264,6 +1292,8 @@ function GRPSection({
               </div>
             )}
           </div>
+            )
+          })()}
       </CollapsibleSection>
 
       {/* Baseline GRP (Pre-COD) */}
@@ -1517,8 +1547,20 @@ interface PricingTariffsTabProps {
 }
 
 export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonthly = [], grpAnnual = [], grpTokens = [] }: PricingTariffsTabProps) {
-  const { contracts, tariffs, billing_products, rate_periods, monthly_rates, tariff_rates, exchange_rates, lookups } = data
+  const { contracts, tariffs: rawTariffs, billing_products, rate_periods, monthly_rates, tariff_rates, exchange_rates, lookups } = data
   const pid = data.project.id as number
+
+  // Filter out component tariffs — only show consolidated MAIN tariffs (MOH01 pattern).
+  // Excludes legacy multi-tariff rows (GRID_BASE, DISCOUNTED, FLOOR, CEILING suffixes)
+  // and older tariff-bridge component rows (_Discounted_Solar_, _Floor_Solar_, _Current_Grid_).
+  const tariffs = useMemo(() => rawTariffs.filter((t: R) => {
+    const gk = String(t.tariff_group_key ?? '')
+    const lp = (t.logic_parameters ?? {}) as R
+    if (COMPONENT_SUFFIXES.some(s => gk.endsWith(s))) return false
+    if (lp.tariff_component != null) return false
+    if (COMPONENT_INFIX_RE.test(gk)) return false
+    return true
+  }), [rawTariffs])
 
   const [openProducts, setOpenProducts] = useState<Set<unknown>>(new Set())
   const toggleProduct = (id: unknown) =>
@@ -1712,19 +1754,17 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
                                   ) : (() => {
                                     if (isRebasedTariff && periodMonthlyRates.length > 0) {
                                       const latestMr = periodMonthlyRates[0]
-                                      const mrFx = latestMr.exchange_rate != null ? Number(latestMr.exchange_rate) : null
-                                      const mrLocal = latestMr.effective_tariff_local != null ? Number(latestMr.effective_tariff_local) : null
-                                      const latestUsd = mrLocal != null && mrFx ? mrLocal / mrFx : null
-                                      return latestUsd != null ? (
+                                      const latestRate = latestMr.effective_tariff_local != null ? Number(latestMr.effective_tariff_local) : null
+                                      return latestRate != null ? (
                                         <span title={`Latest: ${formatBillingMonth(latestMr.billing_month)}`}>
-                                          {latestUsd.toFixed(6)}
+                                          {latestRate.toFixed(6)}
                                         </span>
                                       ) : str(rp.effective_rate_contract_ccy)
                                     }
                                     return str(rp.effective_rate_contract_ccy)
                                   })()}
                                 </td>
-                                <td className="px-3 py-1.5 text-slate-500 text-xs">{isRebasedTariff && periodMonthlyRates.length > 0 ? str(hardCurrencyCode ?? rp.currency_code) : str(rp.currency_code)}</td>
+                                <td className="px-3 py-1.5 text-slate-500 text-xs">{isRebasedTariff && periodMonthlyRates.length > 0 ? str(billingCurrencyCode ?? rp.currency_code) : str(rp.currency_code)}</td>
                                 <td className="px-3 py-1.5 text-slate-500 text-xs whitespace-pre-line max-w-[160px] break-words">
                                   {editMode && rp.id != null ? (
                                     <EditableCell value={rp.calculation_basis} fieldKey="calculation_basis" entity="rate-periods" entityId={rp.id as number} type="text" editMode onSaved={onSaved} />

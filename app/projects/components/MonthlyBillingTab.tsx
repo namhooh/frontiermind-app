@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Upload, Download, Plus, Loader2, Check, X, ChevronDown, ChevronRight, Maximize2, Minimize2 } from 'lucide-react'
 import { IS_DEMO } from '@/lib/demoMode'
 import { toast } from 'sonner'
@@ -360,14 +360,51 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
       }
     }
 
-    // Sort descending; exclude months before COD if available
+    // Sort descending; exclude months before COD and after current month
     result.sort((a, b) => b.billing_month.localeCompare(a.billing_month))
+    const currentMonth = new Date().toISOString().slice(0, 7) + '-01'
     const codMonth = data?.cod_date?.substring(0, 7)  // "YYYY-MM" or undefined
-    if (codMonth) {
-      return result.filter((r) => r.billing_month >= codMonth)
-    }
-    return result
+    return result.filter((r) => {
+      if (r.billing_month > currentMonth) return false
+      if (codMonth && r.billing_month < codMonth) return false
+      return true
+    })
   }, [data, meterData])
+
+  // Group rows by calendar year (DESC)
+  const yearGroups = useMemo(() => {
+    const map = new Map<string, UnifiedBillingRow[]>()
+    for (const row of unifiedRows) {
+      const year = row.billing_month.substring(0, 4)
+      if (!map.has(year)) map.set(year, [])
+      map.get(year)!.push(row)
+    }
+    // Sort years DESC
+    return [...map.entries()]
+      .sort(([a], [b]) => b.localeCompare(a))
+      .map(([year, rows]) => ({ year, rows }))
+  }, [unifiedRows])
+
+  // Year-group collapse state: most recent year expanded, rest collapsed
+  const [collapsedYears, setCollapsedYears] = useState<Set<string>>(new Set())
+  const yearGroupsInitRef = useRef(false)
+  useEffect(() => {
+    if (!yearGroupsInitRef.current && yearGroups.length > 0) {
+      yearGroupsInitRef.current = true
+      const initial = new Set<string>()
+      yearGroups.slice(1).forEach(g => initial.add(g.year))
+      setCollapsedYears(initial)
+    }
+  }, [yearGroups])
+
+  const toggleYear = useCallback((year: string) => {
+    setCollapsedYears(prev => {
+      const next = new Set(prev)
+      if (next.has(year)) next.delete(year)
+      else next.add(year)
+      return next
+    })
+  }, [])
 
   // Auto-expand the most recent (top) month on initial load
   const autoExpandedRef = useRef(false)
@@ -603,23 +640,73 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
                 </tr>
               )}
 
-              {/* Data rows */}
-              {unifiedRows.map((row) => (
-                <UnifiedRow
-                  key={row.billing_month}
-                  row={row}
-                  products={products}
-                  currency={currency}
-                  hardCurrency={hardCurrency}
-                  showHardCcy={showHardCcy}
-                  isExpanded={expanded.has(row.billing_month)}
-                  onToggle={() => toggleExpand(row.billing_month)}
-                  totalCols={totalCols}
-                  editMode={editMode}
-                  projectId={projectId}
-                  onSaved={fetchData}
-                />
-              ))}
+              {/* Year-grouped data rows */}
+              {yearGroups.map(({ year, rows: yearRows }) => {
+                const isYearCollapsed = collapsedYears.has(year)
+                const yearActual = yearRows.reduce((s, r) => s + (r.actual_kwh ?? 0), 0)
+                const yearForecast = yearRows.reduce((s, r) => s + (r.forecast_kwh ?? 0), 0)
+                const yearNetDue = yearRows.reduce((s, r) => {
+                  if (r.expected_invoice) return s + r.expected_invoice.net_due
+                  return s + (r.total_billing_amount ?? 0)
+                }, 0)
+                const hasActuals = yearRows.some(r => r.actual_kwh != null)
+
+                return (
+                  <React.Fragment key={year}>
+                    {/* Year header row */}
+                    <tr
+                      className="border-b border-slate-200 bg-slate-100/80 cursor-pointer hover:bg-slate-100 select-none"
+                      onClick={() => toggleYear(year)}
+                    >
+                      <td className="w-6 px-1 py-1.5 text-slate-400">
+                        {isYearCollapsed
+                          ? <ChevronRight className="h-3.5 w-3.5" />
+                          : <ChevronDown className="h-3.5 w-3.5" />
+                        }
+                      </td>
+                      <td className="px-3 py-1.5 font-semibold text-slate-700 text-xs border-r-2 border-blue-100">
+                        {year}
+                        <span className="ml-2 font-normal text-slate-400">{yearRows.length} mo</span>
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-xs tabular-nums text-slate-600 font-medium">
+                        {hasActuals ? fmtNum(yearActual) : '—'}
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-xs tabular-nums text-slate-500">
+                        {yearForecast > 0 ? fmtNum(yearForecast) : '—'}
+                      </td>
+                      <td className="px-3 py-1.5" />
+                      {products.map((p) => (
+                        <td key={p.product_code} className="px-3 py-1.5" />
+                      ))}
+                      <td className="px-3 py-1.5" />
+                      <td className="px-3 py-1.5" />
+                      <td className="px-3 py-1.5" />
+                      <td className="px-3 py-1.5" />
+                      <td className="px-3 py-1.5 text-right text-xs tabular-nums font-semibold text-slate-700">
+                        {yearNetDue > 0 ? fmtCurrency(yearNetDue, currency) : '—'}
+                        {currency && yearNetDue > 0 && <span className="ml-1 font-normal text-slate-400">{currency}</span>}
+                      </td>
+                    </tr>
+                    {/* Month rows (hidden when collapsed) */}
+                    {!isYearCollapsed && yearRows.map((row) => (
+                      <UnifiedRow
+                        key={row.billing_month}
+                        row={row}
+                        products={products}
+                        currency={currency}
+                        hardCurrency={hardCurrency}
+                        showHardCcy={showHardCcy}
+                        isExpanded={expanded.has(row.billing_month)}
+                        onToggle={() => toggleExpand(row.billing_month)}
+                        totalCols={totalCols}
+                        editMode={editMode}
+                        projectId={projectId}
+                        onSaved={fetchData}
+                      />
+                    ))}
+                  </React.Fragment>
+                )
+              })}
             </tbody>
 
             {/* Footer totals */}

@@ -113,6 +113,47 @@ export interface ProjectDashboardResponse {
 }
 
 // ============================================================================
+// Portfolio Revenue Summary Types
+// ============================================================================
+
+export interface PortfolioMonthRow {
+  billing_month: string
+  project_count: number
+  actual_kwh: number | null
+  forecast_kwh: number | null
+  weighted_avg_tariff_usd: number | null
+  revenue_usd: number | null
+  forecast_revenue_usd: number | null
+}
+
+export interface PortfolioProjectSummary {
+  project_id: number
+  project_name: string
+  country: string | null
+  total_actual_kwh: number | null
+  total_revenue_usd: number | null
+  months_with_data: number
+}
+
+export interface PortfolioRevenueSummaryResponse {
+  success: boolean
+  months: PortfolioMonthRow[]
+  projects: PortfolioProjectSummary[]
+  summary: {
+    total_actual_kwh: number | null
+    total_forecast_kwh: number | null
+    total_revenue_usd: number | null
+    total_forecast_revenue_usd: number | null
+  }
+  data_coverage: {
+    total_projects: number
+    projects_with_meter_data: number
+    projects_with_forecast: number
+    projects_with_tariff: number
+  }
+}
+
+// ============================================================================
 // Inline Editing Types
 // ============================================================================
 
@@ -1053,6 +1094,18 @@ export class AdminClient {
       { method: 'POST' }
     )
     return this.handleResponse<{ success: boolean; updated_rows: number; annual_degradation_pct: number }>(response)
+  }
+
+  // =========================================================================
+  // Portfolio
+  // =========================================================================
+
+  async getPortfolioRevenueSummary(organizationId: number): Promise<PortfolioRevenueSummaryResponse> {
+    this.log('Fetching portfolio revenue summary', { organizationId })
+    const response = await fetch(
+      `${this.baseUrl}/api/portfolio/revenue-summary?organization_id=${organizationId}`
+    )
+    return this.handleResponse<PortfolioRevenueSummaryResponse>(response)
   }
 
   async exportMonthlyBilling(projectId: number): Promise<Blob> {

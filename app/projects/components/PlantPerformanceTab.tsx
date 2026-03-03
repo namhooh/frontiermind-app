@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Upload, Plus, Loader2, Check, X, Maximize2, Minimize2 } from 'lucide-react'
+import { Upload, Plus, Loader2, Check, X, Maximize2, Minimize2, ChevronRight, ChevronDown } from 'lucide-react'
 import { IS_DEMO } from '@/lib/demoMode'
 import { toast } from 'sonner'
 import {
@@ -128,7 +128,9 @@ export function PlantPerformanceTab({ projectId, editMode }: PlantPerformanceTab
     return <p className="text-sm text-red-600">{error}</p>
   }
 
-  const months = data?.months ?? []
+  // Cap display at the current month — future forecast-only rows are hidden
+  const currentMonth = new Date().toISOString().slice(0, 7) + '-01'
+  const months = (data?.months ?? []).filter(m => m.billing_month <= currentMonth)
   const meters = data?.meters ?? []
   const capacity = data?.installed_capacity_kwp
   const degradation = data?.annual_degradation_pct
@@ -141,14 +143,17 @@ export function PlantPerformanceTab({ projectId, editMode }: PlantPerformanceTab
         <SummaryCard label="Degradation Rate" value={degradation != null ? `${(degradation * 100).toFixed(2)}%/yr` : '—'} />
         <SummaryCard
           label="Latest PR"
-          value={months.length > 0 && months[0].actual_pr != null ? fmtPct(months[0].actual_pr) : '—'}
+          value={(() => {
+            const m = months.find(m => m.actual_pr != null)
+            return m ? fmtPct(m.actual_pr!) : '—'
+          })()}
         />
         <SummaryCard
           label="Latest Availability"
-          value={months.length > 0 && months[0].actual_availability_pct != null
-            ? `${months[0].actual_availability_pct.toFixed(1)}%`
-            : '—'
-          }
+          value={(() => {
+            const m = months.find(m => m.actual_availability_pct != null)
+            return m ? `${m.actual_availability_pct!.toFixed(1)}%` : '—'
+          })()}
         />
       </div>
 
@@ -249,6 +254,37 @@ function SummaryCard({ label, value }: { label: string; value: string }) {
 // Workbook Table — grouped header with per-meter columns
 // ---------------------------------------------------------------------------
 
+interface YearGroup {
+  oy: number | null
+  label: string
+  months: PerformanceMonth[]
+}
+
+function groupByOperatingYear(months: PerformanceMonth[]): YearGroup[] {
+  const map = new Map<number | null, PerformanceMonth[]>()
+  for (const m of months) {
+    const oy = m.operating_year ?? null
+    if (!map.has(oy)) map.set(oy, [])
+    map.get(oy)!.push(m)
+  }
+  // Sort groups: highest OY first (DESC), null last
+  const groups: YearGroup[] = []
+  const keys = [...map.keys()].sort((a, b) => {
+    if (a == null && b == null) return 0
+    if (a == null) return 1
+    if (b == null) return -1
+    return b - a
+  })
+  for (const oy of keys) {
+    groups.push({
+      oy,
+      label: oy != null ? `OY${oy}` : 'Unknown',
+      months: map.get(oy)!,
+    })
+  }
+  return groups
+}
+
 function PerformanceWorkbook({
   months,
   meters,
@@ -274,6 +310,24 @@ function PerformanceWorkbook({
   onSaveManual?: () => void
   onCancelAdd?: () => void
 }) {
+  const yearGroups = groupByOperatingYear(months)
+
+  // Most recent year expanded by default, rest collapsed
+  const [collapsed, setCollapsed] = useState<Set<string>>(() => {
+    const initial = new Set<string>()
+    yearGroups.slice(1).forEach(g => initial.add(g.label))
+    return initial
+  })
+
+  const toggleYear = useCallback((label: string) => {
+    setCollapsed(prev => {
+      const next = new Set(prev)
+      if (next.has(label)) next.delete(label)
+      else next.add(label)
+      return next
+    })
+  }, [])
+
   if (months.length === 0 && !showAddRow) {
     return (
       <div className="flex items-center justify-center h-32 text-sm text-slate-400">
@@ -283,6 +337,7 @@ function PerformanceWorkbook({
   }
 
   const hasMeters = meters.length > 0
+  const totalCols = 2 + 3 + (hasMeters ? meters.length : 0) + 1 + 4 + 3
 
   return (
     <div className="overflow-x-auto border border-slate-200 rounded-lg">
@@ -363,7 +418,7 @@ function PerformanceWorkbook({
               <td className="px-2 py-1.5" />
               <td className="px-2 py-1.5" />
               {/* Per-meter cols empty */}
-              {hasMeters && meters.map((m, i) => (
+              {hasMeters && meters.map((m) => (
                 <td key={`add-${m.meter_id}`} className="px-1 py-1.5" />
               ))}
               {/* Available empty */}
@@ -409,21 +464,131 @@ function PerformanceWorkbook({
             </tr>
           )}
 
-          {/* Data rows */}
-          {months.map((m) => (
-            <PerformanceRow
-              key={m.billing_month}
-              m={m}
-              meters={meters}
-              hasMeters={hasMeters}
-              editMode={editMode}
-              projectId={projectId}
-              onSaved={onSaved}
-            />
-          ))}
+          {/* Year-grouped data rows */}
+          {yearGroups.map((group) => {
+            const isCollapsed = collapsed.has(group.label)
+            // Compute year-level summary for the collapsed row
+            const totalEnergy = group.months.reduce((s, m) => s + (m.total_energy_kwh ?? 0), 0)
+            const totalForecast = group.months.reduce((s, m) => s + (m.forecast_energy_kwh ?? 0), 0)
+            const monthCount = group.months.length
+
+            return (
+              <YearGroupRows
+                key={group.label}
+                group={group}
+                isCollapsed={isCollapsed}
+                onToggle={() => toggleYear(group.label)}
+                totalCols={totalCols}
+                totalEnergy={totalEnergy}
+                totalForecast={totalForecast}
+                monthCount={monthCount}
+                meters={meters}
+                hasMeters={hasMeters}
+                editMode={editMode}
+                projectId={projectId}
+                onSaved={onSaved}
+              />
+            )
+          })}
         </tbody>
       </table>
     </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Year Group Rows — collapsible year header + month rows
+// ---------------------------------------------------------------------------
+
+function YearGroupRows({
+  group,
+  isCollapsed,
+  onToggle,
+  totalCols,
+  totalEnergy,
+  totalForecast,
+  monthCount,
+  meters,
+  hasMeters,
+  editMode,
+  projectId,
+  onSaved,
+}: {
+  group: YearGroup
+  isCollapsed: boolean
+  onToggle: () => void
+  totalCols: number
+  totalEnergy: number
+  totalForecast: number
+  monthCount: number
+  meters: { meter_id: number; meter_name: string; energy_category: string }[]
+  hasMeters: boolean
+  editMode?: boolean
+  projectId?: number
+  onSaved?: () => void
+}) {
+  const energyRatio = totalForecast > 0 ? totalEnergy / totalForecast : null
+
+  return (
+    <>
+      {/* Year header row */}
+      <tr
+        className="border-b border-slate-200 bg-slate-100/80 cursor-pointer hover:bg-slate-100 select-none"
+        onClick={onToggle}
+      >
+        <td
+          className="px-3 py-1.5 font-semibold text-slate-700 text-xs sticky left-0 bg-slate-100/80 z-10 border-r border-slate-200"
+        >
+          <span className="inline-flex items-center gap-1">
+            {isCollapsed
+              ? <ChevronRight className="h-3.5 w-3.5 text-slate-400" />
+              : <ChevronDown className="h-3.5 w-3.5 text-slate-400" />
+            }
+            {group.label}
+          </span>
+        </td>
+        <td className="px-2 py-1.5 text-xs text-slate-500 border-r-2 border-blue-100">
+          {monthCount} mo
+        </td>
+        {/* Forecast total */}
+        <td className="px-2 py-1.5 text-right text-xs tabular-nums text-slate-500">
+          {totalForecast > 0 ? fmtNum(totalForecast) : '—'}
+        </td>
+        <td className="px-2 py-1.5" />
+        <td className="px-2 py-1.5 border-r-2 border-green-100" />
+        {/* Per-meter cols */}
+        {hasMeters && meters.map((m, i) => (
+          <td key={`yr-${group.label}-${m.meter_id}`} className={`px-1 py-1.5 ${i === meters.length - 1 ? 'border-r-2 border-purple-100' : ''}`} />
+        ))}
+        {/* Available */}
+        <td className="px-2 py-1.5 border-r-2 border-purple-100" />
+        {/* Aggregated total */}
+        <td className="px-2 py-1.5 text-right text-xs tabular-nums font-semibold text-slate-700">
+          {totalEnergy > 0 ? fmtNum(totalEnergy) : '—'}
+        </td>
+        <td className="px-2 py-1.5" />
+        <td className="px-2 py-1.5" />
+        <td className="px-2 py-1.5 border-r-2 border-slate-200" />
+        {/* Comparison: energy ratio */}
+        <td className={`px-2 py-1.5 text-right text-xs tabular-nums ${energyRatio != null ? compClass(energyRatio) : 'text-slate-400'}`}>
+          {energyRatio != null ? fmtRatio(energyRatio) : '—'}
+        </td>
+        <td className="px-2 py-1.5" />
+        <td className="px-2 py-1.5" />
+      </tr>
+      {/* Month rows (hidden when collapsed) */}
+      {!isCollapsed && group.months.map((m) => (
+        <PerformanceRow
+          key={m.billing_month}
+          m={m}
+          meters={meters}
+          hasMeters={hasMeters}
+          editMode={editMode}
+          projectId={projectId}
+          onSaved={onSaved}
+        />
+      ))}
+    </>
   )
 }
 
