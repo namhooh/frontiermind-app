@@ -9,10 +9,17 @@
 #   EXCUSES  - Event/condition excuses obligation (FM -> availability)
 #   GOVERNS  - Sets context for clauses (CP -> all obligations)
 #   INPUTS   - Data flows between clauses (pricing -> payment)
+#
+# Semantic Filtering Fields (optional per pattern):
+#   source_clause_name_pattern  - regex: only include source clauses whose name matches
+#   target_clause_name_pattern  - regex: only include target clauses whose name matches
+#   source_name_exclude_pattern - regex: exclude source clauses whose name matches
+#   target_name_exclude_pattern - regex: exclude target clauses whose name matches
+#   max_targets_per_source      - int: cap relationships per source clause (0 = no limit)
 # =====================================================
 
-version: "1.0"
-description: "Category-level relationship patterns for PPA and O&M contracts"
+version: "2.0"
+description: "Semantically filtered relationship patterns for PPA, SSA, and O&M contracts"
 
 # =====================================================
 # Intra-contract Relationships (within same contract)
@@ -23,85 +30,104 @@ intra_contract:
   # TRIGGERS: Obligation breach → Consequence
   # -------------------------------------------------
 
-  # Availability breach triggers liquidated damages
-  - name: "availability_triggers_ld"
+  # Availability shortfall triggers availability-related LD only
+  - name: "availability_triggers_availability_ld"
     source_category: "AVAILABILITY"
     target_category: "LIQUIDATED_DAMAGES"
+    target_clause_name_pattern: "(?i)availability|shortfall|guarantee.payment"
+    target_name_exclude_pattern: "(?i)delay|COD|performance"
     relationship_type: "TRIGGERS"
     default_confidence: 0.95
-    description: "Availability shortfall triggers liquidated damages"
+    max_targets_per_source: 3
+    description: "Availability shortfall triggers availability-related LD only"
 
-  # Performance guarantee breach triggers liquidated damages
-  - name: "performance_triggers_ld"
+  # Performance guarantee shortfall triggers performance-related LD
+  - name: "performance_triggers_performance_ld"
     source_category: "PERFORMANCE_GUARANTEE"
+    source_name_exclude_pattern: "(?i)annexure|provision"
     target_category: "LIQUIDATED_DAMAGES"
+    target_clause_name_pattern: "(?i)performance|output|production"
+    target_name_exclude_pattern: "(?i)delay|availability"
     relationship_type: "TRIGGERS"
     default_confidence: 0.95
-    description: "Performance ratio shortfall triggers liquidated damages"
+    max_targets_per_source: 3
+    description: "Performance guarantee shortfall triggers performance-related LD"
 
-  # Default triggers termination rights
-  - name: "default_triggers_termination"
+  # Event of default triggers termination rights (not pre-COD, not term duration)
+  - name: "default_event_triggers_termination"
     source_category: "DEFAULT"
+    source_clause_name_pattern: "(?i)event.of.default|default.event|buyer.default|seller.default|owner.default|developer.default|customer.default"
+    source_name_exclude_pattern: "(?i)interest|late.payment|reimburs|cure|remedy"
     target_category: "TERMINATION"
+    target_clause_name_pattern: "(?i)terminat|early.terminat"
+    target_name_exclude_pattern: "(?i)pre.COD|extension|additional.term|commencement|duration|purchase.option"
     relationship_type: "TRIGGERS"
     default_confidence: 0.90
-    description: "Default event triggers termination rights"
+    max_targets_per_source: 5
+    description: "Event of default triggers termination rights (not pre-COD, not term duration)"
 
-  # Default triggers security draw
-  - name: "default_triggers_security"
+  # Event of default triggers security draw rights
+  - name: "default_event_triggers_security"
     source_category: "DEFAULT"
+    source_clause_name_pattern: "(?i)event.of.default|default.event|buyer.default|seller.default"
+    source_name_exclude_pattern: "(?i)interest|late.payment|reimburs|cure"
     target_category: "SECURITY_PACKAGE"
+    target_clause_name_pattern: "(?i)draw|letter.of.credit|LC|bond|guarantee|security"
+    target_name_exclude_pattern: "(?i)annexure|provision"
     relationship_type: "TRIGGERS"
     default_confidence: 0.85
-    description: "Default event triggers security draw rights"
+    max_targets_per_source: 3
+    description: "Event of default triggers security draw rights"
 
-  # Compliance failure triggers default
-  - name: "compliance_triggers_default"
+  # Compliance failure can trigger event of default
+  - name: "compliance_failure_triggers_default"
     source_category: "COMPLIANCE"
+    source_clause_name_pattern: "(?i)compliance|regulatory|permit|obligation|requirement"
+    source_name_exclude_pattern: "(?i)annexure|provision|specification|internet|cost|access"
     target_category: "DEFAULT"
+    target_clause_name_pattern: "(?i)event.of.default|default.event"
+    target_name_exclude_pattern: "(?i)interest|cure|remedy"
     relationship_type: "TRIGGERS"
     default_confidence: 0.80
-    description: "Compliance failure can trigger default event"
-
-  # Default triggers security draw
-  # (Strengthened from implicit to explicit pattern)
-
-  # Security package as condition precedent input
-  - name: "security_inputs_cp"
-    source_category: "SECURITY_PACKAGE"
-    target_category: "CONDITIONS_PRECEDENT"
-    relationship_type: "INPUTS"
-    default_confidence: 0.80
-    description: "Security instrument delivery is often a CP requirement"
+    max_targets_per_source: 3
+    description: "Compliance failure can trigger event of default"
 
   # -------------------------------------------------
   # EXCUSES: Event type → Excused Obligation
   # -------------------------------------------------
 
-  # Force majeure excuses availability
+  # Force majeure events excuse availability (not customer-caused delays)
   - name: "fm_excuses_availability"
     source_category: "FORCE_MAJEURE"
+    source_clause_name_pattern: "(?i)force.majeure|FM.event|excused.event|act.of.god"
+    source_name_exclude_pattern: "(?i)customer.non.payment|customer.breach|import.delay|approval.failure|customer.caused"
     target_category: "AVAILABILITY"
     relationship_type: "EXCUSES"
     default_confidence: 0.95
-    description: "Force majeure events excuse availability obligation"
+    max_targets_per_source: 3
+    description: "Force majeure events excuse availability (not customer-caused delays)"
 
-  # Force majeure excuses performance guarantee
+  # Force majeure events excuse performance guarantee
   - name: "fm_excuses_performance"
     source_category: "FORCE_MAJEURE"
+    source_clause_name_pattern: "(?i)force.majeure|FM.event|excused.event"
+    source_name_exclude_pattern: "(?i)customer.non.payment|customer.breach|import|approval|customer.caused"
     target_category: "PERFORMANCE_GUARANTEE"
+    target_name_exclude_pattern: "(?i)annexure|provision"
     relationship_type: "EXCUSES"
     default_confidence: 0.95
-    description: "Force majeure events excuse performance ratio guarantee"
+    max_targets_per_source: 3
+    description: "Force majeure events excuse performance guarantee"
 
-  # Scheduled maintenance excuses availability (with limits)
-  - name: "maintenance_excuses_availability"
+  # Scheduled maintenance (with notice) excuses availability
+  - name: "scheduled_maintenance_excuses_availability"
     source_category: "MAINTENANCE"
+    source_clause_name_pattern: "(?i)scheduled.outage|planned.outage|outage.allow|outage.notice"
     target_category: "AVAILABILITY"
     relationship_type: "EXCUSES"
     default_confidence: 0.90
-    description: "Scheduled maintenance (within limits) excuses availability"
-    condition: "source.scheduled_outage_max_hours > 0"
+    max_targets_per_source: 3
+    description: "Scheduled maintenance (with notice) excuses availability"
     parameters:
       requires_notice: true
       limit_type: "hours_per_year"
@@ -110,57 +136,95 @@ intra_contract:
   # INPUTS: Data flow between clauses
   # -------------------------------------------------
 
-  # Pricing inputs to payment terms
-  - name: "pricing_inputs_payment"
+  # Pricing rates feed into payment calculations
+  - name: "pricing_rate_inputs_payment"
     source_category: "PRICING"
+    source_clause_name_pattern: "(?i)tariff|rate|price|discount|escalation|charge"
+    source_name_exclude_pattern: "(?i)annexure|provision|savings.exclusion"
     target_category: "PAYMENT_TERMS"
+    target_clause_name_pattern: "(?i)payment|invoice|billing|purchase.obligation|purchase.commit"
+    target_name_exclude_pattern: "(?i)sublease|disconnection|deposit|tax"
     relationship_type: "INPUTS"
-    default_confidence: 0.95
-    description: "Pricing parameters flow into payment calculations"
+    default_confidence: 0.90
+    max_targets_per_source: 5
+    description: "Pricing rates feed into payment calculations"
 
-  # Pricing inputs to LD calculation
-  - name: "pricing_inputs_ld"
+  # Contract price may be used in LD calculations
+  - name: "pricing_inputs_availability_ld"
     source_category: "PRICING"
+    source_clause_name_pattern: "(?i)tariff|rate|price"
     target_category: "LIQUIDATED_DAMAGES"
+    target_clause_name_pattern: "(?i)availability|guarantee.payment"
     relationship_type: "INPUTS"
     default_confidence: 0.75
+    max_targets_per_source: 2
     description: "Contract price may be used in LD calculations"
-    condition: "target.calculation_type == 'per_kwh'"
+
+  # Security instrument delivery is often a CP requirement
+  - name: "security_inputs_cp"
+    source_category: "SECURITY_PACKAGE"
+    source_clause_name_pattern: "(?i)insurance|letter.of.credit|bond|guarantee"
+    source_name_exclude_pattern: "(?i)annexure|provision"
+    target_category: "CONDITIONS_PRECEDENT"
+    target_clause_name_pattern: "(?i)condition|requirement|approval"
+    relationship_type: "INPUTS"
+    default_confidence: 0.80
+    max_targets_per_source: 5
+    description: "Security instrument delivery is often a CP requirement"
 
   # -------------------------------------------------
   # GOVERNS: Context setting
   # -------------------------------------------------
 
-  # Conditions precedent govern all obligations
+  # CP satisfaction unlocks commercial obligations
   - name: "cp_governs_obligations"
     source_category: "CONDITIONS_PRECEDENT"
+    source_clause_name_pattern: "(?i)condition|commencement|completion|approval"
+    source_name_exclude_pattern: "(?i)annexure|provision"
     target_categories:
       - "AVAILABILITY"
       - "PERFORMANCE_GUARANTEE"
       - "PAYMENT_TERMS"
     relationship_type: "GOVERNS"
     default_confidence: 0.90
-    description: "CP satisfaction unlocks all commercial obligations"
+    max_targets_per_source: 5
+    description: "CP satisfaction unlocks commercial obligations"
 
-  # Maintenance windows govern availability calculation
-  - name: "maintenance_governs_availability"
+  # Maintenance SLAs affect availability calculation
+  - name: "maintenance_sla_governs_availability"
     source_category: "MAINTENANCE"
+    source_clause_name_pattern: "(?i)SLA|service.level|outage|response.time|resolution"
     target_category: "AVAILABILITY"
     relationship_type: "GOVERNS"
     default_confidence: 0.85
-    description: "Maintenance windows and SLAs affect availability calculation"
+    max_targets_per_source: 3
+    description: "Maintenance SLAs affect availability calculation"
 
-  # General provisions govern all clauses
-  - name: "general_governs_all"
+  # Definitions and interpretation clauses govern all
+  - name: "definitions_govern_all"
     source_category: "GENERAL"
+    source_clause_name_pattern: "(?i)definition|interpretation"
     target_category: "*"
     relationship_type: "GOVERNS"
     default_confidence: 0.85
-    description: "General provisions (definitions, governing law) apply to all"
+    max_targets_per_source: 10
+    description: "Definitions and interpretation clauses govern all (capped to avoid combinatorial explosion)"
 
-  # Term clause governs all obligations
-  - name: "term_governs_obligations"
+  # Governing law applies to all clauses
+  - name: "governing_law_governs_all"
+    source_category: "GENERAL"
+    source_clause_name_pattern: "(?i)governing.law|jurisdiction|applicable.law"
+    target_category: "*"
+    relationship_type: "GOVERNS"
+    default_confidence: 0.80
+    max_targets_per_source: 10
+    description: "Governing law applies to all clauses (capped to avoid combinatorial explosion)"
+
+  # Contract term defines when obligations are active
+  - name: "term_duration_governs_obligations"
     source_category: "TERMINATION"
+    source_clause_name_pattern: "(?i)initial.term|term.duration|agreement.commencement|additional.term.plus"
+    source_name_exclude_pattern: "(?i)pre.COD|purchase.option|extension.notice|response|rejection|access.right"
     target_categories:
       - "AVAILABILITY"
       - "PERFORMANCE_GUARANTEE"
@@ -168,6 +232,7 @@ intra_contract:
       - "LIQUIDATED_DAMAGES"
     relationship_type: "GOVERNS"
     default_confidence: 0.95
+    max_targets_per_source: 10
     description: "Contract term defines when obligations are active"
 
 
@@ -269,4 +334,4 @@ detection:
   expand_wildcards: true
 
   # Maximum relationships to create per contract (safety limit)
-  max_relationships_per_contract: 500
+  max_relationships_per_contract: 200

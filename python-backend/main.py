@@ -14,13 +14,24 @@ from dotenv import load_dotenv
 # Load environment variables FIRST - before importing modules that need them
 load_dotenv()
 
+import os
+import sentry_sdk
+
+# Initialize Sentry BEFORE importing application modules
+sentry_sdk.init(
+    dsn=os.getenv("SENTRY_DSN"),
+    release=os.getenv("GIT_HASH"),
+    traces_sample_rate=float(os.getenv("SENTRY_TRACES_SAMPLE_RATE", "0.1")),
+    environment=os.getenv("ENVIRONMENT", "development"),
+    send_default_pii=False,
+)
+
 # Now import modules that depend on environment variables
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from typing import Dict
-import os
 import logging
 
 # Import API routers (these can now access DATABASE_URL)
@@ -40,6 +51,7 @@ from api.grp import router as grp_router
 from api.spreadsheet import router as spreadsheet_router
 from api.billing import router as billing_router
 from api.performance import router as performance_router
+from api.portfolio import router as portfolio_router
 
 # Import email notification scheduler
 from services.email import scheduler as email_scheduler
@@ -122,6 +134,7 @@ app.include_router(grp_router)
 app.include_router(spreadsheet_router)
 app.include_router(billing_router)
 app.include_router(performance_router)
+app.include_router(portfolio_router)
 
 
 @app.get("/", response_model=Dict[str, str])

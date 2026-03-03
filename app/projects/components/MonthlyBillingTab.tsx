@@ -353,7 +353,7 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
           product_rates: {},
           product_rates_hard_ccy: {},
           total_billing_amount: mm.total_amount,
-          total_billing_amount_hard_ccy: null,
+          total_billing_amount_hard_ccy: mm.total_amount_hard_ccy ?? null,
           meter_readings: mm.meter_readings,
           expected_invoice: mm.expected_invoice,
         })
@@ -433,7 +433,10 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
       } else if (row.total_billing_amount != null) {
         netDue += row.total_billing_amount
       }
-      if (row.total_billing_amount_hard_ccy != null) {
+      // Hard currency: prefer invoice-level FX conversion, fall back to monthly-billing
+      if (row.expected_invoice?.net_due_hard_ccy != null) {
+        netDueHard += row.expected_invoice.net_due_hard_ccy
+      } else if (row.total_billing_amount_hard_ccy != null) {
         netDueHard += row.total_billing_amount_hard_ccy
       }
     }
@@ -649,6 +652,11 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
                   if (r.expected_invoice) return s + r.expected_invoice.net_due
                   return s + (r.total_billing_amount ?? 0)
                 }, 0)
+                const yearNetDueHard = yearRows.reduce((s, r) => {
+                  if (r.expected_invoice?.net_due_hard_ccy != null) return s + r.expected_invoice.net_due_hard_ccy
+                  if (r.total_billing_amount_hard_ccy != null) return s + r.total_billing_amount_hard_ccy
+                  return s
+                }, 0)
                 const hasActuals = yearRows.some(r => r.actual_kwh != null)
 
                 return (
@@ -683,8 +691,15 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
                       <td className="px-3 py-1.5" />
                       <td className="px-3 py-1.5" />
                       <td className="px-3 py-1.5 text-right text-xs tabular-nums font-semibold text-slate-700">
-                        {yearNetDue > 0 ? fmtCurrency(yearNetDue, currency) : '—'}
-                        {currency && yearNetDue > 0 && <span className="ml-1 font-normal text-slate-400">{currency}</span>}
+                        <div>
+                          {yearNetDue > 0 ? fmtCurrency(yearNetDue, currency) : '—'}
+                          {currency && yearNetDue > 0 && <span className="ml-1 font-normal text-slate-400">{currency}</span>}
+                        </div>
+                        {showHardCcy && yearNetDueHard > 0 && (
+                          <div className="text-xs font-normal text-slate-500 tabular-nums">
+                            {fmtCurrency(yearNetDueHard, hardCurrency)} {hardCurrency}
+                          </div>
+                        )}
                       </td>
                     </tr>
                     {/* Month rows (hidden when collapsed) */}
@@ -780,7 +795,8 @@ function UnifiedRow({
 
   // Net due: from invoice, or fall back to total_billing_amount
   const netDue = inv ? inv.net_due : row.total_billing_amount
-  const netDueHard = row.total_billing_amount_hard_ccy
+  // Hard currency: prefer invoice-level FX conversion, fall back to monthly-billing hard_ccy
+  const netDueHard = inv?.net_due_hard_ccy ?? row.total_billing_amount_hard_ccy
 
   return (
     <>

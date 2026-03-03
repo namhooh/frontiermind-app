@@ -369,3 +369,276 @@ class OnboardingCommitResponse(BaseModel):
     contract_id: Optional[int] = None
     warnings: List[str] = Field(default_factory=list)
     counts: Dict[str, int] = Field(default_factory=dict)
+
+
+# =============================================================================
+# STRUCTURED SOURCE DATA (Excel-first cross-examination pipeline)
+# =============================================================================
+
+class SAGEContractLine(BaseModel):
+    """A single contract line from SAGE ERP."""
+    contract_line_unique_id: str
+    contract_number: str
+    contract_line: int
+    product_desc: str
+    product_code: Optional[str] = None
+    metered_available: Optional[str] = None
+    quantity_unit: Optional[str] = None
+    active_status: int = 1
+    effective_start_date: Optional[date] = None
+    effective_end_date: Optional[date] = None
+    price_adjust_date: Optional[date] = None
+    ind_use_cpi_inflation: int = 0
+    energy_category: Optional[str] = None  # metered_energy | available_energy | non_energy
+
+
+class SAGEMeterReading(BaseModel):
+    """A single meter reading row from SAGE ERP."""
+    meter_reading_unique_id: str
+    customer_number: str
+    facility: str
+    bill_date: date
+    contract_number: str
+    contract_line: int
+    product_desc: str
+    metered_available: Optional[str] = None
+    utilized_reading: float = 0.0
+    discount_reading: float = 0.0
+    sourced_energy: float = 0.0
+    opening_reading: Optional[float] = None
+    closing_reading: Optional[float] = None
+    contract_currency: Optional[str] = None
+
+
+class SAGEProjectData(BaseModel):
+    """All SAGE ERP data for a single project, keyed by sage_id."""
+    sage_id: str
+    customer_number: str
+    customer_name: Optional[str] = None
+    country: Optional[str] = None
+
+    # Contract-level from dim_finance_contract
+    contracts: List[Dict[str, Any]] = Field(default_factory=list)
+    primary_contract_number: Optional[str] = None
+    contract_currency: Optional[str] = None
+    payment_terms: Optional[str] = None
+    contract_start_date: Optional[date] = None
+    contract_end_date: Optional[date] = None
+    contract_category: Optional[str] = None  # KWH, RENTAL, OM
+
+    # Contract lines
+    contract_lines: List[SAGEContractLine] = Field(default_factory=list)
+
+    # Meter readings
+    meter_readings: List[SAGEMeterReading] = Field(default_factory=list)
+
+    # Product codes (unique set)
+    product_codes: List[str] = Field(default_factory=list)
+
+    # Flags
+    has_cpi_inflation: bool = False
+
+
+class RevenueMasterfileProject(BaseModel):
+    """Tariff parameters for a single project from the Revenue Masterfile."""
+    project_name: Optional[str] = None
+    sage_id: Optional[str] = None
+    currency: Optional[str] = None
+    cod_date: Optional[date] = None
+    term_years: Optional[int] = None
+    base_rate: Optional[float] = None
+    current_rate: Optional[float] = None
+    rate_series: Dict[int, float] = Field(
+        default_factory=dict,
+        description="Year offset (1-based) → rate value from Inp_Proj year series"
+    )
+    discount_pct: Optional[float] = None
+    floor_rate: Optional[float] = None
+    ceiling_rate: Optional[float] = None
+    escalation_type: Optional[str] = None
+    escalation_value: Optional[float] = None
+    formula_type: Optional[str] = None  # FIXED, FLOATING_GRID, FLOATING_GENERATOR
+
+
+class RevenueMasterfileData(BaseModel):
+    """All data extracted from the Revenue Masterfile (.xlsb)."""
+    projects: Dict[str, RevenueMasterfileProject] = Field(
+        default_factory=dict, description="Keyed by sage_id"
+    )
+    us_cpi_rates: Dict[int, float] = Field(
+        default_factory=dict, description="Year -> CPI rate"
+    )
+    grid_gen_costs: Dict[str, Dict[int, float]] = Field(
+        default_factory=dict, description="sage_id -> {year: reference_price}"
+    )
+    fx_rates: Dict[str, Dict[int, float]] = Field(
+        default_factory=dict, description="currency_pair -> {year: rate}"
+    )
+
+
+class PlantPerformanceMonthly(BaseModel):
+    """Monthly performance data from the Plant Performance Workbook."""
+    month: date
+    metered_energy_kwh: Optional[float] = None
+    available_energy_kwh: Optional[float] = None
+    ghi_kwh_m2: Optional[float] = None
+    poa_kwh_m2: Optional[float] = None
+    performance_ratio_pct: Optional[float] = None
+    availability_pct: Optional[float] = None
+
+
+class TechnicalModelRow(BaseModel):
+    """One month from the Technical Model section of the Plant Performance Workbook."""
+    month: date
+    operating_year: int
+    # Forecast
+    forecast_energy_phase1_kwh: Optional[float] = None
+    forecast_energy_phase2_kwh: Optional[float] = None
+    forecast_energy_combined_kwh: Optional[float] = None
+    forecast_ghi_wm2: Optional[float] = None
+    forecast_poa_wm2: Optional[float] = None
+    forecast_pr: Optional[float] = None
+    # Actuals — per phase
+    phase1_meter_opening: Optional[float] = None
+    phase1_meter_closing: Optional[float] = None
+    phase1_invoiced_kwh: Optional[float] = None
+    phase2_meter_opening: Optional[float] = None
+    phase2_meter_closing: Optional[float] = None
+    phase2_invoiced_kwh: Optional[float] = None
+    # Actuals — aggregated
+    total_metered_kwh: Optional[float] = None
+    available_energy_kwh: Optional[float] = None
+    total_energy_kwh: Optional[float] = None
+    actual_ghi_wm2: Optional[float] = None
+    actual_poa_wm2: Optional[float] = None
+    actual_pr: Optional[float] = None
+    actual_availability_pct: Optional[float] = None
+    # Derived
+    energy_comparison: Optional[float] = None
+    irr_comparison: Optional[float] = None
+    pr_comparison: Optional[float] = None
+    comments: Optional[str] = None
+
+
+class PlantPerformanceData(BaseModel):
+    """All data extracted from the Plant Performance Workbook."""
+    projects: Dict[str, List[PlantPerformanceMonthly]] = Field(
+        default_factory=dict, description="sage_id -> monthly time-series"
+    )
+    technical_model: Dict[str, List[TechnicalModelRow]] = Field(
+        default_factory=dict, description="sage_id -> technical model time-series"
+    )
+    site_parameters: Dict[str, dict] = Field(
+        default_factory=dict, description="sage_id -> {capacity_kwp, degradation_pct, ...}"
+    )
+    tab_to_sage_id: Dict[str, str] = Field(
+        default_factory=dict, description="Tab name -> sage_id mapping used"
+    )
+
+
+class MarketRefPricingProject(BaseModel):
+    """Market reference pricing summary for a project."""
+    sage_id: Optional[str] = None
+    project_name: Optional[str] = None
+    tariff_summary: Dict[str, Any] = Field(default_factory=dict)
+    reference_prices: Dict[str, float] = Field(
+        default_factory=dict, description="period -> price"
+    )
+
+
+class MarketRefPricingData(BaseModel):
+    """All data from the Market Ref Pricing workbook."""
+    projects: Dict[str, MarketRefPricingProject] = Field(
+        default_factory=dict, description="Keyed by sage_id"
+    )
+    po_summary: List[Dict[str, Any]] = Field(default_factory=list)
+
+
+# =============================================================================
+# CROSS-VERIFICATION MODELS
+# =============================================================================
+
+class FieldVerification(BaseModel):
+    """Verification result for a single field."""
+    field_name: str
+    primary_source: str
+    primary_value: Any = None
+    verification_sources: Dict[str, Any] = Field(
+        default_factory=dict, description="source_name -> value"
+    )
+    confidence: float = 0.75
+    status: Literal["confirmed", "warning", "conflict", "single_source"] = "single_source"
+    variance_pct: Optional[float] = None
+    notes: str = ""
+    requires_manual_approval: bool = False
+
+
+class TariffTypeResult(BaseModel):
+    """Result of tariff type detection."""
+    energy_sale_type_id: Optional[str] = None  # FIXED_SOLAR, FLOATING_GRID, etc.
+    escalation_type_id: Optional[str] = None   # NONE, PERCENTAGE, US_CPI, etc.
+    formula_type: Optional[str] = None         # For logic_parameters
+    grp_method: Optional[str] = None           # GRP calculation method for tariff engine
+    signals: Dict[str, Any] = Field(default_factory=dict)
+    confidence: float = 0.75
+
+
+class MotherChildPattern(BaseModel):
+    """Detection result for mother-child line decomposition."""
+    pattern: Literal["single_meter", "mother_children", "multi_phase"]
+    mother_line_number: Optional[int] = None
+    child_line_numbers: List[int] = Field(default_factory=list)
+    notes: str = ""
+
+
+class CrossVerificationResult(BaseModel):
+    """Full cross-verification result for a project — extends DiscrepancyReport."""
+    sage_id: str
+    project_name: Optional[str] = None
+
+    # Field-level verification
+    field_verifications: List[FieldVerification] = Field(default_factory=list)
+
+    # Tariff detection
+    tariff_type: Optional[TariffTypeResult] = None
+
+    # Mother-child decomposition
+    line_decomposition: Optional[MotherChildPattern] = None
+
+    # Overall confidence (average of field confidences)
+    overall_confidence: float = 0.0
+
+    # Merged best-values for DB population
+    merged_values: Dict[str, Any] = Field(default_factory=dict)
+
+    # Discrepancies (extends DiscrepancyReport format)
+    discrepancies: List[Discrepancy] = Field(default_factory=list)
+    critical_conflicts: List[str] = Field(default_factory=list)
+    blocked: bool = False  # True if critical-field conflict blocks auto-population
+
+    # Source data references
+    sage_data: Optional[SAGEProjectData] = None
+    masterfile_data: Optional[RevenueMasterfileProject] = None
+
+    # Provenance
+    source_metadata: Dict[str, Any] = Field(default_factory=dict)
+
+
+class PDFValidationField(BaseModel):
+    """Single field comparison between DB (Excel) and PPA (PDF)."""
+    field_name: str
+    db_value: Any = None
+    pdf_value: Any = None
+    tolerance: Optional[float] = None
+    within_tolerance: bool = True
+    notes: str = ""
+
+
+class PDFValidationResult(BaseModel):
+    """Result of comparing DB-populated values against PPA extraction."""
+    sage_id: str
+    contract_id: Optional[int] = None
+    status: Literal["confirmed", "discrepancy_found", "pdf_failed"] = "pdf_failed"
+    comparisons: List[PDFValidationField] = Field(default_factory=list)
+    enrichments: List[Dict[str, Any]] = Field(default_factory=list)
+    summary: str = ""

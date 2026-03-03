@@ -2,11 +2,8 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { adminClient, type ProjectGroupedItem } from '@/lib/api/adminClient'
-import { BarChart3, ChevronDown, ChevronRight, Loader2 } from 'lucide-react'
-
-// TODO: Replace with value from auth context once user authentication is implemented.
-// Reset to null on logout.
-const CURRENT_ORGANIZATION_ID = 1
+import { BarChart3, ChevronDown, ChevronRight, Loader2, Search, X } from 'lucide-react'
+import { CURRENT_ORGANIZATION_ID } from '@/app/projects/utils/constants'
 
 type SortBy = 'name' | 'sage_id' | 'country'
 
@@ -21,6 +18,7 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject, onSelectHom
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [sortBy, setSortBy] = useState<SortBy>('name')
+  const [searchQuery, setSearchQuery] = useState('')
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
 
   useEffect(() => {
@@ -42,20 +40,28 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject, onSelectHom
     return maxLen > 0 ? `${maxLen}ch` : undefined
   }, [projects])
 
+  const filteredProjects = useMemo(() => {
+    if (!searchQuery.trim()) return projects
+    const q = searchQuery.toLowerCase()
+    return projects.filter(
+      (p) => p.name.toLowerCase().includes(q) || (p.sage_id ?? '').toLowerCase().includes(q)
+    )
+  }, [projects, searchQuery])
+
   const sortedProjects = useMemo(() => {
-    const sorted = [...projects]
+    const sorted = [...filteredProjects]
     if (sortBy === 'name') {
       sorted.sort((a, b) => a.name.localeCompare(b.name))
     } else if (sortBy === 'sage_id') {
       sorted.sort((a, b) => (a.sage_id ?? '').localeCompare(b.sage_id ?? ''))
     }
     return sorted
-  }, [projects, sortBy])
+  }, [filteredProjects, sortBy])
 
   const countryGroups = useMemo(() => {
     if (sortBy !== 'country') return null
     const groups = new Map<string, ProjectGroupedItem[]>()
-    for (const p of projects) {
+    for (const p of filteredProjects) {
       const key = p.country || 'No Country'
       const list = groups.get(key) ?? []
       list.push(p)
@@ -72,7 +78,7 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject, onSelectHom
       list.sort((a, b) => a.name.localeCompare(b.name))
     }
     return sortedEntries
-  }, [projects, sortBy])
+  }, [filteredProjects, sortBy])
 
   function toggleGroup(group: string) {
     setCollapsedGroups((prev) => {
@@ -156,23 +162,44 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject, onSelectHom
         </>
       )}
 
-      <div className="px-3 pb-2 mb-1">
-        <div className="flex items-center gap-2">
-          <label htmlFor="sort-select" className="text-xs text-slate-500 shrink-0">Sort by</label>
-          <select
-            id="sort-select"
-            value={sortBy}
-            onChange={(e) => setSortBy(e.target.value as SortBy)}
-            className="w-full text-xs rounded-md border border-slate-200 bg-white px-2 py-1 text-slate-700 focus:outline-none focus:border-blue-400"
-          >
-            <option value="name">Name</option>
-            <option value="sage_id">Sage ID</option>
-            <option value="country">Country</option>
-          </select>
+      <div className="px-3 pb-2 mb-1 flex items-center gap-2">
+        <div className="relative flex-1 min-w-0">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
+          <input
+            type="text"
+            placeholder="Search…"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="w-full text-xs rounded-md border border-slate-200 bg-white pl-7 pr-7 py-1.5 text-slate-700 placeholder:text-slate-400 focus:outline-none focus:border-blue-400"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+            >
+              <X className="h-3.5 w-3.5" />
+            </button>
+          )}
         </div>
+        <select
+          id="sort-select"
+          aria-label="Sort by"
+          value={sortBy}
+          onChange={(e) => setSortBy(e.target.value as SortBy)}
+          className="text-xs rounded-md border border-slate-200 bg-white px-2 py-1.5 text-slate-700 focus:outline-none focus:border-blue-400 shrink-0"
+        >
+          <option value="name">Name</option>
+          <option value="sage_id">Sage ID</option>
+          <option value="country">Country</option>
+        </select>
       </div>
 
-      {sortBy === 'country' && countryGroups ? (
+      {filteredProjects.length === 0 && searchQuery ? (
+        <div className="px-4 py-6 text-xs text-slate-400 text-center">
+          No projects matching &ldquo;{searchQuery}&rdquo;
+        </div>
+      ) : sortBy === 'country' && countryGroups ? (
         <div className="space-y-0.5">
           {countryGroups.map(([group, items]) => {
             const isCollapsed = collapsedGroups.has(group)

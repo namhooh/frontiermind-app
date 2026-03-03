@@ -169,14 +169,17 @@ async def get_plant_performance(
                         FROM meter_aggregate ma
                         WHERE ma.meter_id IN (SELECT id FROM project_meters)
                           AND ma.period_start IS NOT NULL
+                          AND ma.period_start <= date_trunc('month', CURRENT_DATE)
                         UNION
                         SELECT DISTINCT forecast_month
                         FROM production_forecast
                         WHERE project_id = %(pid)s
+                          AND forecast_month <= date_trunc('month', CURRENT_DATE)
                         UNION
                         SELECT DISTINCT billing_month
                         FROM plant_performance
                         WHERE project_id = %(pid)s
+                          AND billing_month <= date_trunc('month', CURRENT_DATE)
                     ),
                     -- Aggregate actuals per month
                     monthly_actuals AS (

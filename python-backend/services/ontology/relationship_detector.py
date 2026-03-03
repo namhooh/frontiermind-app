@@ -13,6 +13,7 @@ Usage:
 """
 
 import os
+import re
 import logging
 from typing import List, Dict, Any, Optional, Tuple
 from pathlib import Path
@@ -186,7 +187,10 @@ class RelationshipDetector:
         """
         Detect relationships within a single contract.
 
-        Uses intra_contract patterns from configuration.
+        Uses intra_contract patterns from configuration with semantic filtering:
+        - source_clause_name_pattern / target_clause_name_pattern: include only matching
+        - source_name_exclude_pattern / target_name_exclude_pattern: exclude matching
+        - max_targets_per_source: cap relationships per source clause (0 = no limit)
         """
         relationships = []
         patterns = self.config.get('intra_contract', [])
@@ -196,44 +200,78 @@ class RelationshipDetector:
             target_category = pattern.get('target_category')
             target_categories = pattern.get('target_categories', [])
 
+            # Semantic filtering config
+            src_name_pat = pattern.get('source_clause_name_pattern')
+            tgt_name_pat = pattern.get('target_clause_name_pattern')
+            src_excl_pat = pattern.get('source_name_exclude_pattern')
+            tgt_excl_pat = pattern.get('target_name_exclude_pattern')
+            max_per_src = pattern.get('max_targets_per_source')
+
             # Handle wildcard target
             if target_category == '*':
                 if self.config.get('detection', {}).get('expand_wildcards', True):
                     target_categories = list(category_to_clauses.keys())
                 else:
                     continue
-
-            # Single target category
-            if target_category and target_category != '*':
+            elif target_category:
                 target_categories = [target_category]
 
-            # Get source clauses
-            source_clauses = category_to_clauses.get(source_category, [])
+            # Get and filter source clauses
+            source_clauses = list(category_to_clauses.get(source_category, []))
+            if src_name_pat:
+                source_clauses = [
+                    c for c in source_clauses
+                    if c.get('name') and re.search(src_name_pat, c['name'])
+                ]
+            if src_excl_pat:
+                source_clauses = [
+                    c for c in source_clauses
+                    if not (c.get('name') and re.search(src_excl_pat, c['name']))
+                ]
             if not source_clauses:
                 continue
 
-            # Create relationships for each source-target pair
+            # Build filtered target clauses across all target categories
+            all_target_clauses = []
             for target_cat in target_categories:
-                target_clauses = category_to_clauses.get(target_cat, [])
+                target_clauses = list(category_to_clauses.get(target_cat, []))
+                if tgt_name_pat:
+                    target_clauses = [
+                        c for c in target_clauses
+                        if c.get('name') and re.search(tgt_name_pat, c['name'])
+                    ]
+                if tgt_excl_pat:
+                    target_clauses = [
+                        c for c in target_clauses
+                        if not (c.get('name') and re.search(tgt_excl_pat, c['name']))
+                    ]
+                all_target_clauses.extend(target_clauses)
 
-                for source_clause in source_clauses:
-                    for target_clause in target_clauses:
-                        # Skip self-relationships
-                        if source_clause['id'] == target_clause['id']:
-                            continue
+            # Create relationships — cap is tracked per source across all categories
+            for source_clause in source_clauses:
+                targets_created = 0
+                for target_clause in all_target_clauses:
+                    # Skip self-relationships
+                    if source_clause['id'] == target_clause['id']:
+                        continue
 
-                        relationship = {
-                            'source_clause_id': source_clause['id'],
-                            'target_clause_id': target_clause['id'],
-                            'relationship_type': pattern['relationship_type'],
-                            'confidence': pattern.get('default_confidence', 0.80),
-                            'pattern_name': pattern.get('name', 'unknown'),
-                            'is_inferred': True,
-                            'inferred_by': 'pattern_matcher',
-                            'is_cross_contract': False,
-                            'parameters': pattern.get('parameters', {})
-                        }
-                        relationships.append(relationship)
+                    # Enforce per-source cap (0 means no limit)
+                    if max_per_src and max_per_src > 0 and targets_created >= max_per_src:
+                        break
+
+                    relationship = {
+                        'source_clause_id': source_clause['id'],
+                        'target_clause_id': target_clause['id'],
+                        'relationship_type': pattern['relationship_type'],
+                        'confidence': pattern.get('default_confidence', 0.80),
+                        'pattern_name': pattern.get('name', 'unknown'),
+                        'is_inferred': True,
+                        'inferred_by': 'pattern_matcher',
+                        'is_cross_contract': False,
+                        'parameters': pattern.get('parameters', {})
+                    }
+                    relationships.append(relationship)
+                    targets_created += 1
 
         return relationships
 

@@ -14,11 +14,14 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
+from utils.dates import add_years_clamped
+
 import psycopg2.extras
 
 from db.database import get_db_connection
 from models.onboarding import (
     ContactData,
+    CrossVerificationResult,
     Discrepancy,
     DiscrepancyReport,
     ExcelOnboardingData,
@@ -1132,8 +1135,8 @@ class OnboardingService:
             logger.warning("COD date missing — guarantee year dates will be NULL")
         for g in data.guarantees:
             # Calculate year dates from COD
-            year_start = date(cod.year + g.operating_year - 1, cod.month, cod.day) if cod else None
-            year_end = date(cod.year + g.operating_year, cod.month, cod.day) - timedelta(days=1) if cod else None
+            year_start = add_years_clamped(cod, g.operating_year - 1) if cod else None
+            year_end = add_years_clamped(cod, g.operating_year) - timedelta(days=1) if cod else None
 
             # Calculate derived fields
             p50 = g.preliminary_yield_kwh
@@ -1199,11 +1202,21 @@ class OnboardingService:
             cur.execute(
                 """
                 INSERT INTO clause (project_id, contract_id, clause_category_id, name, normalized_payload, is_current)
-                VALUES (%s, %s, 6, 'Payment Terms & Default Rate', %s::jsonb, true)
+                VALUES (
+                    %s, %s,
+                    (SELECT id FROM clause_category WHERE code = 'PAYMENT_TERMS'),
+                    'Payment Terms & Default Rate', %s::jsonb, true
+                )
                 ON CONFLICT DO NOTHING
                 """,
                 (project_id, contract_id, json.dumps(payload)),
             )
+            # Verify the subquery resolved (would be NULL if category missing)
+            if cur.rowcount == 0:
+                # Could be ON CONFLICT or NULL subquery — log for visibility
+                cur.execute("SELECT id FROM clause_category WHERE code = 'PAYMENT_TERMS'")
+                if not cur.fetchone():
+                    logger.error("clause_category 'PAYMENT_TERMS' not found — clause insertion skipped")
             logger.info(f"Inserted PAYMENT_TERMS clause for project {project_id}")
         except Exception as e:
             logger.warning(f"Failed to insert PAYMENT_TERMS clause (non-fatal): {e}")
@@ -1315,3 +1328,386 @@ class OnboardingService:
             counts["clause_tariff"] = 0
 
         return counts
+
+    # =========================================================================
+    # MULTI-SOURCE STRUCTURED DATA (Excel-first cross-examination pipeline)
+    # =========================================================================
+
+    def preview_from_structured_sources(
+        self,
+        organization_id: int,
+        cross_verification: CrossVerificationResult,
+    ) -> Dict[str, Any]:
+        """
+        Preview data from cross-verified structured sources (Phase 1 output).
+
+        Unlike the Excel+PPA preview, this accepts pre-verified data from
+        the cross-examination pipeline (SAGE CSVs + Revenue Masterfile).
+
+        Args:
+            organization_id: Organization ID.
+            cross_verification: Output from CrossVerifier.verify().
+
+        Returns:
+            Preview dict with merged_values, discrepancies, and readiness.
+
+        Raises:
+            OnboardingError: If data is invalid or blocked by critical conflicts.
+        """
+        sage_id = cross_verification.sage_id
+
+        if cross_verification.blocked:
+            raise OnboardingError(
+                f"Project {sage_id} blocked by critical conflicts: "
+                f"{cross_verification.critical_conflicts}"
+            )
+
+        # Resolve FKs for the merged values
+        merged = dict(cross_verification.merged_values)
+
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                # Look up project and contract by sage_id
+                cur.execute(
+                    "SELECT id, name FROM project WHERE sage_id = %s AND organization_id = %s",
+                    (sage_id, organization_id),
+                )
+                project_row = cur.fetchone()
+                if not project_row:
+                    raise OnboardingError(
+                        f"Project not found for sage_id={sage_id}, org={organization_id}. "
+                        f"Run migrations 046/047 first."
+                    )
+                merged["project_id"] = project_row["id"]
+                merged["project_name"] = project_row["name"]
+
+                # Find primary contract
+                cur.execute(
+                    """SELECT id, external_contract_id FROM contract
+                       WHERE project_id = %s AND parent_contract_id IS NULL
+                       ORDER BY id LIMIT 1""",
+                    (project_row["id"],),
+                )
+                contract_row = cur.fetchone()
+                if contract_row:
+                    merged["contract_id"] = contract_row["id"]
+                    merged["external_contract_id"] = contract_row["external_contract_id"]
+
+                # Resolve FK lookup maps
+                lookup_tables = {
+                    "energy_sale_type": "energy_sale_type",
+                    "escalation_type": "escalation_type",
+                    "currency": "currency",
+                }
+                fk_maps: Dict[str, Dict[str, int]] = {}
+                for key, table in lookup_tables.items():
+                    cur.execute(f"SELECT id, code FROM {table}")
+                    fk_maps[key] = {row["code"]: row["id"] for row in cur.fetchall()}
+
+                # Resolve tariff FK IDs
+                if merged.get("energy_sale_type_id"):
+                    code = merged["energy_sale_type_id"]
+                    merged["energy_sale_type_fk"] = fk_maps.get("energy_sale_type", {}).get(code)
+                if merged.get("escalation_type_id"):
+                    code = merged["escalation_type_id"]
+                    merged["escalation_type_fk"] = fk_maps.get("escalation_type", {}).get(code)
+                if merged.get("contract_currency"):
+                    code = merged["contract_currency"]
+                    merged["currency_fk"] = fk_maps.get("currency", {}).get(code)
+
+        return {
+            "sage_id": sage_id,
+            "organization_id": organization_id,
+            "merged_values": merged,
+            "overall_confidence": cross_verification.overall_confidence,
+            "discrepancies": [d.model_dump() for d in cross_verification.discrepancies],
+            "critical_conflicts": cross_verification.critical_conflicts,
+            "tariff_type": cross_verification.tariff_type.model_dump() if cross_verification.tariff_type else None,
+            "line_decomposition": cross_verification.line_decomposition.model_dump() if cross_verification.line_decomposition else None,
+            "ready_for_commit": not cross_verification.blocked,
+        }
+
+    def commit_from_structured_sources(
+        self,
+        organization_id: int,
+        preview: Dict[str, Any],
+        dry_run: bool = False,
+        skip_if_populated: bool = False,
+    ) -> Dict[str, Any]:
+        """
+        Commit cross-verified data to production tables.
+
+        Uses the same FK dependency order as the plan:
+        1. billing_product upsert
+        2. contract_line upsert
+        3. clause_tariff upsert
+        4. Year 1 tariff_rate insert
+        5. contract_line.clause_tariff_id FK update
+        6. contract_billing_product junction
+
+        Args:
+            organization_id: Organization ID.
+            preview: Output from preview_from_structured_sources().
+            dry_run: If True, log SQL but don't commit.
+            skip_if_populated: Skip tables that already have data.
+
+        Returns:
+            Dict with counts of rows upserted per table.
+        """
+        from db.contract_repository import ContractRepository
+
+        merged = preview["merged_values"]
+        sage_id = preview["sage_id"]
+        project_id = merged.get("project_id")
+        contract_id = merged.get("contract_id")
+
+        if not project_id or not contract_id:
+            raise OnboardingError(
+                f"Cannot commit: project_id={project_id}, contract_id={contract_id}"
+            )
+
+        logger.info(
+            f"Committing structured data for {sage_id}: "
+            f"project_id={project_id}, contract_id={contract_id}, dry_run={dry_run}"
+        )
+
+        counts: Dict[str, int] = {}
+        repo = ContractRepository()
+
+        with get_db_connection() as conn:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+
+                # ─── 1. Contract Lines ─────────────────────────────────
+                sage_data = preview.get("_sage_data")
+                # Map SAGE energy_category values to DB enum values
+                _ENERGY_CAT_MAP = {
+                    "metered_energy": "metered",
+                    "available_energy": "available",
+                    "non_energy": None,  # DB enum has no non_energy; skip
+                    "metered": "metered",
+                    "available": "available",
+                    "test": "test",
+                }
+
+                if sage_data and sage_data.get("contract_lines"):
+                    lines_data = []
+                    for line in sage_data["contract_lines"]:
+                        raw_cat = line.get("energy_category")
+                        db_cat = _ENERGY_CAT_MAP.get(raw_cat, raw_cat) if raw_cat else None
+                        # Skip lines with no valid energy_category (NOT NULL in DB)
+                        if not db_cat:
+                            logger.debug(
+                                f"Skipping contract line {line.get('contract_line')}: "
+                                f"no valid energy_category (raw={raw_cat})"
+                            )
+                            continue
+                        lines_data.append({
+                            "contract_id": contract_id,
+                            "contract_line_number": line.get("contract_line"),
+                            "external_line_id": line.get("contract_line_unique_id"),
+                            "product_desc": line.get("product_desc"),
+                            "product_code": line.get("product_code"),
+                            "energy_category": db_cat,
+                            "is_active": line.get("active_status", 1) == 1,
+                            "effective_start_date": line.get("effective_start_date"),
+                            "effective_end_date": line.get("effective_end_date"),
+                            "organization_id": organization_id,
+                            "source_confidence": preview.get("overall_confidence", 0.75),
+                        })
+
+                    if not dry_run:
+                        n = repo.upsert_contract_lines_batch(cur, lines_data)
+                        counts["contract_line"] = n
+                    else:
+                        counts["contract_line"] = len(lines_data)
+                        logger.info(f"  [DRY RUN] Would upsert {len(lines_data)} contract lines")
+
+                # ─── 2. Clause Tariff (single-row, MOH01 pattern) ─────
+                tariff_type = preview.get("tariff_type") or {}
+                tariff_info = merged.get("tariff", {})
+                base_rate = tariff_info.get("base_rate") or merged.get("base_rate")
+
+                # Derive validity dates
+                # NOTE: cod_date is the INITIAL (earliest) COD, resolved by the
+                # cross-verifier's multi-phase rule.  For projects with multiple
+                # phases (e.g. Phase I COD=2018, Phase II COD=2024), this is
+                # always the Phase I date so that operating year counting and
+                # tariff period anchoring start from the original COD.
+                cod_date = merged.get("cod_date")
+                term_years = merged.get("contract_term_years")
+                valid_from = cod_date
+                valid_to = None
+                if cod_date and term_years:
+                    try:
+                        if isinstance(cod_date, str):
+                            cod_date = date.fromisoformat(cod_date)
+                        valid_from = cod_date
+                        valid_to = add_years_clamped(cod_date, term_years)
+                    except (ValueError, TypeError):
+                        pass
+
+                tariff_count = 0
+                year1_count = 0
+                created_tariff_ids = []
+
+                if base_rate is not None:
+                    # Pack floor/ceiling/discount into logic_parameters (MOH01 pattern)
+                    logic_params = {}
+                    if merged.get("discount_pct") is not None:
+                        logic_params["discount_pct"] = merged["discount_pct"]
+                    if merged.get("floor_rate") is not None:
+                        logic_params["floor_rate"] = merged["floor_rate"]
+                    if merged.get("ceiling_rate") is not None:
+                        logic_params["ceiling_rate"] = merged["ceiling_rate"]
+                    if tariff_type.get("formula_type"):
+                        logic_params["formula_type"] = tariff_type["formula_type"]
+                    if tariff_type.get("grp_method"):
+                        logic_params["grp_method"] = tariff_type["grp_method"]
+                    if merged.get("escalation_type_id") and merged["escalation_type_id"] != "NONE":
+                        esc_val = merged.get("escalation_value")
+                        if esc_val is not None:
+                            logic_params["escalation_value"] = esc_val
+
+                    tariff_group_key = tariff_info.get(
+                        "tariff_group_key", f"{sage_id}-MAIN"
+                    )
+
+                    tariff_data = {
+                        "contract_id": contract_id,
+                        "project_id": project_id,
+                        "tariff_group_key": tariff_group_key,
+                        "name": f"{sage_id} Main Tariff",
+                        "base_rate": base_rate,
+                        "energy_sale_type_id": merged.get("energy_sale_type_fk"),
+                        "escalation_type_id": merged.get("escalation_type_fk"),
+                        "currency_id": merged.get("currency_fk"),
+                        "logic_parameters": logic_params,
+                        "valid_from": valid_from,
+                        "valid_to": valid_to,
+                        "is_current": True,
+                        "source_metadata": {
+                            "pipeline": "excel_first_cross_examination",
+                            "sage_id": sage_id,
+                            "confidence": preview.get("overall_confidence", 0.75),
+                        },
+                        "source_confidence": preview.get("overall_confidence", 0.75),
+                    }
+
+                    if not dry_run:
+                        tariff_id = repo.upsert_clause_tariff(cur, tariff_data)
+                        if tariff_id:
+                            tariff_count = 1
+                            created_tariff_ids.append(tariff_id)
+
+                            # Insert Year 1 tariff_rate with rate_binding="fixed"
+                            self._insert_year1_tariff_rate(
+                                cur, tariff_id, base_rate, valid_from,
+                                currency_id=merged.get("currency_fk"),
+                                rate_binding="fixed",
+                            )
+                            year1_count = 1
+                    else:
+                        logger.info(
+                            f"  [DRY RUN] Would upsert clause_tariff "
+                            f"base_rate={base_rate} "
+                            f"group_key={tariff_group_key}"
+                        )
+                        tariff_count = 1
+
+                counts["clause_tariff"] = tariff_count
+                counts["tariff_rate_year1"] = year1_count
+
+                # ─── 3. Billing Products ───────────────────────────────
+                product_codes = merged.get("product_codes", [])
+                if product_codes and not dry_run:
+                    bp_data = [{"contract_id": contract_id, "product_code": pc} for pc in product_codes]
+                    n = repo.upsert_contract_billing_products_batch(cur, bp_data)
+                    counts["contract_billing_product"] = n
+                elif product_codes:
+                    logger.info(f"  [DRY RUN] Would upsert {len(product_codes)} billing products")
+                    counts["contract_billing_product"] = len(product_codes)
+
+                if not dry_run:
+                    conn.commit()
+                    logger.info(f"Committed structured data for {sage_id}: {counts}")
+                else:
+                    conn.rollback()
+                    logger.info(f"[DRY RUN] Rolled back. Would have written: {counts}")
+
+        return {
+            "sage_id": sage_id,
+            "project_id": project_id,
+            "contract_id": contract_id,
+            "counts": counts,
+            "clause_tariff_ids": created_tariff_ids if not dry_run else [],
+            "dry_run": dry_run,
+        }
+
+    def _insert_year1_tariff_rate(
+        self, cur, clause_tariff_id: int, base_rate: float,
+        valid_from: Any, currency_id: Optional[int] = None,
+        rate_binding: str = "fixed",
+    ) -> None:
+        """Insert Year 1 tariff_rate explicitly.
+
+        Uses a savepoint so failures don't abort the outer transaction.
+
+        Schema: tariff_rate requires contract_year, rate_granularity,
+        period_start, hard_currency_id, local_currency_id,
+        billing_currency_id, rate_binding (floor|ceiling|discounted|fixed),
+        calc_status.
+        """
+        # Default to USD (id=1) if no currency provided
+        ccy_id = currency_id or 1
+        try:
+            cur.execute("SAVEPOINT yr1_tariff_rate")
+            cur.execute(
+                """
+                INSERT INTO tariff_rate (
+                    clause_tariff_id, contract_year, rate_granularity,
+                    period_start,
+                    hard_currency_id, local_currency_id, billing_currency_id,
+                    effective_rate_contract_ccy,
+                    effective_rate_hard_ccy,
+                    effective_rate_local_ccy,
+                    effective_rate_billing_ccy,
+                    rate_binding, calc_status, is_current,
+                    calc_detail
+                )
+                VALUES (
+                    %s, 1, 'annual',
+                    %s,
+                    %s, %s, %s,
+                    %s, %s, %s, %s,
+                    %s, 'computed', TRUE,
+                    %s
+                )
+                ON CONFLICT (clause_tariff_id, contract_year)
+                    WHERE rate_granularity = 'annual'
+                DO UPDATE SET
+                    effective_rate_contract_ccy = EXCLUDED.effective_rate_contract_ccy,
+                    effective_rate_hard_ccy = EXCLUDED.effective_rate_hard_ccy,
+                    effective_rate_local_ccy = EXCLUDED.effective_rate_local_ccy,
+                    effective_rate_billing_ccy = EXCLUDED.effective_rate_billing_ccy,
+                    period_start = EXCLUDED.period_start,
+                    is_current = TRUE,
+                    calc_status = 'computed'
+                """,
+                (
+                    clause_tariff_id,
+                    valid_from,
+                    ccy_id, ccy_id, ccy_id,
+                    base_rate, base_rate, base_rate, base_rate,
+                    rate_binding,
+                    psycopg2.extras.Json({
+                        "source": "excel_first_pipeline",
+                        "year": 1,
+                        "base_rate": float(base_rate),
+                    }),
+                ),
+            )
+            cur.execute("RELEASE SAVEPOINT yr1_tariff_rate")
+            logger.info(f"Inserted Year 1 tariff_rate for clause_tariff_id={clause_tariff_id}")
+        except Exception as e:
+            cur.execute("ROLLBACK TO SAVEPOINT yr1_tariff_rate")
+            logger.warning(f"Year 1 tariff_rate insert failed: {e}")

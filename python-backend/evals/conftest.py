@@ -263,7 +263,8 @@ def fm_contract_lines(db_conn) -> List[Dict[str, Any]]:
     """Load FM contract lines."""
     with db_conn.cursor() as cur:
         cur.execute("""
-            SELECT id, contract_id, external_line_id, meter_id, is_active,
+            SELECT id, contract_id, external_line_id, contract_line_number,
+                   meter_id, is_active,
                    energy_category::text AS energy_category, clause_tariff_id,
                    organization_id, parent_contract_line_id
             FROM contract_line
@@ -302,12 +303,35 @@ def fm_billing_periods(db_conn) -> List[Dict[str, Any]]:
 
 @pytest.fixture(scope="session")
 def fm_clause_tariffs(db_conn) -> List[Dict[str, Any]]:
-    """Load FM clause tariffs."""
+    """Load FM clause tariffs with tariff details for lean gate tests."""
     with db_conn.cursor() as cur:
         cur.execute("""
-            SELECT id, tariff_group_key, is_active, valid_from, valid_to, organization_id
-            FROM clause_tariff
-            WHERE organization_id = 1
+            SELECT ct.id, ct.tariff_group_key, ct.is_active, ct.valid_from, ct.valid_to,
+                   ct.organization_id, ct.base_rate, ct.contract_id,
+                   ct.source_metadata,
+                   et.code AS escalation_type_code
+            FROM clause_tariff ct
+            LEFT JOIN escalation_type et ON et.id = ct.escalation_type_id
+            WHERE ct.organization_id = 1
+        """)
+        return [dict(row) for row in cur.fetchall()]
+
+
+@pytest.fixture(scope="session")
+def fm_tariff_rates(db_conn) -> List[Dict[str, Any]]:
+    """Load FM tariff rates for lean gate tests."""
+    with db_conn.cursor() as cur:
+        cur.execute("""
+            SELECT id, clause_tariff_id, contract_year,
+                   rate_granularity::text AS rate_granularity,
+                   effective_rate_contract_ccy,
+                   period_start, period_end,
+                   calc_status::text AS calc_status
+            FROM tariff_rate
+            WHERE clause_tariff_id IN (
+                SELECT id FROM clause_tariff WHERE organization_id = 1
+            )
+            ORDER BY clause_tariff_id, contract_year, period_start
         """)
         return [dict(row) for row in cur.fetchall()]
 

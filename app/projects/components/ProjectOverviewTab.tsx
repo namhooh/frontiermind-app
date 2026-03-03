@@ -2,6 +2,7 @@
 
 import { useMemo } from 'react'
 import type { ProjectDashboardResponse } from '@/lib/api/adminClient'
+import { toOpts } from '@/app/projects/utils/constants'
 import { CollapsibleSection } from './CollapsibleSection'
 import { ProjectTableTab, type Column } from './ProjectTableTab'
 import { FieldGrid, type FieldDef } from './shared/FieldGrid'
@@ -63,8 +64,6 @@ export function ProjectOverviewTab({ data, contractColumns, projectId, onSaved, 
     return result
   }, [contacts])
 
-  const toOpts = (items: { id: number; code?: string; name: string }[]) =>
-    (items ?? []).map((t) => ({ value: t.id, label: t.name }))
   const contractTypeOpts = toOpts(lookups?.contract_types)
 
   return (

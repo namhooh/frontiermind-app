@@ -8,6 +8,8 @@ import { IS_DEMO } from '@/lib/demoMode'
 import { toast } from 'sonner'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/app/components/ui/tabs'
 import { adminClient, type ProjectDashboardResponse, type GRPObservation, type SubmissionTokenItem } from '@/lib/api/adminClient'
+import { fmtNum } from './utils/formatters'
+import { toOpts } from './utils/constants'
 import { ProjectSidebar } from './components/ProjectSidebar'
 import { ProjectOverviewTab } from './components/ProjectOverviewTab'
 import { ProjectTableTab, type Column } from './components/ProjectTableTab'
@@ -107,8 +109,6 @@ function ProjectsPageContent() {
 
   // Build lookup options from dashboard response
   const lookups = dashboard?.lookups ?? {}
-  const toOpts = (items: { id: number; code?: string; name: string }[]) =>
-    (items ?? []).map((t) => ({ value: t.id, label: t.name }))
   const contractTypeOpts = useMemo(() => toOpts(lookups.contract_types), [lookups.contract_types])
   const contractStatusOpts = useMemo(() => toOpts(lookups.contract_statuses), [lookups.contract_statuses])
   const counterpartyOpts = useMemo(() => toOpts(lookups.counterparties), [lookups.counterparties])
@@ -152,7 +152,7 @@ function ProjectsPageContent() {
     const d = new Date(String(v))
     return isNaN(d.getTime()) ? String(v) : MONTH_SHORT[d.getUTCMonth()]
   }
-  const fmtNum2 = (v: unknown) => v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  const fmtNum2 = (v: unknown) => v == null ? '—' : fmtNum(Number(v), 2)
   const fmtPR = (v: unknown) => v == null ? '—' : (Number(v) * 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
   const forecastColumns: Column[] = [

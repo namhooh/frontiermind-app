@@ -19,8 +19,12 @@ export function fmtNum(v: number | null | undefined, decimals = 0): string {
   })
 }
 
-/** Format currency amount to 2 decimal places */
-export function fmtCurrency(v: number | null | undefined, _currency?: string | null): string {
+/** Format currency amount to 2 decimal places.
+ *  The currency param is accepted for call-site documentation but does not
+ *  alter formatting (callers add symbols/codes themselves).
+ */
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function fmtCurrency(v: number | null | undefined, currency?: string | null): string {
   if (v == null) return '—'
   return v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }

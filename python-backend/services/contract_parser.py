@@ -14,16 +14,41 @@ sending any data to Claude API, preventing PII exposure to external AI services.
 """
 
 import logging
+import re
 import time
 import os
 import json
-from typing import List
+from typing import List, Dict, Any, Optional
 from pathlib import Path
 
 from llama_parse import LlamaParse
 from anthropic import Anthropic
 
+from config.settings import CLAUDE_MODEL
 from services.pii_detector import PIIDetector, PIIDetectionError
+
+
+def _extract_json_block(text: str, strict: bool = True) -> str:
+    """Extract JSON from a markdown-fenced response.
+
+    Handles ```json ... ``` and bare ``` ... ``` patterns.
+    If strict=False, tolerates unclosed fences (takes to end of string).
+    """
+    if "```json" in text:
+        start = text.find("```json") + 7
+        end = text.find("```", start)
+        if end == -1 and not strict:
+            end = len(text)
+        if end != -1:
+            return text[start:end].strip()
+    elif "```" in text:
+        start = text.find("```") + 3
+        end = text.find("```", start)
+        if end == -1 and not strict:
+            end = len(text)
+        if end != -1:
+            return text[start:end].strip()
+    return text
 
 
 class StreamingResponseWrapper:
@@ -414,6 +439,21 @@ class ContractParser:
             raw_text = self._parse_document(file_bytes, filename)
             logger.info(f"Document parsed: {len(raw_text)} characters")
 
+            # Step 1.5: Detect document sections (combined PDF detection)
+            document_sections = self._detect_document_sections(raw_text)
+            multi_document_detected = len(document_sections) > 1
+            if multi_document_detected:
+                section_titles = [s['title'] for s in document_sections]
+                logger.warning(
+                    f"MULTI-DOCUMENT DETECTED: {len(document_sections)} sections found "
+                    f"in contract {contract_id}: {section_titles}. "
+                    f"This PDF may contain the original contract plus amendment(s). "
+                    f"Proceeding with full document parse — review extraction_metadata "
+                    f"for section boundaries."
+                )
+            else:
+                logger.info("Single document detected — no amendment boundaries found")
+
             # Step 2: Detect PII locally
             logger.info("Step 2: Detecting PII locally")
             pii_entities = self.pii_detector.detect(raw_text)
@@ -439,13 +479,22 @@ class ContractParser:
 
             # Update contract record with extracted metadata
             if contract_metadata:
+                # Merge document section info into extraction_metadata
+                ext_meta = contract_metadata.get('extraction_metadata') or {}
+                if multi_document_detected:
+                    ext_meta['document_sections'] = document_sections
+                    ext_meta['multi_document_detected'] = True
+                else:
+                    ext_meta['multi_document_detected'] = False
+
                 self.repository.update_contract_metadata(
                     contract_id=contract_id,
                     contract_type_id=contract_metadata.get('contract_type_id'),
                     counterparty_id=contract_metadata.get('counterparty_id'),
                     effective_date=contract_metadata.get('effective_date'),
                     end_date=contract_metadata.get('end_date'),
-                    extraction_metadata=contract_metadata.get('extraction_metadata')
+                    contract_term_years=contract_metadata.get('contract_term_years'),
+                    extraction_metadata=ext_meta
                 )
                 logger.info(
                     f"Contract metadata updated: type_id={contract_metadata.get('contract_type_id')}, "
@@ -589,6 +638,34 @@ class ContractParser:
                     f"Relationship detection failed (non-critical): {rel_err}"
                 )
 
+            # Step 9: Bridge PRICING clauses to clause_tariff
+            tariffs_created = 0
+            try:
+                from services.tariff.tariff_bridge import TariffBridge
+                bridge = TariffBridge()
+                tariff_ids = bridge.bridge_pricing_clauses(contract_id, project_id)
+                tariffs_created = len(tariff_ids)
+                logger.info(f"Created {tariffs_created} clause_tariff records from PRICING clauses")
+
+                # Also repair any existing tariffs with incorrect dates
+                repaired = bridge.repair_existing_tariff_dates(contract_id)
+                if repaired > 0:
+                    logger.info(f"Repaired {repaired} existing clause_tariff date(s)")
+            except Exception as tariff_err:
+                logger.warning(f"Tariff bridge failed (non-critical): {tariff_err}")
+
+            # Step 10: Enrich MAIN tariff logic_parameters from extracted clauses
+            try:
+                from services.tariff.logic_parameter_enricher import LogicParameterEnricher
+                enricher = LogicParameterEnricher()
+                enrichment_result = enricher.enrich(contract_id)
+                logger.info(
+                    f"Logic parameter enrichment: {enrichment_result.get('enriched_count', 0)} fields "
+                    f"added, {enrichment_result.get('skipped_count', 0)} skipped"
+                )
+            except Exception as enrich_err:
+                logger.warning(f"Logic parameter enrichment failed (non-critical): {enrich_err}")
+
             result = ContractParseResult(
                 contract_id=contract_id,
                 clauses=clauses,
@@ -673,6 +750,76 @@ class ContractParser:
             logger.error(f"LlamaParse document parsing failed: {str(e)}")
             raise DocumentParsingError(f"Failed to parse document: {str(e)}") from e
 
+    # Boundary patterns that indicate a new document section in combined PDFs
+    BOUNDARY_PATTERNS = [
+        r'(?i)^(?:FIRST|SECOND|THIRD|1ST|2ND|3RD|\d+(?:ST|ND|RD|TH))\s+AMENDMENT',
+        r'(?i)^AMENDMENT\s+(?:NO\.?\s*)?\d+',
+        r'(?i)^ADDENDUM\s+(?:NO\.?\s*)?\d+',
+        r'(?i)^SUPPLEMENTAL\s+AGREEMENT',
+        r'(?i)^DEED\s+OF\s+(?:AMENDMENT|VARIATION)',
+    ]
+
+    def _detect_document_sections(self, raw_text: str) -> List[Dict[str, Any]]:
+        """
+        Scan raw text for amendment/addendum boundary markers indicating
+        a combined PDF with multiple logical documents.
+
+        Args:
+            raw_text: Full parsed text of the document
+
+        Returns:
+            List of section dicts with keys:
+                - section_type: "original" or "amendment"
+                - title: Section title (e.g. "FIRST AMENDMENT")
+                - char_start: Character offset start
+                - char_end: Character offset end
+                - amendment_number: Integer (for amendments only)
+        """
+        boundaries = []
+
+        for line_match in re.finditer(r'^(.+)$', raw_text, re.MULTILINE):
+            line = line_match.group(1).strip()
+            for pattern in self.BOUNDARY_PATTERNS:
+                if re.match(pattern, line):
+                    boundaries.append({
+                        'title': line,
+                        'char_start': line_match.start(),
+                    })
+                    break
+
+        if not boundaries:
+            # Single document — no boundaries detected
+            return [{
+                'section_type': 'original',
+                'title': 'Original Contract',
+                'char_start': 0,
+                'char_end': len(raw_text),
+            }]
+
+        # Build sections: original + each amendment
+        sections = []
+
+        # Original contract runs from start to first boundary
+        sections.append({
+            'section_type': 'original',
+            'title': 'Original Contract',
+            'char_start': 0,
+            'char_end': boundaries[0]['char_start'],
+        })
+
+        # Each boundary starts a new amendment section
+        for i, boundary in enumerate(boundaries):
+            end = boundaries[i + 1]['char_start'] if i + 1 < len(boundaries) else len(raw_text)
+            sections.append({
+                'section_type': 'amendment',
+                'title': boundary['title'],
+                'char_start': boundary['char_start'],
+                'char_end': end,
+                'amendment_number': i + 1,
+            })
+
+        return sections
+
     def _extract_clauses(self, anonymized_text: str) -> tuple[List[ExtractedClause], ExtractionSummary]:
         """
         Route to appropriate extraction method based on extraction_mode.
@@ -754,7 +901,7 @@ class ContractParser:
 
                 # Call Claude API with streaming to avoid timeout
                 response = self._call_claude_streaming(
-                    model="claude-sonnet-4-5-20250929",
+                    model=CLAUDE_MODEL,
                     max_tokens=TOKEN_BUDGETS["main_extraction"],
                     system=prompts['system'],
                     messages=[{"role": "user", "content": prompts['user']}],
@@ -830,14 +977,7 @@ class ContractParser:
         response_text = response.content[0].text
 
         # Extract JSON from response (Claude may wrap it in markdown)
-        if "```json" in response_text:
-            json_start = response_text.find("```json") + 7
-            json_end = response_text.find("```", json_start)
-            response_text = response_text[json_start:json_end].strip()
-        elif "```" in response_text:
-            json_start = response_text.find("```") + 3
-            json_end = response_text.find("```", json_start)
-            response_text = response_text[json_start:json_end].strip()
+        response_text = _extract_json_block(response_text)
 
         clauses_data = json.loads(response_text)
 
@@ -912,7 +1052,7 @@ class ContractParser:
                 )
 
                 response = self._call_claude_streaming(
-                    model="claude-sonnet-4-5-20250929",
+                    model=CLAUDE_MODEL,
                     max_tokens=TOKEN_BUDGETS["discovery"],
                     system=prompts['system'],
                     messages=[{"role": "user", "content": prompts['user']}],
@@ -964,7 +1104,7 @@ class ContractParser:
                 )
 
                 response = self._call_claude_streaming(
-                    model="claude-sonnet-4-5-20250929",
+                    model=CLAUDE_MODEL,
                     max_tokens=TOKEN_BUDGETS["categorization"],
                     system=prompts['system'],
                     messages=[{"role": "user", "content": prompts['user']}],
@@ -1119,18 +1259,7 @@ class ContractParser:
         response_text = response.content[0].text
 
         # Extract JSON from response
-        if "```json" in response_text:
-            json_start = response_text.find("```json") + 7
-            json_end = response_text.find("```", json_start)
-            if json_end == -1:
-                json_end = len(response_text)
-            response_text = response_text[json_start:json_end].strip()
-        elif "```" in response_text:
-            json_start = response_text.find("```") + 3
-            json_end = response_text.find("```", json_start)
-            if json_end == -1:
-                json_end = len(response_text)
-            response_text = response_text[json_start:json_end].strip()
+        response_text = _extract_json_block(response_text, strict=False)
 
         # Try to parse, with repair for truncated JSON (output token limit may truncate response)
         try:
@@ -1170,19 +1299,7 @@ class ContractParser:
         response_text = response.content[0].text
 
         # Extract JSON from response
-        if "```json" in response_text:
-            json_start = response_text.find("```json") + 7
-            json_end = response_text.find("```", json_start)
-            if json_end == -1:
-                # No closing ```, try to find where JSON ends
-                json_end = len(response_text)
-            response_text = response_text[json_start:json_end].strip()
-        elif "```" in response_text:
-            json_start = response_text.find("```") + 3
-            json_end = response_text.find("```", json_start)
-            if json_end == -1:
-                json_end = len(response_text)
-            response_text = response_text[json_start:json_end].strip()
+        response_text = _extract_json_block(response_text, strict=False)
 
         # Try to repair truncated JSON (output token limit may truncate response)
         try:
@@ -1333,7 +1450,7 @@ class ContractParser:
 
                         # Call Claude API with streaming
                         response = self._call_claude_streaming(
-                            model="claude-sonnet-4-5-20250929",
+                            model=CLAUDE_MODEL,
                             max_tokens=TOKEN_BUDGETS["targeted"],
                             system=prompts['system'],
                             messages=[{"role": "user", "content": prompts['user']}],
@@ -1409,7 +1526,7 @@ class ContractParser:
 
                     # Call Claude API with streaming
                     response = self._call_claude_streaming(
-                        model="claude-sonnet-4-5-20250929",
+                        model=CLAUDE_MODEL,
                         max_tokens=TOKEN_BUDGETS["enrichment"],
                         system=prompts['system'],
                         messages=[{"role": "user", "content": prompts['user']}],
@@ -1453,7 +1570,7 @@ class ContractParser:
 
                 # Call Claude API with streaming
                 response = self._call_claude_streaming(
-                    model="claude-sonnet-4-5-20250929",
+                    model=CLAUDE_MODEL,
                     max_tokens=TOKEN_BUDGETS["validation"],
                     system=prompts['system'],
                     messages=[{"role": "user", "content": prompts['user']}],
@@ -1509,14 +1626,7 @@ class ContractParser:
         response_text = response.content[0].text
 
         # Extract JSON from response
-        if "```json" in response_text:
-            json_start = response_text.find("```json") + 7
-            json_end = response_text.find("```", json_start)
-            response_text = response_text[json_start:json_end].strip()
-        elif "```" in response_text:
-            json_start = response_text.find("```") + 3
-            json_end = response_text.find("```", json_start)
-            response_text = response_text[json_start:json_end].strip()
+        response_text = _extract_json_block(response_text)
 
         try:
             data = json.loads(response_text)
@@ -1548,14 +1658,7 @@ class ContractParser:
         response_text = response.content[0].text
 
         # Extract JSON from response
-        if "```json" in response_text:
-            json_start = response_text.find("```json") + 7
-            json_end = response_text.find("```", json_start)
-            response_text = response_text[json_start:json_end].strip()
-        elif "```" in response_text:
-            json_start = response_text.find("```") + 3
-            json_end = response_text.find("```", json_start)
-            response_text = response_text[json_start:json_end].strip()
+        response_text = _extract_json_block(response_text)
 
         try:
             data = json.loads(response_text)
@@ -1624,7 +1727,7 @@ class ContractParser:
 
             # Call Claude API with streaming
             response = self._call_claude_streaming(
-                model="claude-sonnet-4-5-20250929",
+                model=CLAUDE_MODEL,
                 max_tokens=TOKEN_BUDGETS["metadata"],
                 system=prompts['system'],
                 messages=[{"role": "user", "content": prompts['user']}],
@@ -1647,9 +1750,11 @@ class ContractParser:
                 'overall_confidence': metadata.get('overall_confidence', 0),
             })
 
-            # Extract dates
+            # Extract dates and term
             result['effective_date'] = metadata.get('effective_date')
             result['end_date'] = metadata.get('end_date')
+            if metadata.get('term_years') is not None:
+                result['contract_term_years'] = int(metadata['term_years'])
 
             # Resolve contract_type to FK
             if self.lookup_service and metadata.get('contract_type'):

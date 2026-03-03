@@ -28,7 +28,11 @@ IMPORTANT RULES:
    - Multiple TERMINATION triggers (early termination, expiration, default termination)
    - Multiple PRICING provisions (base rate, escalation, adjustments)
    - Multiple COMPLIANCE requirements (permits, reporting, environmental)
-9. Aim to extract 20-30 clauses from a typical PPA contract"""
+9. Aim to extract 20-30 clauses from a typical PPA contract
+10. CRITICAL: Only extract values EXPLICITLY STATED in the text.
+    Do NOT calculate, derive, or convert values. If the text says "355 days",
+    extract 355 with unit "days" — do NOT convert to percentage.
+    If a canonical field would require calculation, set it to null."""
 
 
 CLAUSE_EXTRACTION_USER_PROMPT = """Extract clauses from this energy contract. For each clause found, provide BOTH the raw text AND a normalized structure.
@@ -58,10 +62,13 @@ Extract and normalize:
 ### 2. AVAILABILITY
 **Code:** AVAILABILITY
 **Description:** System uptime, availability guarantees, meter accuracy, and curtailment provisions
-**Look for:** "availability", "uptime", "meter accuracy", "curtailment", "unavailability", "outage hours"
+**Look for:** "availability", "uptime", "meter accuracy", "curtailment", "unavailability", "outage hours",
+  "Annexure G", "available energy", "deemed energy", "irradiance", "Normal Operation", "W/m²"
 
 Extract and normalize (use these canonical field names):
-- threshold [T]: Guaranteed minimum availability percentage (e.g., 95.0)
+- threshold [T]: Guaranteed minimum availability value AS STATED in the text
+  (do NOT convert between units — if it says 355 days, extract 355)
+- threshold_unit [C]: "percent" or "days" — matches how the contract states the threshold
 - measurement_period [C]: "monthly", "quarterly", "annual"
 - calculation_method [FD]: Formula or method description
 - excused_events [S]: List of events that don't count against availability
@@ -69,6 +76,11 @@ Extract and normalize (use these canonical field names):
 - ld_cap [FI]: Annual cap on liquidated damages
 - scheduled_outage_max_hours_per_year [C]: Maximum scheduled outage hours per year
 - scheduled_outage_notice_days [C]: Advance notice for planned outages
+- available_energy_method [FD]: Available/deemed energy calculation method (e.g., "irradiance_interval_adjusted", "monthly_average_irradiance", "fixed_deemed")
+- irradiance_threshold_wm2 [FI]: Minimum irradiance (W/m²) for qualifying Normal Operation intervals (e.g., 100)
+- interval_minutes [C]: Meter reading interval in minutes (e.g., 15)
+- monthly_production_formula [FD]: Formula for Actual Monthly Production / Energy Output (e.g., "E_month = sum(E_metered(i)) + sum(E_Available(x))")
+- available_energy_formula [FD]: Formula for Available/Deemed Energy per interval (e.g., "E_Available(x) = (E_hist / Intervals) * (Irr(x) / Irr_hist)")
 
 
 ### 3. PERFORMANCE GUARANTEE
@@ -103,8 +115,10 @@ Extract and normalize:
 
 ### 5. PRICING
 **Code:** PRICING
-**Description:** Energy rates, price escalation, indexing, and adjustment mechanisms
-**Look for:** "price", "rate", "$/kWh", "$/MWh", "escalation", "price adjustment", "tariff"
+**Description:** Energy rates, price escalation, indexing, adjustment mechanisms, and grid reference pricing
+**Look for:** "price", "rate", "$/kWh", "$/MWh", "escalation", "price adjustment", "tariff",
+  "Grid Tariff", "Grid Reference Price", "Reference Bill", "Reference Invoice", "Current Grid Tariff",
+  "discount", "floor", "ceiling", "solar tariff", "solar discount"
 
 Extract and normalize (use these canonical field names):
 - base_rate_per_kwh [FI]: Starting energy rate value (REQUIRED)
@@ -116,6 +130,18 @@ Extract and normalize (use these canonical field names):
 - includes_environmental_attributes [C]: Whether rate includes RECs
 - rate_schedule [S]: Rate schedule for tiered/time-varying pricing (list of {period, rate, unit})
 - billing_currency [C]: Currency for billing and invoicing
+- grp_method [C]: Grid Reference Price calculation method (e.g., "utility_variable_charges_tou", "utility_total_charges")
+- grp_included_components [S]: Which utility bill line items are included in GRP (e.g., ["energy_charge", "subsidy", "streetlight_levy"])
+- grp_excluded_components [S]: Which utility bill line items are excluded from GRP (e.g., ["VAT", "demand_charges"])
+- grp_time_window_start [C]: Operating window start time if GRP is time-of-use restricted (e.g., "06:00")
+- grp_time_window_end [C]: Operating window end time (e.g., "18:00")
+- grp_calculation_due_days [C]: Days after month-end for GRP calculation to be delivered
+- grp_verification_deadline_days [C]: Days for joint verification of GRP after receipt
+- pricing_formula_text [FD]: Full pricing/payment formula as stated in the contract
+- discount_pct [FI]: Solar discount percentage off grid tariff (e.g., 18.5 for 18.5%)
+- floor_rate [FI]: Minimum solar price / floor tariff per kWh
+- ceiling_rate [FI]: Maximum solar price / ceiling tariff per kWh
+- recalculation_frequency [C]: How often the solar tariff is recalculated (e.g., "annual")
 
 
 ### 6. PAYMENT TERMS

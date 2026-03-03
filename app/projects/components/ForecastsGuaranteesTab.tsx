@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import { IS_DEMO } from '@/lib/demoMode'
 import { ProjectTableTab, type Column } from './ProjectTableTab'
 import { adminClient } from '@/lib/api/adminClient'
+import { fmtNum } from '@/app/projects/utils/formatters'
 
 interface ForecastsGuaranteesTabProps {
   forecasts: Record<string, unknown>[]
@@ -44,7 +45,7 @@ function CollapsibleSection({ title, subtitle, defaultOpen = true, children }: {
   )
 }
 
-const fmtNum2 = (v: number) => v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmtNum2 = (v: number) => fmtNum(v, 2)
 
 // Keys that should be summed; PR is averaged instead
 const SUM_KEYS = ['forecast_energy_kwh', 'forecast_ghi_irradiance', 'forecast_poa_irradiance'] as const

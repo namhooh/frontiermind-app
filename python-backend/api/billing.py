@@ -12,7 +12,7 @@ import io
 import json
 import logging
 from datetime import date, datetime
-from decimal import Decimal, ROUND_HALF_UP, InvalidOperation
+from decimal import Decimal, ROUND_HALF_UP, ROUND_HALF_EVEN, ROUND_FLOOR, ROUND_CEILING, InvalidOperation
 from typing import Any, List, Optional
 
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, UploadFile, File, Path, Query, status
@@ -135,6 +135,8 @@ class MeterReadingDetail(BaseModel):
     available_kwh: Optional[float] = None
     rate: Optional[float] = None
     amount: Optional[float] = None
+    amount_metered: Optional[float] = None
+    amount_available: Optional[float] = None
     rate_hard_ccy: Optional[float] = None
     amount_hard_ccy: Optional[float] = None
 
@@ -146,6 +148,7 @@ class MeterBillingMonth(BaseModel):
     total_available_kwh: Optional[float] = None
     total_energy_kwh: Optional[float] = None
     total_amount: Optional[float] = None
+    total_amount_hard_ccy: Optional[float] = None
     expected_invoice: Optional['ExpectedInvoiceSummary'] = None
 
 
@@ -186,6 +189,8 @@ class ExpectedInvoiceSummary(BaseModel):
     invoice_total: float = 0         # subtotal_after_levies + vat_amount
     withholdings_total: float = 0    # SUM(|line_total|) WHERE type = WITHHOLDING
     net_due: float = 0               # SUM(all line_total) = header.total_amount
+    net_due_hard_ccy: Optional[float] = None  # net_due converted via FX rate
+    fx_rate: Optional[float] = None           # billing_ccy / hard_ccy (e.g. GHS/USD)
     line_items: List[ExpectedInvoiceLineItem] = []
 
 
@@ -225,10 +230,145 @@ def _to_decimal(val: Any) -> Decimal:
         return Decimal('0')
 
 
+_ROUNDING_MODES: dict[str, str] = {
+    "ROUND_HALF_UP": ROUND_HALF_UP,
+    "ROUND_HALF_EVEN": ROUND_HALF_EVEN,
+    "ROUND_FLOOR": ROUND_FLOOR,
+    "ROUND_CEILING": ROUND_CEILING,
+}
+
+
 def _round_d(val: Decimal, precision: int = 2, mode: str = 'ROUND_HALF_UP') -> Decimal:
     """Round a Decimal with the specified mode."""
-    rounding = ROUND_HALF_UP  # only mode we support currently
+    rounding = _ROUNDING_MODES.get(mode)
+    if rounding is None:
+        logger.warning(f"Unknown rounding mode '{mode}', falling back to ROUND_HALF_UP")
+        rounding = ROUND_HALF_UP
     return val.quantize(Decimal(10) ** -precision, rounding=rounding)
+
+
+def _resolve_effective_rates(
+    cur, clause_tariff_ids: list[int], billing_month: date
+) -> dict[int, tuple[Decimal | None, Decimal | None]]:
+    """Batch-resolve effective rates for a single billing month.
+
+    Returns {ct_id: (billing_ccy_rate, hard_ccy_rate)} using fallback chain:
+    monthly rate → annual rate → base_rate from clause_tariff.
+    """
+    result: dict[int, tuple[Decimal | None, Decimal | None]] = {}
+    if not clause_tariff_ids:
+        return result
+
+    ids = list(clause_tariff_ids)
+
+    # 1) Monthly rates (batch)
+    cur.execute("""
+        SELECT clause_tariff_id, effective_rate_billing_ccy, effective_rate_hard_ccy
+        FROM tariff_rate
+        WHERE clause_tariff_id = ANY(%(ids)s)
+          AND billing_month = %(bm)s
+          AND rate_granularity = 'monthly'
+          AND calc_status IN ('computed', 'approved')
+    """, {"ids": ids, "bm": billing_month})
+    for rr in cur.fetchall():
+        if rr["effective_rate_billing_ccy"] is not None:
+            hard = Decimal(str(rr["effective_rate_hard_ccy"])) if rr["effective_rate_hard_ccy"] is not None else None
+            result[rr["clause_tariff_id"]] = (Decimal(str(rr["effective_rate_billing_ccy"])), hard)
+
+    # 2) Annual fallback (batch — pick best matching annual rate per tariff)
+    missing_ids = [ct_id for ct_id in ids if ct_id not in result]
+    if missing_ids:
+        cur.execute("""
+            SELECT DISTINCT ON (clause_tariff_id)
+                   clause_tariff_id, effective_rate_billing_ccy, effective_rate_hard_ccy
+            FROM tariff_rate
+            WHERE clause_tariff_id = ANY(%(ids)s)
+              AND rate_granularity = 'annual'
+              AND period_start <= %(bm)s
+              AND (period_end IS NULL OR period_end >= %(bm)s)
+              AND calc_status IN ('computed', 'approved')
+            ORDER BY clause_tariff_id, period_start DESC
+        """, {"ids": missing_ids, "bm": billing_month})
+        for rr in cur.fetchall():
+            if rr["effective_rate_billing_ccy"] is not None:
+                hard = Decimal(str(rr["effective_rate_hard_ccy"])) if rr["effective_rate_hard_ccy"] is not None else None
+                result[rr["clause_tariff_id"]] = (Decimal(str(rr["effective_rate_billing_ccy"])), hard)
+
+    # 3) Base rate fallback (batch)
+    still_missing = [ct_id for ct_id in ids if ct_id not in result]
+    if still_missing:
+        cur.execute("""
+            SELECT id, base_rate FROM clause_tariff WHERE id = ANY(%(ids)s)
+        """, {"ids": still_missing})
+        for rr in cur.fetchall():
+            if rr["base_rate"] is not None:
+                result[rr["id"]] = (Decimal(str(rr["base_rate"])), None)
+
+    return result
+
+
+def _get_project_currencies(cur, project_id: int) -> tuple[str | None, str | None, float | None]:
+    """Get billing and hard currency codes + degradation_pct for a project.
+
+    Returns (billing_currency_code, hard_currency_code, degradation_pct).
+    """
+    cur.execute("""
+        SELECT COALESCE(bcur.code, cur.code) AS code,
+               hcur.code AS hard_currency_code,
+               ct.logic_parameters->>'degradation_pct' AS degradation_pct
+        FROM clause_tariff ct
+        JOIN currency cur ON cur.id = ct.currency_id
+        LEFT JOIN tariff_rate tr2 ON tr2.clause_tariff_id = ct.id
+        LEFT JOIN currency bcur ON bcur.id = tr2.billing_currency_id
+        LEFT JOIN currency hcur ON hcur.id = tr2.hard_currency_id
+        WHERE ct.project_id = %(pid)s AND ct.is_current = true
+        ORDER BY tr2.billing_currency_id IS NOT NULL DESC
+        LIMIT 1
+    """, {"pid": project_id})
+    row = cur.fetchone()
+    if not row:
+        return None, None, None
+    degradation = float(row["degradation_pct"]) if row["degradation_pct"] else None
+    return row["code"], row["hard_currency_code"], degradation
+
+
+def _load_rate_data(cur, ct_id: int) -> dict:
+    """Load all rate data (monthly + annual) for a clause_tariff.
+
+    Returns dict with keys: monthly, monthly_hard, annual, base.
+    Used by monthly-billing and meter-billing rate lookups.
+    """
+    cur.execute("SELECT base_rate FROM clause_tariff WHERE id = %(ct_id)s", {"ct_id": ct_id})
+    ct_info = cur.fetchone()
+    br = float(ct_info["base_rate"]) if ct_info and ct_info["base_rate"] else None
+
+    cur.execute("""
+        SELECT tr.billing_month, tr.effective_rate_billing_ccy,
+               tr.effective_rate_hard_ccy,
+               tr.rate_granularity::text AS rate_granularity,
+               tr.period_start, tr.period_end
+        FROM tariff_rate tr
+        WHERE tr.clause_tariff_id = %(ct_id)s
+          AND tr.calc_status IN ('computed', 'approved')
+        ORDER BY tr.rate_granularity = 'annual' ASC, tr.billing_month
+    """, {"ct_id": ct_id})
+    monthly: dict[str, float] = {}
+    monthly_hard: dict[str, float] = {}
+    annual: list[dict] = []
+    for rr in cur.fetchall():
+        if rr["rate_granularity"] == "monthly" and rr["effective_rate_billing_ccy"] is not None:
+            m_str = rr["billing_month"].strftime("%Y-%m-%d") if isinstance(rr["billing_month"], date) else str(rr["billing_month"])
+            monthly[m_str] = float(rr["effective_rate_billing_ccy"])
+            if rr["effective_rate_hard_ccy"] is not None:
+                monthly_hard[m_str] = float(rr["effective_rate_hard_ccy"])
+        elif rr["rate_granularity"] == "annual":
+            annual.append({
+                "period_start": rr["period_start"],
+                "period_end": rr["period_end"],
+                "rate": float(rr["effective_rate_billing_ccy"]) if rr["effective_rate_billing_ccy"] else None,
+                "rate_hard_ccy": float(rr["effective_rate_hard_ccy"]) if rr["effective_rate_hard_ccy"] else None,
+            })
+    return {"monthly": monthly, "monthly_hard": monthly_hard, "annual": annual, "base": br}
 
 
 # ============================================================================
@@ -331,52 +471,15 @@ async def generate_expected_invoice(
                 # ----------------------------------------------------------
                 # 3. Resolve tariff rates per contract_line
                 # ----------------------------------------------------------
-                # Collect all clause_tariff_ids we need rates for
                 tariff_ids = set()
                 for cl in contract_lines:
                     ct_id = cl.get("clause_tariff_id") or project_tariff["id"]
                     tariff_ids.add(ct_id)
 
-                # Get monthly rates for the billing month
-                rate_by_tariff: dict[int, Decimal] = {}
-                if tariff_ids:
-                    cur.execute("""
-                        SELECT clause_tariff_id, effective_rate_billing_ccy
-                        FROM tariff_rate
-                        WHERE clause_tariff_id = ANY(%(ids)s)
-                          AND billing_month = %(bm)s
-                          AND rate_granularity = 'monthly'
-                          AND calc_status IN ('computed', 'approved')
-                    """, {"ids": list(tariff_ids), "bm": bm_date})
-                    for rr in cur.fetchall():
-                        if rr["effective_rate_billing_ccy"] is not None:
-                            rate_by_tariff[rr["clause_tariff_id"]] = Decimal(str(rr["effective_rate_billing_ccy"]))
-
-                    # Fallback: annual rates
-                    for ct_id in tariff_ids:
-                        if ct_id not in rate_by_tariff:
-                            cur.execute("""
-                                SELECT effective_rate_billing_ccy
-                                FROM tariff_rate
-                                WHERE clause_tariff_id = %(ct_id)s
-                                  AND rate_granularity = 'annual'
-                                  AND period_start <= %(bm)s
-                                  AND (period_end IS NULL OR period_end >= %(bm)s)
-                                  AND calc_status IN ('computed', 'approved')
-                                ORDER BY period_start DESC
-                                LIMIT 1
-                            """, {"ct_id": ct_id, "bm": bm_date})
-                            ar = cur.fetchone()
-                            if ar and ar["effective_rate_billing_ccy"]:
-                                rate_by_tariff[ct_id] = Decimal(str(ar["effective_rate_billing_ccy"]))
-
-                    # Last fallback: base_rate from clause_tariff
-                    for ct_id in tariff_ids:
-                        if ct_id not in rate_by_tariff:
-                            cur.execute("SELECT base_rate FROM clause_tariff WHERE id = %(id)s", {"id": ct_id})
-                            br = cur.fetchone()
-                            if br and br["base_rate"]:
-                                rate_by_tariff[ct_id] = Decimal(str(br["base_rate"]))
+                resolved = _resolve_effective_rates(cur, list(tariff_ids), bm_date)
+                rate_by_tariff: dict[int, Decimal] = {
+                    ct_id: pair[0] for ct_id, pair in resolved.items() if pair[0] is not None
+                }
 
                 # ----------------------------------------------------------
                 # 4. Get meter_aggregate data for this billing period
@@ -457,9 +560,14 @@ async def generate_expected_invoice(
                 # CBE billing system which truncates effective rates before
                 # multiplying by kWh quantities.
                 invoice_rate_precision = tax_config.get("invoice_rate_precision", 4)
+                invoice_rate_rounding = tax_config.get("invoice_rate_rounding_mode", rounding_mode)
+                rate_rounding = _ROUNDING_MODES.get(invoice_rate_rounding)
+                if rate_rounding is None:
+                    logger.warning(f"Unknown invoice_rate_rounding_mode '{invoice_rate_rounding}', falling back to ROUND_HALF_UP")
+                    rate_rounding = ROUND_HALF_UP
                 for ct_id in rate_by_tariff:
                     rate_by_tariff[ct_id] = rate_by_tariff[ct_id].quantize(
-                        Decimal(10) ** -invoice_rate_precision, rounding=ROUND_HALF_UP
+                        Decimal(10) ** -invoice_rate_precision, rounding=rate_rounding
                     )
 
                 # ----------------------------------------------------------
@@ -485,7 +593,7 @@ async def generate_expected_invoice(
                 if avail_mode == "single" and total_available_kwh > 0:
                     ct_id = contract_lines[0].get("clause_tariff_id") or project_tariff["id"]
                     rate = rate_by_tariff.get(ct_id, Decimal('0'))
-                    line_total = _round_d(total_available_kwh * rate, rounding_precision)
+                    line_total = _round_d(total_available_kwh * rate, rounding_precision, rounding_mode)
                     line_items.append({
                         "type_code": "AVAILABLE_ENERGY",
                         "type_id": type_map.get("AVAILABLE_ENERGY"),
@@ -516,7 +624,7 @@ async def generate_expected_invoice(
 
                         ct_id = cl.get("clause_tariff_id") or project_tariff["id"]
                         rate = rate_by_tariff.get(ct_id, Decimal('0'))
-                        line_total = _round_d(avail_kwh * rate, rounding_precision)
+                        line_total = _round_d(avail_kwh * rate, rounding_precision, rounding_mode)
 
                         desc = cl.get("product_desc") or agg.get("meter_name") or f"Meter {cl['meter_id']}"
                         line_items.append({
@@ -549,7 +657,7 @@ async def generate_expected_invoice(
 
                     ct_id = cl.get("clause_tariff_id") or project_tariff["id"]
                     rate = rate_by_tariff.get(ct_id, Decimal('0'))
-                    line_total = _round_d(metered_kwh * rate, rounding_precision)
+                    line_total = _round_d(metered_kwh * rate, rounding_precision, rounding_mode)
 
                     desc = cl.get("product_desc") or agg.get("meter_name") or f"Meter {cl['meter_id']}"
                     line_items.append({
@@ -591,7 +699,7 @@ async def generate_expected_invoice(
                 for levy in levies:
                     basis = _resolve_basis(levy, energy_subtotal, levies_total)
                     rate_pct = _to_decimal(levy.get("rate", 0))
-                    levy_amount = _round_d(basis * rate_pct, rounding_precision)
+                    levy_amount = _round_d(basis * rate_pct, rounding_precision, rounding_mode)
                     levies_total += levy_amount
 
                     line_items.append({
@@ -617,7 +725,7 @@ async def generate_expected_invoice(
                 if vat_config:
                     vat_basis = _resolve_basis(vat_config, energy_subtotal, levies_total, subtotal_after_levies)
                     vat_rate = _to_decimal(vat_config.get("rate", 0))
-                    vat_amount = _round_d(vat_basis * vat_rate, rounding_precision)
+                    vat_amount = _round_d(vat_basis * vat_rate, rounding_precision, rounding_mode)
 
                     line_items.append({
                         "type_code": "TAX",
@@ -642,7 +750,7 @@ async def generate_expected_invoice(
                 for wh in withholdings:
                     wh_basis = _resolve_basis(wh, energy_subtotal, levies_total, subtotal_after_levies)
                     wh_rate = _to_decimal(wh.get("rate", 0))
-                    wh_amount = _round_d(wh_basis * wh_rate, rounding_precision)
+                    wh_amount = _round_d(wh_basis * wh_rate, rounding_precision, rounding_mode)
                     wh_signed = -wh_amount  # store as negative
                     withholdings_total += wh_amount
 
@@ -759,7 +867,7 @@ async def generate_expected_invoice(
                     "cp": counterparty_id,
                     "cur": currency_id,
                     "dir": invoice_direction,
-                    "total": float(net_due),
+                    "total": net_due,  # pass Decimal directly for NUMERIC column
                     "ver": new_version,
                     "ikey": body.idempotency_key,
                     "meta": json.dumps(source_metadata, default=str),
@@ -792,11 +900,11 @@ async def generate_expected_invoice(
                         "type_id": li["type_id"],
                         "comp": li["component_code"],
                         "desc": li["description"],
-                        "qty": float(li["quantity"]) if li["quantity"] is not None else None,
-                        "price": float(li["unit_price"]) if li["unit_price"] is not None else None,
-                        "basis": float(li["basis_amount"]) if li["basis_amount"] is not None else None,
-                        "rate": float(li["rate_pct"]) if li["rate_pct"] is not None else None,
-                        "total": float(li["line_total_amount"]),
+                        "qty": li["quantity"],  # pass Decimal directly for NUMERIC columns
+                        "price": li["unit_price"],
+                        "basis": li["basis_amount"],
+                        "rate": li["rate_pct"],
+                        "total": li["line_total_amount"],
                         "sign": li["amount_sign"],
                         "sort": li["sort_order"],
                         "cl_id": li["contract_line_id"],
@@ -852,6 +960,21 @@ def _resolve_basis(
         return subtotal_after_levies if subtotal_after_levies is not None else (energy_subtotal + levies_total)
     return energy_subtotal
 
+
+# Guard against double-counted kWh when both a meter_id=NULL row (from
+# migration 049) and a real-meter row exist for the same contract_line/month.
+_METER_AGG_DEDUP = """
+    AND NOT (
+        ma.meter_id IS NULL
+        AND ma.contract_line_id IS NOT NULL
+        AND EXISTS (
+            SELECT 1 FROM meter_aggregate ma2
+            WHERE ma2.contract_line_id = ma.contract_line_id
+              AND date_trunc('month', ma2.period_start) = date_trunc('month', ma.period_start)
+              AND ma2.meter_id IS NOT NULL
+        )
+    )
+"""
 
 # ============================================================================
 # GET /projects/{project_id}/monthly-billing
@@ -916,23 +1039,7 @@ async def get_monthly_billing(
                     ))
 
                 # 2) Get currency from first tariff (billing + hard currency)
-                cur.execute("""
-                    SELECT COALESCE(bcur.code, cur.code) AS code,
-                           hcur.code AS hard_currency_code,
-                           ct.logic_parameters->>'degradation_pct' AS degradation_pct
-                    FROM clause_tariff ct
-                    JOIN currency cur ON cur.id = ct.currency_id
-                    LEFT JOIN tariff_rate tr2 ON tr2.clause_tariff_id = ct.id
-                    LEFT JOIN currency bcur ON bcur.id = tr2.billing_currency_id
-                    LEFT JOIN currency hcur ON hcur.id = tr2.hard_currency_id
-                    WHERE ct.project_id = %(pid)s AND ct.is_current = true
-                    ORDER BY tr2.billing_currency_id IS NOT NULL DESC
-                    LIMIT 1
-                """, {"pid": project_id})
-                currency_row = cur.fetchone()
-                currency_code = currency_row["code"] if currency_row else None
-                hard_currency_code = currency_row["hard_currency_code"] if currency_row else None
-                degradation_pct = float(currency_row["degradation_pct"]) if currency_row and currency_row["degradation_pct"] else None
+                currency_code, hard_currency_code, degradation_pct = _get_project_currencies(cur, project_id)
 
                 # 2b) Get project COD date
                 cur.execute("SELECT cod_date FROM project WHERE id = %(pid)s", {"pid": project_id})
@@ -972,6 +1079,7 @@ async def get_monthly_billing(
                                OR (c.project_id = %(pid)s AND ma.contract_line_id IS NOT NULL))
                           AND ma.period_start IS NOT NULL
                           AND (cl.energy_category IS DISTINCT FROM 'test')
+                    """ + _METER_AGG_DEDUP + """
                         GROUP BY 1, 2
                     ),
                     -- Get forecasts per month
@@ -1006,6 +1114,7 @@ async def get_monthly_billing(
                     JOIN contract_line cl ON cl.id = ma.contract_line_id
                     JOIN contract c ON c.id = cl.contract_id
                     WHERE c.project_id = %(pid)s AND ma.period_start IS NOT NULL
+                    """ + _METER_AGG_DEDUP + """
                     GROUP BY 1, 2
                 """, {"pid": project_id})
                 per_product_map: dict[tuple, float] = {}
@@ -1034,40 +1143,20 @@ async def get_monthly_billing(
                             base_rate_map[p.product_code] = float(pr["base_rate"])
                             break
 
-                    cur.execute("""
-                        SELECT tr.billing_month, tr.effective_rate_billing_ccy,
-                               tr.effective_rate_hard_ccy,
-                               tr.rate_granularity::text AS rate_granularity,
-                               tr.period_start, tr.period_end,
-                               tr.calc_status::text AS calc_status
-                        FROM tariff_rate tr
-                        WHERE tr.clause_tariff_id = %(ct_id)s
-                          AND tr.calc_status IN ('computed', 'approved')
-                        ORDER BY tr.rate_granularity = 'annual' ASC, tr.billing_month
-                    """, {"ct_id": ct_id})
-                    rate_rows = cur.fetchall()
-
-                    month_rate_dict: dict[str, float] = {}
-                    month_rate_hard_dict: dict[str, float] = {}
-                    annual_rates = []
-                    for nr in rate_rows:
-                        if nr["rate_granularity"] == "monthly" and nr["effective_rate_billing_ccy"] is not None:
-                            m_str = nr["billing_month"].strftime("%Y-%m-%d") if isinstance(nr["billing_month"], date) else str(nr["billing_month"])
-                            month_rate_dict[m_str] = float(nr["effective_rate_billing_ccy"])
-                            if nr["effective_rate_hard_ccy"] is not None:
-                                month_rate_hard_dict[m_str] = float(nr["effective_rate_hard_ccy"])
-                        elif nr["rate_granularity"] == "annual":
-                            annual_rates.append({
-                                "period_start": nr["period_start"],
-                                "period_end": nr["period_end"],
-                                "effective_tariff": float(nr["effective_rate_billing_ccy"]) if nr["effective_rate_billing_ccy"] else None,
-                                "final_effective_tariff": float(nr["effective_rate_billing_ccy"]) if nr["effective_rate_billing_ccy"] else None,
-                                "effective_tariff_hard_ccy": float(nr["effective_rate_hard_ccy"]) if nr["effective_rate_hard_ccy"] else None,
-                            })
-
-                    rate_map[p.product_code] = month_rate_dict
-                    rate_map_hard[p.product_code] = month_rate_hard_dict
-                    p.__dict__['_annual_rates'] = annual_rates
+                    rd = _load_rate_data(cur, ct_id)
+                    rate_map[p.product_code] = rd["monthly"]
+                    rate_map_hard[p.product_code] = rd["monthly_hard"]
+                    # Map annual rates to the legacy shape expected by downstream
+                    p.__dict__['_annual_rates'] = [
+                        {
+                            "period_start": ar["period_start"],
+                            "period_end": ar["period_end"],
+                            "effective_tariff": ar["rate"],
+                            "final_effective_tariff": ar["rate"],
+                            "effective_tariff_hard_ccy": ar.get("rate_hard_ccy"),
+                        }
+                        for ar in rd["annual"]
+                    ]
 
                 # 5) Assemble rows
                 rows: list[MonthlyBillingRow] = []
@@ -1450,7 +1539,7 @@ async def export_monthly_billing(
 # GET /projects/{project_id}/meter-billing
 # ============================================================================
 
-def _read_expected_invoice(cur, project_id: int, billing_period_id: int, invoice_direction: str = "payable") -> Optional[ExpectedInvoiceSummary]:
+def _read_expected_invoice(cur, project_id: int, billing_period_id: int, invoice_direction: str = "payable", fx_rate: Optional[float] = None) -> Optional[ExpectedInvoiceSummary]:
     """Read persisted expected invoice and derive section totals from line items."""
     cur.execute("""
         SELECT eih.id, eih.version_no, eih.total_amount
@@ -1512,6 +1601,10 @@ def _read_expected_invoice(cur, project_id: int, billing_period_id: int, invoice
     invoice_total = subtotal_after_levies + vat_amount
     net_due = sum(li.line_total_amount for li in line_items)
 
+    net_due_hard = None
+    if fx_rate and fx_rate > 0:
+        net_due_hard = round(net_due / fx_rate, 2)
+
     return ExpectedInvoiceSummary(
         header_id=header["id"],
         version_no=header["version_no"],
@@ -1522,6 +1615,8 @@ def _read_expected_invoice(cur, project_id: int, billing_period_id: int, invoice
         invoice_total=round(invoice_total, 2),
         withholdings_total=round(withholdings_total, 2),
         net_due=round(net_due, 2),
+        net_due_hard_ccy=net_due_hard,
+        fx_rate=fx_rate,
         line_items=line_items,
     )
 
@@ -1533,6 +1628,7 @@ def _read_expected_invoice(cur, project_id: int, billing_period_id: int, invoice
 )
 async def get_meter_billing(
     project_id: int = Path(..., description="Project ID"),
+    invoice_direction: str = Query("payable", description="Invoice direction: 'payable' or 'receivable'"),
 ) -> MeterBillingResponse:
     """Per-meter billing breakdown with metered + available energy per meter.
     Includes expected_invoice data when available."""
@@ -1582,24 +1678,13 @@ async def get_meter_billing(
                         ))
 
                 # 2) Get currency (billing + hard)
-                cur.execute("""
-                    SELECT COALESCE(bcur.code, cur.code) AS code,
-                           hcur.code AS hard_currency_code
-                    FROM clause_tariff ct
-                    JOIN currency cur ON cur.id = ct.currency_id
-                    LEFT JOIN tariff_rate tr2 ON tr2.clause_tariff_id = ct.id
-                    LEFT JOIN currency bcur ON bcur.id = tr2.billing_currency_id
-                    LEFT JOIN currency hcur ON hcur.id = tr2.hard_currency_id
-                    WHERE ct.project_id = %(pid)s AND ct.is_current = true
-                    ORDER BY tr2.billing_currency_id IS NOT NULL DESC
-                    LIMIT 1
-                """, {"pid": project_id})
-                cc = cur.fetchone()
-                currency_code = cc["code"] if cc else None
-                hard_currency_code = cc["hard_currency_code"] if cc else None
+                currency_code, hard_currency_code, _ = _get_project_currencies(cur, project_id)
 
                 # 3) Build per-meter rate resolvers
-                meter_tariff_map: dict[int, int] = {}
+                # Key by (meter_id, energy_category) so metered/available
+                # can have different tariffs for the same meter
+                meter_tariff_map: dict[int, int] = {}  # meter_id → ct_id (legacy compat)
+                meter_cat_tariff_map: dict[tuple[int, str], int] = {}  # (meter_id, energy_category) → ct_id
                 for cl in cl_rows:
                     mid = cl["meter_id"]
                     if mid:
@@ -1614,10 +1699,13 @@ async def get_meter_billing(
                             ct_row = cur.fetchone()
                             if ct_row:
                                 meter_tariff_map[mid] = ct_row["id"]
+                                cat = cl.get("energy_category") or "metered"
+                                meter_cat_tariff_map[(mid, cat)] = ct_row["id"]
 
                 if not meter_tariff_map and cl_rows:
                     cur.execute("""
-                        SELECT cl.meter_id, ct.id AS clause_tariff_id
+                        SELECT cl.meter_id, cl.energy_category::text AS energy_category,
+                               ct.id AS clause_tariff_id
                         FROM contract_line cl
                         JOIN clause_tariff ct
                             ON ct.tariff_group_key = cl.external_line_id
@@ -1628,6 +1716,8 @@ async def get_meter_billing(
                     """, {"pid": project_id})
                     for row in cur.fetchall():
                         meter_tariff_map[row["meter_id"]] = row["clause_tariff_id"]
+                        cat = row.get("energy_category") or "metered"
+                        meter_cat_tariff_map[(row["meter_id"], cat)] = row["clause_tariff_id"]
 
                 cur.execute("""
                     SELECT ct.id AS clause_tariff_id, ct.base_rate
@@ -1645,41 +1735,19 @@ async def get_meter_billing(
 
                 rate_data_by_ct: dict[int, dict] = {}
                 for ct_id in all_ct_ids:
-                    cur.execute("SELECT base_rate FROM clause_tariff WHERE id = %(ct_id)s", {"ct_id": ct_id})
-                    ct_info = cur.fetchone()
-                    br = float(ct_info["base_rate"]) if ct_info and ct_info["base_rate"] else None
+                    rate_data_by_ct[ct_id] = _load_rate_data(cur, ct_id)
 
-                    cur.execute("""
-                        SELECT tr.billing_month, tr.effective_rate_billing_ccy,
-                               tr.effective_rate_hard_ccy,
-                               tr.rate_granularity::text AS rate_granularity,
-                               tr.period_start, tr.period_end
-                        FROM tariff_rate tr
-                        WHERE tr.clause_tariff_id = %(ct_id)s
-                          AND tr.calc_status IN ('computed', 'approved')
-                        ORDER BY tr.rate_granularity = 'annual' ASC, tr.billing_month
-                    """, {"ct_id": ct_id})
-                    monthly: dict[str, float] = {}
-                    monthly_hard: dict[str, float] = {}
-                    annual: list[dict] = []
-                    for rr in cur.fetchall():
-                        if rr["rate_granularity"] == "monthly" and rr["effective_rate_billing_ccy"] is not None:
-                            m_str = rr["billing_month"].strftime("%Y-%m-%d") if isinstance(rr["billing_month"], date) else str(rr["billing_month"])
-                            monthly[m_str] = float(rr["effective_rate_billing_ccy"])
-                            if rr["effective_rate_hard_ccy"] is not None:
-                                monthly_hard[m_str] = float(rr["effective_rate_hard_ccy"])
-                        elif rr["rate_granularity"] == "annual":
-                            annual.append({
-                                "period_start": rr["period_start"],
-                                "period_end": rr["period_end"],
-                                "rate": float(rr["effective_rate_billing_ccy"]) if rr["effective_rate_billing_ccy"] else None,
-                                "rate_hard_ccy": float(rr["effective_rate_hard_ccy"]) if rr["effective_rate_hard_ccy"] else None,
-                            })
-                    rate_data_by_ct[ct_id] = {"monthly": monthly, "monthly_hard": monthly_hard, "annual": annual, "base": br}
+                def resolve_rate_for_meter(meter_id: int, bm: date, energy_category: str | None = None) -> tuple[Optional[float], Optional[float]]:
+                    """Returns (billing_ccy_rate, hard_ccy_rate).
 
-                def resolve_rate_for_meter(meter_id: int, bm: date) -> tuple[Optional[float], Optional[float]]:
-                    """Returns (billing_ccy_rate, hard_ccy_rate)."""
-                    ct_id = meter_tariff_map.get(meter_id, fallback_ct_id)
+                    If energy_category is provided, tries (meter_id, energy_category)
+                    key first for per-category pricing, then falls back to meter-level.
+                    """
+                    ct_id = None
+                    if energy_category:
+                        ct_id = meter_cat_tariff_map.get((meter_id, energy_category))
+                    if ct_id is None:
+                        ct_id = meter_tariff_map.get(meter_id, fallback_ct_id)
                     if ct_id is None:
                         return fallback_base_rate, None
                     rd = rate_data_by_ct.get(ct_id)
@@ -1741,18 +1809,45 @@ async def get_meter_billing(
                     total_metered = 0.0
                     total_available = 0.0
                     total_amount = 0.0
+                    total_amount_hard = 0.0
+                    month_fx_rate: Optional[float] = None
 
                     for rr in readings_raw:
                         metered = _decimal_to_float(rr["metered_kwh"]) or 0.0
                         available = _decimal_to_float(rr["available_kwh"]) or 0.0
-                        rate, rate_hard = resolve_rate_for_meter(rr["meter_id"], bm)
-                        amount = (metered + available) * rate if rate else None
-                        amount_hard = (metered + available) * rate_hard if rate_hard else None
+
+                        # Resolve rates per energy category for this meter
+                        rate_m, rate_m_hard = resolve_rate_for_meter(rr["meter_id"], bm, "metered")
+                        rate_a, rate_a_hard = resolve_rate_for_meter(rr["meter_id"], bm, "available")
+
+                        # Compute per-category amounts
+                        amt_metered = metered * rate_m if rate_m else None
+                        amt_available = available * rate_a if rate_a and available > 0 else None
+
+                        # Total amount = sum of per-category amounts
+                        amount = None
+                        if amt_metered is not None or amt_available is not None:
+                            amount = (amt_metered or 0.0) + (amt_available or 0.0)
+                        amount_hard = None
+                        amt_m_hard = metered * rate_m_hard if rate_m_hard else None
+                        amt_a_hard = available * rate_a_hard if rate_a_hard and available > 0 else None
+                        if amt_m_hard is not None or amt_a_hard is not None:
+                            amount_hard = (amt_m_hard or 0.0) + (amt_a_hard or 0.0)
+
+                        # Use metered rate as the display rate (backward compat)
+                        rate = rate_m
+                        rate_hard = rate_m_hard
+
+                        # Derive FX rate from billing/hard rate pair
+                        if month_fx_rate is None and rate and rate_hard and rate_hard > 0:
+                            month_fx_rate = rate / rate_hard
 
                         total_metered += metered
                         total_available += available
                         if amount is not None:
                             total_amount += amount
+                        if amount_hard is not None:
+                            total_amount_hard += amount_hard
 
                         readings.append(MeterReadingDetail(
                             meter_id=rr["meter_id"],
@@ -1763,15 +1858,17 @@ async def get_meter_billing(
                             available_kwh=available if available > 0 else None,
                             rate=rate,
                             amount=round(amount, 2) if amount is not None else None,
+                            amount_metered=round(amt_metered, 2) if amt_metered is not None else None,
+                            amount_available=round(amt_available, 2) if amt_available is not None else None,
                             rate_hard_ccy=rate_hard,
                             amount_hard_ccy=round(amount_hard, 2) if amount_hard is not None else None,
                         ))
 
-                    # Try to read persisted expected_invoice
+                    # Try to read persisted expected_invoice (pass FX rate for hard_ccy conversion)
                     expected_invoice = None
                     bp_id = month_bp_map.get(bm_str)
                     if bp_id:
-                        expected_invoice = _read_expected_invoice(cur, project_id, bp_id)
+                        expected_invoice = _read_expected_invoice(cur, project_id, bp_id, invoice_direction=invoice_direction, fx_rate=month_fx_rate)
 
                     months.append(MeterBillingMonth(
                         billing_month=bm_str,
@@ -1780,6 +1877,7 @@ async def get_meter_billing(
                         total_available_kwh=round(total_available, 2) if total_available > 0 else None,
                         total_energy_kwh=round(total_metered + total_available, 2),
                         total_amount=round(total_amount, 2) if total_amount > 0 else None,
+                        total_amount_hard_ccy=round(total_amount_hard, 2) if total_amount_hard > 0 else None,
                         expected_invoice=expected_invoice,
                     ))
 

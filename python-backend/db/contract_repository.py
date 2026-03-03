@@ -668,6 +668,243 @@ class ContractRepository:
                 )
                 return clauses
 
+    # =========================================================================
+    # BATCH UPSERTS (Excel-first cross-examination pipeline)
+    # =========================================================================
+
+    def upsert_contract_lines_batch(
+        self, cursor, lines: List[Dict[str, Any]]
+    ) -> int:
+        """
+        Batch upsert contract lines with source-precedence conflict handling.
+
+        ON CONFLICT (contract_id, contract_line_number):
+        - Only overwrite if new source_confidence > 0.7 AND
+          (existing value is NULL OR new confidence > 0.85)
+
+        Args:
+            cursor: Active DB cursor (caller manages transaction).
+            lines: List of dicts with contract_id, contract_line_number,
+                   external_line_id, product_desc, energy_category,
+                   is_active, effective_start_date, effective_end_date,
+                   source_confidence.
+
+        Returns:
+            Number of rows affected.
+        """
+        if not lines:
+            return 0
+
+        # Pre-resolve product_code → billing_product_id for lines that have one
+        product_codes = {
+            line["product_code"]
+            for line in lines
+            if line.get("product_code")
+        }
+        bp_lookup: Dict[str, int] = {}
+        if product_codes:
+            placeholders = ",".join(["%s"] * len(product_codes))
+            cursor.execute(
+                f"SELECT id, code FROM billing_product WHERE code IN ({placeholders})",
+                tuple(product_codes),
+            )
+            for row in cursor.fetchall():
+                bp_lookup[row[1]] = row[0]
+
+        count = 0
+        for line in lines:
+            confidence = line.get("source_confidence", 0.75)
+            billing_product_id = bp_lookup.get(line.get("product_code")) if line.get("product_code") else None
+            cursor.execute(
+                """
+                INSERT INTO contract_line (
+                    contract_id, contract_line_number, external_line_id,
+                    product_desc, energy_category, is_active,
+                    effective_start_date, effective_end_date,
+                    organization_id, billing_product_id
+                )
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                ON CONFLICT (contract_id, contract_line_number)
+                DO UPDATE SET
+                    external_line_id = CASE
+                        WHEN contract_line.external_line_id IS NULL
+                        THEN EXCLUDED.external_line_id
+                        ELSE contract_line.external_line_id
+                    END,
+                    product_desc = CASE
+                        WHEN %s > 0.7 AND (
+                            contract_line.product_desc IS NULL OR %s > 0.85
+                        )
+                        THEN EXCLUDED.product_desc
+                        ELSE contract_line.product_desc
+                    END,
+                    energy_category = CASE
+                        WHEN %s > 0.7 AND (
+                            contract_line.energy_category IS NULL OR %s > 0.85
+                        )
+                        THEN EXCLUDED.energy_category
+                        ELSE contract_line.energy_category
+                    END,
+                    billing_product_id = COALESCE(EXCLUDED.billing_product_id, contract_line.billing_product_id),
+                    is_active = EXCLUDED.is_active,
+                    effective_start_date = COALESCE(EXCLUDED.effective_start_date, contract_line.effective_start_date),
+                    effective_end_date = COALESCE(EXCLUDED.effective_end_date, contract_line.effective_end_date)
+                """,
+                (
+                    line["contract_id"],
+                    line["contract_line_number"],
+                    line.get("external_line_id"),
+                    line.get("product_desc"),
+                    line.get("energy_category"),
+                    line.get("is_active", True),
+                    line.get("effective_start_date"),
+                    line.get("effective_end_date"),
+                    line.get("organization_id"),
+                    billing_product_id,
+                    # Parameters for CASE expressions
+                    confidence, confidence,
+                    confidence, confidence,
+                ),
+            )
+            count += cursor.rowcount
+
+        logger.info(f"Upserted {count} contract lines")
+        return count
+
+    def upsert_clause_tariff(
+        self, cursor, data: Dict[str, Any]
+    ) -> Optional[int]:
+        """
+        Upsert a clause_tariff record with source precedence.
+
+        ON CONFLICT uses the actual composite unique index:
+          (contract_id, tariff_group_key, valid_from, COALESCE(valid_to, '9999-12-31'))
+          WHERE tariff_group_key IS NOT NULL AND is_current = TRUE
+
+        Args:
+            cursor: Active DB cursor (caller manages transaction).
+            data: Dict with contract_id, tariff_group_key, base_rate,
+                  energy_sale_type_id, escalation_type_id, currency_id,
+                  logic_parameters, valid_from, valid_to, is_current,
+                  source_metadata, source_confidence.
+                  tariff_group_key is REQUIRED (must not be NULL).
+
+        Returns:
+            clause_tariff ID, or None if skipped.
+        """
+        confidence = data.get("source_confidence", 0.75)
+        source_meta = data.get("source_metadata", {})
+        tariff_group_key = data.get("tariff_group_key")
+
+        if not tariff_group_key:
+            logger.error(
+                f"tariff_group_key is required for upsert_clause_tariff "
+                f"(contract_id={data.get('contract_id')})"
+            )
+            return None
+
+        name = data.get("name") or tariff_group_key
+
+        cursor.execute(
+            """
+            INSERT INTO clause_tariff (
+                contract_id, project_id, tariff_group_key, name, base_rate,
+                energy_sale_type_id, escalation_type_id, currency_id,
+                logic_parameters, valid_from, valid_to,
+                is_current, source_metadata
+            )
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            ON CONFLICT (contract_id, tariff_group_key, valid_from, COALESCE(valid_to, '9999-12-31'))
+                WHERE tariff_group_key IS NOT NULL AND is_current = TRUE
+            DO UPDATE SET
+                base_rate = CASE
+                    WHEN %s > 0.7 AND (
+                        clause_tariff.base_rate IS NULL OR %s > 0.85
+                    )
+                    THEN EXCLUDED.base_rate
+                    ELSE clause_tariff.base_rate
+                END,
+                energy_sale_type_id = COALESCE(EXCLUDED.energy_sale_type_id, clause_tariff.energy_sale_type_id),
+                escalation_type_id = COALESCE(EXCLUDED.escalation_type_id, clause_tariff.escalation_type_id),
+                currency_id = COALESCE(EXCLUDED.currency_id, clause_tariff.currency_id),
+                logic_parameters = COALESCE(clause_tariff.logic_parameters, '{}'::jsonb) || EXCLUDED.logic_parameters,
+                valid_from = COALESCE(EXCLUDED.valid_from, clause_tariff.valid_from),
+                valid_to = COALESCE(EXCLUDED.valid_to, clause_tariff.valid_to),
+                source_metadata = COALESCE(clause_tariff.source_metadata, '{}'::jsonb) || EXCLUDED.source_metadata
+            RETURNING id
+            """,
+            (
+                data["contract_id"],
+                data.get("project_id"),
+                tariff_group_key,
+                name,
+                data.get("base_rate"),
+                data.get("energy_sale_type_id"),
+                data.get("escalation_type_id"),
+                data.get("currency_id"),
+                Json(data.get("logic_parameters", {})),
+                data.get("valid_from"),
+                data.get("valid_to"),
+                data.get("is_current", True),
+                Json(source_meta),
+                # CASE parameters
+                confidence, confidence,
+            ),
+        )
+        row = cursor.fetchone()
+        tariff_id = row["id"] if row else None
+        if tariff_id:
+            logger.info(
+                f"Upserted clause_tariff id={tariff_id} for contract={data['contract_id']}, "
+                f"group_key={tariff_group_key}"
+            )
+        return tariff_id
+
+    def upsert_contract_billing_products_batch(
+        self, cursor, products: List[Dict[str, Any]]
+    ) -> int:
+        """
+        Batch upsert contract_billing_product junction records.
+
+        Args:
+            cursor: Active DB cursor.
+            products: List of dicts with contract_id, product_code.
+
+        Returns:
+            Number of rows affected.
+        """
+        if not products:
+            return 0
+
+        count = 0
+        for prod in products:
+            # Look up billing_product by product_code
+            cursor.execute(
+                "SELECT id FROM billing_product WHERE product_code = %s LIMIT 1",
+                (prod["product_code"],),
+            )
+            bp_row = cursor.fetchone()
+            if not bp_row:
+                logger.warning(f"billing_product not found for code={prod['product_code']}, skipping")
+                continue
+
+            cursor.execute(
+                """
+                INSERT INTO contract_billing_product (contract_id, billing_product_id)
+                VALUES (%s, %s)
+                ON CONFLICT (contract_id, billing_product_id) DO NOTHING
+                """,
+                (prod["contract_id"], bp_row["id"]),
+            )
+            count += cursor.rowcount
+
+        logger.info(f"Upserted {count} contract_billing_product records")
+        return count
+
+    # Fields subject to defensive merge: only overwrite if current DB value is NULL
+    _mergeable_fields = ['contract_type_id', 'counterparty_id', 'effective_date',
+                         'end_date', 'file_location', 'contract_term_years']
+
     def update_contract_metadata(
         self,
         contract_id: int,
@@ -675,13 +912,20 @@ class ContractRepository:
         counterparty_id: Optional[int] = None,
         effective_date: Optional[str] = None,
         end_date: Optional[str] = None,
-        extraction_metadata: Optional[Dict[str, Any]] = None
+        contract_term_years: Optional[int] = None,
+        extraction_metadata: Optional[Dict[str, Any]] = None,
+        force_update_fields: Optional[List[str]] = None
     ) -> bool:
         """
-        Update contract with AI-extracted metadata.
+        Update contract with AI-extracted metadata using defensive merge.
 
-        This method is called after metadata extraction to update the contract
-        record with resolved FKs and store extraction details for audit.
+        For mergeable fields (contract_type_id, counterparty_id, effective_date,
+        end_date, file_location, contract_term_years): only overwrite if the
+        current DB value is NULL or the field is in force_update_fields.
+        If the current value is non-null and differs from the new value,
+        log a warning and preserve the existing value.
+
+        For extraction_metadata: uses JSONB merge to append keys rather than replace.
 
         Args:
             contract_id: Contract ID to update
@@ -689,14 +933,9 @@ class ContractRepository:
             counterparty_id: Resolved counterparty FK (or None if not matched)
             effective_date: Extracted effective date (YYYY-MM-DD format)
             end_date: Extracted end date (YYYY-MM-DD format)
-            extraction_metadata: JSONB metadata including:
-                - seller_name: Extracted seller name
-                - buyer_name: Extracted buyer name
-                - counterparty_match_confidence: Match confidence (0-1)
-                - counterparty_matched: Boolean if matched
-                - contract_type_extracted: Original extracted type code
-                - extraction_timestamp: When extraction occurred
-                - extraction_notes: Any notes from extraction
+            contract_term_years: Extracted contract duration in years
+            extraction_metadata: JSONB metadata to merge into existing
+            force_update_fields: List of field names to force-overwrite even if non-null
 
         Returns:
             True if update succeeded, False otherwise
@@ -704,30 +943,69 @@ class ContractRepository:
         Raises:
             psycopg2.Error: If database operation fails
         """
+        force_fields = set(force_update_fields or [])
+
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                # Build dynamic UPDATE query based on provided fields
+                # Fetch current values for defensive merge
+                cursor.execute(
+                    """
+                    SELECT contract_type_id, counterparty_id, effective_date,
+                           end_date, file_location, contract_term_years,
+                           extraction_metadata
+                    FROM contract WHERE id = %s
+                    """,
+                    (contract_id,)
+                )
+                current = cursor.fetchone()
+                if not current:
+                    logger.warning(f"Contract {contract_id} not found for metadata update")
+                    return False
+
+                current = dict(current)
+
+                # Build dynamic UPDATE query with defensive merge
                 updates = []
                 params = []
 
-                if contract_type_id is not None:
-                    updates.append("contract_type_id = %s")
-                    params.append(contract_type_id)
+                new_values = {
+                    'contract_type_id': contract_type_id,
+                    'counterparty_id': counterparty_id,
+                    'effective_date': effective_date,
+                    'end_date': end_date,
+                    'contract_term_years': contract_term_years,
+                }
 
-                if counterparty_id is not None:
-                    updates.append("counterparty_id = %s")
-                    params.append(counterparty_id)
+                for field, new_val in new_values.items():
+                    if new_val is None:
+                        continue
 
-                if effective_date is not None:
-                    updates.append("effective_date = %s")
-                    params.append(effective_date)
+                    current_val = current.get(field)
+                    # Convert date objects to string for comparison
+                    if current_val is not None and hasattr(current_val, 'isoformat'):
+                        current_val_str = current_val.isoformat()
+                    else:
+                        current_val_str = str(current_val) if current_val is not None else None
 
-                if end_date is not None:
-                    updates.append("end_date = %s")
-                    params.append(end_date)
+                    if field in self._mergeable_fields and current_val is not None and field not in force_fields:
+                        # Current value exists and field is not force-updated: preserve
+                        new_val_str = str(new_val)
+                        if current_val_str != new_val_str:
+                            logger.warning(
+                                f"Defensive merge: contract {contract_id}.{field} "
+                                f"preserving existing '{current_val}' "
+                                f"(new value '{new_val}' ignored — use force_update_fields to override)"
+                            )
+                        continue
 
+                    updates.append(f"{field} = %s")
+                    params.append(new_val)
+
+                # Handle extraction_metadata with JSONB merge
                 if extraction_metadata is not None:
-                    updates.append("extraction_metadata = %s")
+                    updates.append(
+                        "extraction_metadata = COALESCE(extraction_metadata, '{}'::jsonb) || %s"
+                    )
                     params.append(Json(extraction_metadata))
 
                 if not updates:

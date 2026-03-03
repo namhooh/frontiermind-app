@@ -31,7 +31,10 @@ CANONICAL_SCHEMAS = {
         "fields": [
             {"name": "threshold", "type": "number", "role": "T", "required": True,
              "aliases": ["threshold_percent", "guaranteed_availability_percent", "minimum_availability_percent", "availability_percent"],
-             "description": "Guaranteed minimum availability percentage"},
+             "description": "Guaranteed minimum availability value as stated in the contract text (do NOT convert units)"},
+            {"name": "threshold_unit", "type": "string", "role": "C", "required": True,
+             "aliases": ["threshold_type"],
+             "description": "Unit of the threshold as stated in the contract: 'percent' or 'days'"},
             {"name": "measurement_period", "type": "string", "role": "C", "required": True,
              "aliases": ["evaluation_period", "period"],
              "description": "Measurement period: monthly, quarterly, annual"},
@@ -62,6 +65,12 @@ CANONICAL_SCHEMAS = {
             {"name": "interval_minutes", "type": "number", "role": "C", "required": False,
              "aliases": ["reading_interval", "data_interval"],
              "description": "Meter reading interval in minutes (e.g., 15 for 15-minute intervals)"},
+            {"name": "monthly_production_formula", "type": "string", "role": "FD", "required": False,
+             "aliases": ["actual_monthly_production_formula", "energy_output_formula"],
+             "description": "Formula for Actual Monthly Production (e.g., 'E_month = sum(E_metered(i)) + sum(E_Available(x))')"},
+            {"name": "available_energy_formula", "type": "string", "role": "FD", "required": False,
+             "aliases": ["deemed_energy_formula", "e_available_formula"],
+             "description": "Formula for Available/Deemed Energy per interval (e.g., 'E_Available(x) = (E_hist / Intervals) * (Irr(x) / Irr_hist)')"},
         ]
     },
     "PERFORMANCE_GUARANTEE": {
@@ -133,6 +142,42 @@ CANONICAL_SCHEMAS = {
             {"name": "billing_currency", "type": "string", "role": "C", "required": False,
              "aliases": ["payment_currency", "invoice_currency"],
              "description": "Currency for billing and invoicing"},
+            {"name": "grp_method", "type": "string", "role": "C", "required": False,
+             "aliases": ["grid_reference_method", "grid_tariff_method"],
+             "description": "Grid Reference Price calculation method: utility_variable_charges_tou, utility_total_charges"},
+            {"name": "grp_included_components", "type": "list", "role": "S", "required": False,
+             "aliases": ["included_components", "grp_components"],
+             "description": "Utility bill line items included in GRP calculation"},
+            {"name": "grp_excluded_components", "type": "list", "role": "S", "required": False,
+             "aliases": ["excluded_components"],
+             "description": "Utility bill line items excluded from GRP (e.g., VAT, demand charges)"},
+            {"name": "grp_time_window_start", "type": "string", "role": "C", "required": False,
+             "aliases": ["operating_window_start"],
+             "description": "GRP operating window start time (e.g., '06:00')"},
+            {"name": "grp_time_window_end", "type": "string", "role": "C", "required": False,
+             "aliases": ["operating_window_end"],
+             "description": "GRP operating window end time (e.g., '18:00')"},
+            {"name": "grp_calculation_due_days", "type": "number", "role": "C", "required": False,
+             "aliases": ["recalculation_deadline_days"],
+             "description": "Days after month-end for GRP calculation delivery"},
+            {"name": "grp_verification_deadline_days", "type": "number", "role": "C", "required": False,
+             "aliases": ["verification_days", "joint_verification_days"],
+             "description": "Days for joint verification of GRP after receipt"},
+            {"name": "pricing_formula_text", "type": "string", "role": "FD", "required": False,
+             "aliases": ["payment_formula", "tariff_formula"],
+             "description": "Full pricing/payment formula as stated in the contract"},
+            {"name": "discount_pct", "type": "number", "role": "FI", "required": False,
+             "aliases": ["solar_discount", "fixed_solar_discount"],
+             "description": "Solar discount percentage off grid tariff"},
+            {"name": "floor_rate", "type": "number", "role": "FI", "required": False,
+             "aliases": ["minimum_solar_price", "floor_tariff"],
+             "description": "Minimum solar price / floor tariff per kWh"},
+            {"name": "ceiling_rate", "type": "number", "role": "FI", "required": False,
+             "aliases": ["maximum_solar_price", "ceiling_tariff", "cap_rate"],
+             "description": "Maximum solar price / ceiling tariff per kWh"},
+            {"name": "recalculation_frequency", "type": "string", "role": "C", "required": False,
+             "aliases": ["tariff_recalculation_frequency", "redetermination_frequency"],
+             "description": "How often the solar tariff is recalculated (e.g., 'annual')"},
         ]
     },
     "PAYMENT_TERMS": {
@@ -469,11 +514,30 @@ from the availability calculation.
             "category": "AVAILABILITY",
             "normalized_payload": {
                 "threshold": 95.0,
+                "threshold_unit": "percent",
                 "measurement_period": "annual",
                 "calculation_method": "(Total Hours - Forced Outage - Scheduled Maintenance) / Total Hours",
                 "excused_events": ["Transmission Provider curtailment"],
                 "scheduled_outage_max_hours_per_year": 200,
                 "scheduled_outage_notice_days": 30
+            }
+        },
+        "example_raw_text_2": """
+The System shall be available for a minimum of three hundred and fifty-five (355)
+days during each Contract Year. Unavailability due to Force Majeure events and
+Scheduled Maintenance (not exceeding 10 days per year with 14 days notice) shall
+not count against the availability requirement.
+""",
+        "example_extraction_2": {
+            "clause_name": "Availability Guarantee (Days)",
+            "category": "AVAILABILITY",
+            "normalized_payload": {
+                "threshold": 355,
+                "threshold_unit": "days",
+                "measurement_period": "annual",
+                "excused_events": ["Force Majeure", "Scheduled Maintenance"],
+                "scheduled_outage_max_hours_per_year": 240,
+                "scheduled_outage_notice_days": 14
             }
         }
     },

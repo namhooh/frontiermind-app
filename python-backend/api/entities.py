@@ -184,6 +184,23 @@ class ContractPatch(BaseModel):
     meta_extension_provisions: Optional[str] = None
 
 
+class ClausePatch(BaseModel):
+    name: Optional[str] = None
+    section_ref: Optional[str] = None
+    raw_text: Optional[str] = None
+    summary: Optional[str] = None
+    confidence_score: Optional[float] = None
+    # normalized_payload JSONB sub-fields (prefixed np_)
+    np_available_energy_method: Optional[str] = None
+    np_irradiance_threshold_wm2: Optional[float] = None
+    np_interval_minutes: Optional[float] = None
+    np_calculation_method: Optional[str] = None
+    np_excused_events: Optional[list] = None
+    np_threshold: Optional[float] = None
+    np_threshold_unit: Optional[str] = None
+    np_measurement_period: Optional[str] = None
+
+
 class TariffPatch(BaseModel):
     name: Optional[str] = None
     base_rate: Optional[float] = None
@@ -288,7 +305,7 @@ class ExchangeRatePatch(BaseModel):
 
 
 # Tables that have an updated_at column
-_TABLES_WITH_UPDATED_AT = {"contract", "clause_tariff", "customer_contact", "production_forecast", "production_guarantee"}
+_TABLES_WITH_UPDATED_AT = {"contract", "clause", "clause_tariff", "customer_contact", "production_forecast", "production_guarantee"}
 
 # Mapping of field-name prefix → target JSONB column.
 # E.g. field "lp_floor_rate" → merges {"floor_rate": val} into logic_parameters.
@@ -296,6 +313,7 @@ _JSONB_PREFIX_MAP = {
     "lp_": "logic_parameters",
     "meta_": "extraction_metadata",
     "ts_": "technical_specs",
+    "np_": "normalized_payload",
 }
 
 
@@ -908,16 +926,37 @@ async def get_project_dashboard(
                         WHERE er.organization_id = (SELECT organization_id FROM project_data)
                         ORDER BY er.rate_date DESC
                     ),
+                    has_pre_cod AS (
+                        SELECT EXISTS(
+                            SELECT 1 FROM reference_price
+                            WHERE project_id = %(pid)s
+                              AND organization_id = (SELECT organization_id FROM project_data)
+                              AND observation_type = 'monthly'
+                              AND operating_year = 0
+                        ) AS val
+                    ),
                     baseline_grp_data AS (
                         SELECT rp.id, rp.period_start, rp.period_end,
                                rp.calculated_grp_per_kwh, rp.total_variable_charges,
                                rp.total_kwh_invoiced, rp.verification_status,
-                               rp.source_metadata
-                        FROM reference_price rp
+                               rp.source_metadata,
+                               rp.operating_year
+                        FROM reference_price rp, has_pre_cod hpc
                         WHERE rp.project_id = %(pid)s
                           AND rp.organization_id = (SELECT organization_id FROM project_data)
                           AND rp.observation_type = 'monthly'
-                          AND rp.operating_year = 0
+                          AND (
+                            (hpc.val = true AND rp.operating_year = 0)
+                            OR
+                            (hpc.val = false AND rp.id IN (
+                                SELECT rp2.id FROM reference_price rp2
+                                WHERE rp2.project_id = %(pid)s
+                                  AND rp2.organization_id = (SELECT organization_id FROM project_data)
+                                  AND rp2.observation_type = 'monthly'
+                                ORDER BY rp2.period_start DESC
+                                LIMIT 12
+                            ))
+                          )
                         ORDER BY rp.period_start
                     ),
                     contract_types_lookup AS (SELECT id, code, name FROM contract_type ORDER BY name),
@@ -1112,6 +1151,15 @@ async def patch_contract(
     body: ContractPatch = ...,
 ) -> dict:
     return await _execute_patch("contract", contract_id, body, project_id)
+
+
+@router.patch("/clauses/{clause_id}", summary="Patch a clause")
+async def patch_clause(
+    clause_id: int = Path(..., description="Clause ID"),
+    project_id: int = Query(..., description="Project ID for scope check"),
+    body: ClausePatch = ...,
+) -> dict:
+    return await _execute_patch("clause", clause_id, body, project_id)
 
 
 @router.patch("/tariffs/{tariff_id}", summary="Patch a tariff")

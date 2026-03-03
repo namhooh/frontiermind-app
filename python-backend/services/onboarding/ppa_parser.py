@@ -17,6 +17,8 @@ from typing import Any, Dict, List, Optional
 import anthropic
 from llama_parse import LlamaParse
 
+from config.settings import CLAUDE_MODEL
+
 from models.onboarding import (
     AvailableEnergyExtraction,
     DefaultRateExtraction,
@@ -219,7 +221,7 @@ class PPAOnboardingExtractor:
                 text = text[:max_chars]
 
             response = self.anthropic_client.messages.create(
-                model="claude-sonnet-4-5-20250929",
+                model=CLAUDE_MODEL,
                 max_tokens=8192,
                 messages=[
                     {

@@ -131,7 +131,8 @@ fi
 TASK_DEF_FILE="/tmp/frontiermind-task-def-$$.json"
 cat ${TASK_DEF_TEMPLATE} | \
     sed "s/ACCOUNT_ID/${ACCOUNT_ID}/g" | \
-    sed "s|${ECR_URI}:latest|${ECR_URI}:${GIT_HASH}|g" > ${TASK_DEF_FILE}
+    sed "s|${ECR_URI}:latest|${ECR_URI}:${GIT_HASH}|g" | \
+    sed "s|__GIT_HASH__|${GIT_HASH}|g" > ${TASK_DEF_FILE}
 
 # Register new task definition
 TASK_DEF_ARN=$(aws ecs register-task-definition \

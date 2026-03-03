@@ -106,6 +106,21 @@
 │     • Store in clause_relationship table                    │
 │     • Confidence scoring for inferred relationships         │
 │                                                              │
+│  Step 8: Auto-detect clause relationships (same as Step 7)  │
+│     (Steps 8-9 exist in code but were added after diagram)  │
+│                                                              │
+│  Step 9: Tariff Bridge                                      │
+│     • Create clause_tariff from PRICING clauses             │
+│     • Repair existing tariff dates (COD+term)               │
+│                                                              │
+│  Step 10: Logic Parameter Enrichment [v5.5]                 │
+│     • Read normalized_payload from all clause categories    │
+│     • Aggregate tariff-relevant fields (GRP params,         │
+│       billing freq, escalation freq, shortfall formula)     │
+│     • Defensive merge into MAIN clause_tariff               │
+│       logic_parameters (never overwrite existing values)    │
+│     • Record provenance in source_metadata                  │
+│                                                              │
 │  RULES ENGINE:                                              │
 │  ────────────────────────────────────────────────────────   │
 │  • Evaluate meter data against contract clauses            │
@@ -2239,6 +2254,879 @@ Data Sources (Inverters, Snowflake, Manual)
 - ⏳ AWS infrastructure setup pending
 - ⏳ Validator Lambda implementation pending
 - ⏳ Ingest API endpoints pending
+
+---
+
+## Section 12: Excel-First Contract Digitization & DB Population
+
+> Added: 2026-03-02
+
+### Context
+
+The original pipeline uses PDF/PPA parsing (LlamaParse + Claude) as the primary tariff data source. This section documents the Excel-first approach where CBE's operational Excel workbooks and SAGE ERP CSV exports establish a verified baseline, with PDF parsing validating and enriching.
+
+### Architecture
+
+```
+Phase 1: Cross-Examination (Excel/CSV)
+  SAGE CSVs ──┐
+  Revenue     ├──→ CrossVerifier → CrossVerificationResult (JSON)
+  Masterfile ─┘    + TariffTypeDetector
+
+Phase 2: DB Population
+  JSON ──→ OnboardingService.preview_from_structured_sources()
+       ──→ OnboardingService.commit_from_structured_sources()
+       ──→ RatePeriodGenerator (Years 2..N)
+
+Phase 3: PDF Validation
+  Existing PPA data ──→ PDFValidator.validate_from_db()
+       ──→ Non-destructive comparison + enrichment
+
+Phase 4: Reconciliation
+  DB state ──→ reconciliation_report.py → readiness score (0-100)
+```
+
+### New Files
+
+| File | Purpose |
+|------|---------|
+| `services/onboarding/parsers/sage_csv_parser.py` | SAGE ERP CSV extraction (5 CSVs) |
+| `services/onboarding/parsers/revenue_masterfile_parser.py` | Revenue Masterfile (.xlsb) |
+| `services/onboarding/parsers/plant_performance_parser.py` | Plant Performance workbook |
+| `services/onboarding/parsers/market_ref_pricing_parser.py` | Market Ref Pricing workbook |
+| `services/onboarding/cross_verifier.py` | Field-level cross-verification engine |
+| `services/onboarding/tariff_type_detector.py` | Tariff type inference from signals |
+| `services/onboarding/pdf_validator.py` | PDF vs Excel comparison |
+| `scripts/batch_cross_examine.py` | Phase 1 orchestrator |
+| `scripts/batch_populate_from_excel.py` | Phase 2 orchestrator |
+| `scripts/batch_validate_with_ppas.py` | Phase 3 orchestrator |
+| `scripts/reconciliation_report.py` | Phase 4 report generator |
+
+### Modified Files
+
+| File | Change |
+|------|--------|
+| `requirements.txt` | Added `pyxlsb>=1.0.10` |
+| `models/onboarding.py` | Added structured source models, cross-verification models, PDF validation models |
+| `services/onboarding/onboarding_service.py` | Added `preview_from_structured_sources()` and `commit_from_structured_sources()` |
+| `db/contract_repository.py` | Added `upsert_contract_lines_batch()`, `upsert_clause_tariff()`, `upsert_contract_billing_products_batch()` |
+| `evals/test_billing_readiness.py` | Added lean gate tests for excel-first pipeline |
+
+### Field-Level Authority Matrix
+
+| Data Point | Primary Source | Verification Source |
+|---|---|---|
+| Contract identity / currency / payment terms | SAGE CSV | Revenue Masterfile |
+| Tariff base rate / discount % / floor / ceiling | Revenue Masterfile | Market Ref PO Summary |
+| Escalation type | SAGE CPI flag + Masterfile | Cross-verify |
+| Market reference prices | Market Ref workbook | Masterfile Grid/Gen costs |
+| Monthly production / technical series | Plant Performance | SAGE meter readings |
+| COD date | Revenue Masterfile | AM Onboarding |
+| Contract term | SAGE dates | AM Onboarding |
+
+### Pipeline Commands
+
+```bash
+# Phase 1: Cross-examine (pilot: KAS01)
+python scripts/batch_cross_examine.py --project KAS01
+
+# Phase 2: Populate DB (after human review of Phase 1 output)
+python scripts/batch_populate_from_excel.py --project KAS01 --dry-run
+python scripts/batch_populate_from_excel.py --project KAS01
+
+# Phase 3: Validate against PPA data
+python scripts/batch_validate_with_ppas.py --project KAS01
+
+# Phase 4: Reconciliation report
+python scripts/reconciliation_report.py --project KAS01
+```
+
+### Lean Eval Gate Tests
+
+Added to `evals/test_billing_readiness.py`:
+- `test_clause_tariff_base_rate_populated`
+- `test_year1_tariff_rate_exists`
+- `test_deterministic_rates_generated`
+- `test_rebased_floating_pending_status`
+- `test_no_duplicate_contract_lines`
+- `test_no_duplicate_meter_reads`
+- `test_contract_line_tariff_linked`
+
+### Multi-Phase Projects & COD Date Handling
+
+**Problem:** Some projects have multiple construction phases with different COD dates (e.g., KAS01 Kasapreko: Phase I COD = 2018-10-03, Phase II COD = 2024-05-03). Using the wrong COD causes incorrect operating year numbering and tariff period boundaries.
+
+**Rule: Always use the initial (earliest) COD for operating year counting and tariff period anchoring.**
+
+Later phase COD dates are stored in metadata for reference but never override the initial COD.
+
+#### How It Works
+
+1. **Cross-verifier** (`services/onboarding/cross_verifier.py`) collects COD candidates from all sources:
+   - Revenue Masterfile `cod_date` (primary authority)
+   - AM Onboarding template `cod_date`
+   - SAGE CSV `contract_start_date`
+2. It picks `min(candidates)` — the earliest date — as the authoritative COD
+3. If the earliest differs from the masterfile value by >30 days, it flags `_multi_phase_cod` in merged values with all source dates for audit
+4. **Onboarding service** (`services/onboarding/onboarding_service.py`) uses this resolved `cod_date` to set:
+   - `project.cod_date` — project-level initial COD
+   - `clause_tariff.valid_from` — tariff period anchor
+   - `valid_to = cod_date + contract_term_years` — contract end
+
+#### Operating Year Calculation
+
+```
+Year N period_start = valid_from + (N - 1) years
+Year N period_end   = valid_from + N years - 1 day
+
+Example (KAS01, valid_from = 2018-10-03):
+  Year 1  = 2018-10-03 → 2019-10-02
+  Year 8  = 2025-10-03 → 2026-10-02  (current as of March 2026)
+```
+
+Both `RatePeriodGenerator` and `RebasedMarketPriceEngine` use `clause_tariff.valid_from` as the anchor for these calculations.
+
+#### Tariff Rate Display
+
+For `REBASED_MARKET_PRICE` tariffs on the dashboard:
+- **Annual row** displays the effective rate in **billing currency** (e.g., 1.255632 GHS), not the hard-currency conversion
+- **Currency label** shows `billing_currency_code` (e.g., GHS), not `hard_currency_code` (USD)
+- **Monthly sub-rows** show per-month effective tariffs with FX rates and floor/ceiling binding status
+
+#### Authority Matrix Update
+
+| Data Point | Primary Source | Verification Source | Resolution Rule |
+|---|---|---|---|
+| COD date | Revenue Masterfile | AM Onboarding, SAGE start date | Use **earliest** across all sources |
+
+#### Error Correction Pattern
+
+When a COD date error is discovered:
+1. **Fix the data** — Update `project.cod_date` and `clause_tariff.valid_from` to the correct initial COD
+2. **Fix the engine inputs** — Recalculate `operating_year` from the corrected COD
+3. **Re-run the engine** — Delete stale `tariff_rate` rows and recalculate via `RebasedMarketPriceEngine`
+4. **Verify display** — Confirm the dashboard shows correct year number, billing currency rate, and period boundaries
+
+---
+
+## Section 12.1: GRP Population from Market Ref Pricing Workbook
+
+### Overview
+
+Monthly GRP (Grid Reference Price) observations can be bulk-populated from the Market Ref Pricing Excel workbook. This provides the per-month GRP history that `RebasedMarketPriceEngine` needs for accurate effective rate calculations.
+
+### Data Source
+
+**File:** `CBE_data_extracts/Sage Contract Extracts market Ref pricing data.xlsx`
+
+**Sheets:** UTK01, UGL01, TBM01, KAS01, JAB01, GBL01, NBL01, NBL02, MOH001 — each containing monthly GRP observations with varying column layouts.
+
+### Parser: `parse_grp_monthly(sage_id)`
+
+**Location:** `python-backend/services/onboarding/parsers/market_ref_pricing_parser.py`
+
+Handles all sheet layout variants:
+- **Standard** (KAS01, UGL01): `ZDAT, ZPRICODE1..N, ZPRITOT` code row + label row
+- **Multi-section** (MOH001, NBL01): GRID + GENERATOR sections side-by-side — parses first (grid) section only
+- **No components** (NBL01): Just `ZDAT + ZPRITOT` — no component breakdown
+- **Label-only** (UTK01): No ZDAT code row, just `Period, ..., Price total`
+- **Different currencies:** GHS (Ghana), NGN (Nigeria), KES (Kenya)
+
+Returns list of `{"billing_month": "YYYY-MM", "grp_per_kwh": float, "tariff_components": dict}`.
+
+### Script: `populate_grp_from_excel.py`
+
+**Location:** `python-backend/scripts/populate_grp_from_excel.py`
+
+```bash
+cd python-backend
+
+# Preview a single project
+python scripts/populate_grp_from_excel.py --project KAS01 --dry-run
+
+# Execute for a single project
+python scripts/populate_grp_from_excel.py --project KAS01
+
+# Preview all projects in workbook
+python scripts/populate_grp_from_excel.py --all --dry-run
+```
+
+**Flow per project:**
+1. Resolve `project.id`, `clause_tariff.id`, and `currency_id` by sage_id
+2. Parse monthly GRP from Excel via `MarketRefPricingParser.parse_grp_monthly()`
+3. Compute `operating_year` from `project.cod_date` + billing_month
+4. Upsert into `reference_price` (ON CONFLICT update on `(project_id, observation_type, period_start)`)
+5. Detach any `tariff_rate` FK references to stale annual rows, then delete them
+6. Print summary with insert/update counts per operating year
+
+**Key properties:**
+- **Idempotent** — safe to re-run (upsert on unique constraint)
+- **`--dry-run`** — parses and prints without DB writes
+- Projects without a matching DB record, COD date, or Excel sheet are skipped with a warning
+- Sets `verification_status = 'estimated'` and `source_metadata.entry_method = 'excel_import'`
+
+### Operating Year Calculation
+
+Operating years are 1-based, counted from the project's COD anniversary:
+- Year 1 starts at COD month
+- Months before COD → operating_year = 0 (pre-COD)
+- `operating_year = floor((months_since_COD) / 12) + 1`
+
+### Relationship to Tariff Engine
+
+```
+Monthly GRP (reference_price, observation_type='monthly')
+    ↓ aggregate (via dashboard "Aggregate" or API)
+Annual GRP (reference_price, observation_type='annual')
+    ↓ feed into
+RebasedMarketPriceEngine.calculate_and_store()
+    ↓ produces
+tariff_rate (monthly effective rates with floor/ceiling bounds)
+```
+
+After populating monthly GRP, trigger recalculation via `recalc_kas01_tariff.py` or the dashboard Aggregate button.
+
+### Extending to New Projects
+
+1. Add a new sheet to the workbook with the project's sage_id as the tab name
+2. Ensure the project exists in the DB with a valid `cod_date`
+3. If the sage_id differs from the sheet name (e.g., MOH01 → MOH001), add an entry to `SHEET_TO_SAGE_ID` in the parser
+4. If the project uses a non-standard currency, add it to `SAGE_ID_CURRENCY_FALLBACK` in the script
+5. Run: `python scripts/populate_grp_from_excel.py --project <SAGE_ID>`
+
+---
+
+## Section 13: Performance Data Pipeline
+
+### Overview
+
+The Performance Data Pipeline populates plant-level operational data from the **Operations Plant Performance Workbook** into the database. This enables the dashboard Performance tab to show forecast vs actual energy, irradiance, PR, and availability metrics per project.
+
+### Data Flow
+
+```
+Operations Plant Performance Workbook (.xlsx)
+    ↓ PlantPerformanceParser._parse_technical_model()
+TechnicalModelRow[] (per-phase forecast + actual time-series)
+    ↓ populate_performance_data.py
+DB tables: meter → meter_aggregate + production_forecast → plant_performance
+    ↓ GET /api/projects/{id}/plant-performance
+Dashboard Performance Tab
+```
+
+### Technical Model Format
+
+Tabs with a Technical Model section (e.g. KAS01) have a structured layout starting at row ~22:
+
+| Cols | Group | Fields |
+|------|-------|--------|
+| 1-4 | Reference | Date, Year, Month, OY |
+| 5-7 | Forecast Energy | Phase 1 (kWh), Phase 2 (kWh), Combined (kWh) |
+| 8-11 | Forecast Irradiance | GHI Phase 1/2 (Wh/m²), POA Phase 1/2 (Wh/m²) |
+| 12-13 | Forecast PR | PR GHI %, PR POA % |
+| 14-16 | Actual Phase 1 | Meter Opening, Closing, Invoiced Energy (kWh) |
+| 17-19 | Actual Phase 2 | Meter Opening, Closing, Invoiced Energy (kWh) |
+| 20-22 | Actual Totals | Phase 1+2 Metered, Available Energy, Total Energy (kWh) |
+| 23-26 | Actual Irradiance+PR | GHI (Wh/m²), POA (Wh/m²), PR %, Availability % |
+| 27-30 | Performance Analysis | Energy/Irr/PR Comparison, Comments |
+
+Site parameters (rows 2-6) include: installed capacity per phase (kWp), specific yield (kWh/kWp), annual degradation (%).
+
+### Table Dependencies
+
+```
+meter (Phase 1, Phase 2)
+  ├── meter_aggregate (actual meter readings, irradiance)
+  │     ├── contract_line FK (links to billing)
+  │     └── billing_period FK (if period exists)
+  ├── production_forecast (P50 monthly baselines)
+  └── plant_performance (derived metrics: PR, availability, comparisons)
+        └── production_forecast FK
+```
+
+### Unit Conventions
+
+| Field | Storage Unit | Notes |
+|-------|-------------|-------|
+| `meter_aggregate.ghi_irradiance_wm2` | Wh/m² | Monthly cumulative, from workbook |
+| `meter_aggregate.poa_irradiance_wm2` | Wh/m² | Monthly cumulative, from workbook |
+| `production_forecast.forecast_ghi_irradiance` | kWh/m² | Workbook Wh/m² ÷ 1000 |
+| `production_forecast.forecast_poa_irradiance` | kWh/m² | Workbook Wh/m² ÷ 1000 |
+| `plant_performance.actual_pr` | 0-1 ratio | DECIMAL(5,4) |
+| `plant_performance.actual_availability_pct` | 0-100% | DECIMAL(5,2) |
+| `plant_performance.energy_comparison` | ratio | actual/forecast energy |
+
+The API (`GET /projects/{id}/plant-performance`) converts `ghi_irradiance_wm2` → kWh/m² for display comparison with forecast values.
+
+### PR Formula
+
+```
+PR = (Total Energy kWh × 1000) / (GHI Wh/m² × Capacity kWp × 1000)
+```
+
+Where Total Energy = Metered Energy + Available Energy.
+
+### Pipeline Commands
+
+```bash
+cd python-backend
+
+# Dry run — parse workbook only, no DB writes
+python scripts/populate_performance_data.py --project KAS01 --dry-run
+
+# Execute for a single project
+python scripts/populate_performance_data.py --project KAS01
+
+# Execute for all projects with Technical Model data
+python scripts/populate_performance_data.py --all
+```
+
+**Flow per project:**
+1. Parse the workbook Technical Model section via `PlantPerformanceParser`
+2. Create meters (Phase 1, Phase 2) if they don't exist
+3. Link `contract_line.meter_id` FKs to the correct meters
+4. Upsert `production_forecast` rows (ON CONFLICT on project_id + forecast_month)
+5. Upsert `meter_aggregate` rows per phase (lookup by meter_id + period_start)
+6. Upsert `plant_performance` rows (ON CONFLICT on project_id + billing_month)
+
+### Adding a New Project
+
+1. Ensure the project tab exists in the workbook with the Technical Model section
+2. Add the tab name → sage_id mapping to `TAB_NAME_TO_SAGE_ID` in `plant_performance_parser.py`
+3. Add meter configuration to `PROJECT_METER_CONFIG` in `populate_performance_data.py`:
+   ```python
+   "NEW01": [
+       {"name": "Phase 1", "serial_number": "NEW01-P1", "meter_type": "production", "contract_line_numbers": [1000]},
+   ]
+   ```
+4. Run: `python scripts/populate_performance_data.py --project NEW01`
+
+### New Files
+
+| File | Purpose |
+|------|---------|
+| `scripts/populate_performance_data.py` | Performance data population from workbook |
+
+### Modified Files
+
+| File | Change |
+|------|--------|
+| `services/onboarding/parsers/plant_performance_parser.py` | Added `_parse_technical_model()`, `_extract_site_parameters()`, `TechnicalModelRow` support |
+| `models/onboarding.py` | Added `TechnicalModelRow` model, extended `PlantPerformanceData` with `technical_model` and `site_parameters` |
+
+### Authority Matrix
+
+| Data Point | Primary Source | Storage | Notes |
+|---|---|---|---|
+| Forecast energy (kWh) | Workbook Technical Model | `production_forecast.forecast_energy_kwh` | P50 combined phases |
+| Forecast GHI (kWh/m²) | Workbook Technical Model | `production_forecast.forecast_ghi_irradiance` | Converted from Wh/m² |
+| Actual metered energy (kWh) | Workbook Technical Model | `meter_aggregate.energy_kwh` | Per-phase from invoiced energy columns |
+| Actual GHI (Wh/m²) | Workbook Technical Model | `meter_aggregate.ghi_irradiance_wm2` | Site-level on Phase 1 meter |
+| Actual PR | Workbook Technical Model | `plant_performance.actual_pr` | Pre-computed in workbook |
+| Availability % | Workbook Technical Model | `plant_performance.actual_availability_pct` | Pre-computed in workbook |
+| Comparisons (energy/irr/PR) | Workbook Technical Model | `plant_performance.*_comparison` | Ratios: actual/forecast |
+
+---
+
+## Section 13: Clause-to-Tariff Enrichment (Logic Parameter Enricher)
+
+> Added: 2026-03-03
+
+### Why It Exists
+
+The clause table stores per-provision data (140 rows per contract from LLM extraction). The clause_tariff table stores aggregated engine configuration (1-2 rows) that drives billing calculations. Multiple clauses contribute fields to a single tariff config. The Logic Parameter Enricher bridges this gap by reading `clause.normalized_payload` across all categories and merging tariff-relevant fields into the MAIN `clause_tariff.logic_parameters`.
+
+### When It Runs
+
+1. **Automatically** — as Step 10 in the contract parser pipeline (`contract_parser.py`), after the Tariff Bridge (Step 9)
+2. **Manually** — callable directly for re-enrichment of existing contracts
+
+### What It Maps
+
+| Category | Clause Pattern | Source Field | Target Key | Derivation |
+|----------|---------------|-------------|------------|------------|
+| PRICING | `%Grid Tariff Calculation%` | `included_components` | `grp_exclude_vat` | True if VAT not in list |
+| PRICING | `%Grid Tariff Calculation%` | `raw_text` | `grp_clause_text` | Copy clause raw text |
+| PRICING | `%Demand Charge%Exclusion%` | `excluded_components` | `grp_exclude_demand_charges` | True if demand_charge in list |
+| PRICING | `%Floor%Escalation%` | `escalation_frequency` | `escalation_frequency` | Direct |
+| PRICING | `%Floor%Escalation%` | `applies_to` | `tariff_components_to_adjust` | Direct |
+| PRICING | `%Solar Tariff Calculation%` | `recalculation_frequency` | `recalculation_frequency` | Direct |
+| PRICING | `%Solar Tariff Calculation%` | `recalculation_deadline_days` | `grp_calculation_due_days` | Direct |
+| PAYMENT_TERMS | `%Currency Conversion%` | `billing_frequency` | `billing_frequency` | Direct |
+| PAYMENT_TERMS | `%Currency Conversion%` | `exchange_rate_source` | `agreed_fx_rate_source` | Direct |
+| AVAILABILITY | (any) | `available_energy_method` | `available_energy_method` | Direct |
+| AVAILABILITY | (any) | `irradiance_threshold_wm2` | `irradiance_threshold_wm2` | Direct |
+| AVAILABILITY | (any) | `interval_minutes` | `interval_minutes` | Direct |
+| AVAILABILITY | (any) | `excused_events` | `excused_events` | Direct |
+| PERFORMANCE_GUARANTEE | (any) | `degradation_rate_percent_per_year` | `degradation_pct` | Divide by 100 |
+| PERFORMANCE_GUARANTEE | (any) | `shortfall_formula_type` | `shortfall_formula_type` | Direct |
+| PERFORMANCE_GUARANTEE | (any) | `shortfall_excused_events` | `shortfall_excused_events` | Direct |
+| LIQUIDATED_DAMAGES | `%Availability%Payment%` | `calculation_formula` | `shortfall_formula_text` | Direct |
+
+### Clause Matching Strategy
+
+1. **Primary:** Match by `category` + `name_pattern` (ILIKE-style substring matching)
+2. **Fallback:** If no name match, scan all clauses in that category for the `source_field` key in their payload
+3. **Tie-break:** Prefer clause with highest `confidence_score`
+
+### Defensive Merge
+
+Per codebase convention, never overwrites existing non-null values in `logic_parameters`. Only fills in keys that are currently NULL or absent.
+
+### Provenance
+
+Stored in `clause_tariff.source_metadata._enrichment_provenance` (NOT in `logic_parameters`) to keep LP clean for engine consumption. Records which clause contributed each field.
+
+### Annexure G Fields (Energy Output Calculation)
+
+As of March 2026, the extraction prompt explicitly asks for Annexure G fields. These are
+now auto-extracted when the PDF contains Annexure G content (which is common — annexures
+are typically included in the stamped/signed PPA PDF):
+
+| Field | Source | Example (KAS01) |
+|-------|--------|-----------------|
+| `available_energy_method` | Annexure G formula type | `irradiance_interval_adjusted` |
+| `irradiance_threshold_wm2` | Normal Operation threshold | `100` |
+| `interval_minutes` | Meter reading interval | `15` |
+| `monthly_production_formula` | E_month formula | `E_month = sum(E_metered(i)) + sum(E_Available(x))` |
+| `available_energy_formula` | E_Available formula | `E_Available(x) = (E_hist / Intervals) * (Irr(x) / Irr_hist)` |
+
+**If extraction misses these fields** (e.g., annexure is a separate document not in the PDF):
+1. Check whether Annexure G is in the uploaded PDF (search for "Energy Output calculation")
+2. If missing, request the full PDF with annexures and re-run extraction
+3. If re-extraction is not feasible, use `PATCH /api/clauses/{id}?project_id={pid}` with
+   `np_` prefixed fields (e.g., `np_irradiance_threshold_wm2: 100`) to merge into `normalized_payload`
+
+### Fields That Cannot Be Auto-Populated
+
+Some fields require data from external sources not available in the PPA text:
+
+| Field | Reason | Manual Source |
+|-------|--------|--------------|
+| `billing_taxes` | Country-specific tax rates | PURC gazette / local tax authority |
+| `annual_specific_yield` | Engineering parameter | System design report (kWh/kWp) |
+| `escalation_start_date` | Derived from COD + contract terms | Project records |
+| `degradation_pct` | Derived from Annexure D expected output table | Calculate: 1 - (Year2/Year1) |
+
+These are logged as `unenriched_fields` so operators know what still needs manual entry.
+
+### New Files
+
+| File | Purpose |
+|------|---------|
+| `services/tariff/logic_parameter_enricher.py` | Clause→tariff logic_parameters enrichment |
+
+### Modified Files
+
+| File | Change |
+|------|--------|
+| `services/contract_parser.py` | Added Step 10: invoke LogicParameterEnricher after TariffBridge |
+| `services/prompts/clause_extraction_prompt.py` | Added Annexure G fields to AVAILABILITY extraction; Added 12 GRP fields to PRICING extraction |
+| `services/prompts/clause_examples.py` | Added monthly_production_formula, available_energy_formula to AVAILABILITY; Added 12 GRP field definitions to PRICING |
+| `api/entities.py` | Added `PATCH /api/clauses/{id}` endpoint with `np_` prefix for normalized_payload JSONB merge |
+| `services/tariff/logic_parameter_enricher.py` | Added enrichment rules for GRP fields (grp_method, grp_time_window_*, pricing_formula_text, etc.) and availability formulas |
+
+---
+
+## Section 14: GRP Template — Canonical Logic Parameters
+
+> Added: 2026-03-03
+
+### Purpose
+
+The `clause_tariff.logic_parameters` JSONB column drives the billing engine and dashboard display (PricingTariffsTab). Every project needs a consistent set of keys for the UI to render correctly. MOH01 (tariff id=2) is the **canonical template** — it has the most complete set of populated fields and serves as the reference for all other projects.
+
+### Three-Layer Data Flow
+
+```
+Contract PDF
+    → Step 5: Clause Extraction (clause.normalized_payload)
+    → Step 10: Logic Parameter Enricher (clause_tariff.logic_parameters)
+    → Dashboard UI (PricingTariffsTab.tsx reads logic_parameters)
+```
+
+If the extraction prompt doesn't list a field, the LLM won't extract it. If the enricher doesn't have a rule for that field, it won't reach the tariff. Both layers must be in sync.
+
+### Current Grid Reference Price Card
+
+The GRP section displays a summary card showing the **Current Grid Reference Price** as a weighted average (total variable charges / total kWh invoiced). This requires monthly GRP observations in the `reference_price` table.
+
+| Scenario | Data Source | Card Label |
+|----------|------------|------------|
+| New project (pre-COD) | `reference_price` with `operating_year = 0` | "Weighted average of N pre-COD months" |
+| Operating project | Most recent 12 monthly observations (any operating_year) | "Weighted average of N most recent months" |
+
+**Populating for a new project:**
+1. Upload 12 months of pre-COD utility bills via GRP submission tokens
+2. Or use `POST /api/grp/observations/bulk` with `is_baseline: true` to insert `operating_year=0` records
+
+**For existing projects without pre-COD data:**
+The backend automatically falls back to the most recent 12 monthly observations. The card will appear as soon as the project has any `reference_price` records.
+
+Example values:
+- MOH01: **1.8199 GHS/kWh** (12 pre-COD months, Sep 2024 – Aug 2025)
+- KAS01: **1.5687 GHS/kWh** (12 most recent months, Nov 2024 – Oct 2025)
+
+### Canonical LP Key Set (MOH01 Template)
+
+Fields are grouped by the dashboard section that renders them.
+
+#### Grid Reference Price Section (`GRPSection` component)
+
+| Key | Type | Source | Example (MOH01) | Required |
+|-----|------|--------|-----------------|----------|
+| `grp_method` | string | Extraction | `"utility_variable_charges_tou"` | Yes |
+| `grp_clause_text` | string | Enricher | Full clause text | Yes |
+| `grp_exclude_vat` | bool | Enricher | `true` | Yes |
+| `grp_exclude_demand_charges` | bool | Enricher | `true` | Yes |
+| `grp_calculation_due_days` | int | Extraction | `60` | Yes |
+| `grp_verification_deadline_days` | int | Extraction | `30` | Optional |
+| `grp_time_window_start` | string | Extraction | `"06:00"` | Optional (TOU only) |
+| `grp_time_window_end` | string | Extraction | `"18:00"` | Optional (TOU only) |
+| `grp_included_components` | list | Extraction | `[...]` | Optional |
+| `grp_excluded_components` | list | Extraction | `[...]` | Optional |
+
+#### Pricing Formula Section
+
+| Key | Type | Source | Example (MOH01) | Required |
+|-----|------|--------|-----------------|----------|
+| `pricing_formula_text` | string | Extraction/Manual | Full payment formula | Yes |
+| `discount_pct` | float | Extraction | `0.192` | Yes |
+| `floor_rate` | float | Extraction | `0.0874` | Yes |
+| `ceiling_rate` | float | Extraction | `0.3` | Optional |
+| `pricing_model` | string | Extraction | `"discount_based"` | Optional |
+| `formula_type` | string | Derived | `"GRID_DISCOUNT_BOUNDED"` | Optional |
+
+#### Shortfall / Performance Guarantee Section
+
+| Key | Type | Source | Example (MOH01) | Required |
+|-----|------|--------|-----------------|----------|
+| `shortfall_formula_type` | string | Enricher | `"price_differential"` | Yes |
+| `shortfall_formula_text` | string | Enricher | Formula expression | Yes |
+| `shortfall_formula_cap` | string | Manual | Cap description or "No cap" | Yes |
+| `shortfall_formula_variables` | list | Manual | 5 variable definitions | Yes |
+| `degradation_pct` | float | Manual | `0.007` (MOH01), `0.004` (KAS01) | Yes |
+
+#### Escalation Section
+
+| Key | Type | Source | Example (MOH01) | Required |
+|-----|------|--------|-----------------|----------|
+| `escalation_rules` | list | Extraction | `[{type, value, component, start_year}]` | Yes |
+| `escalation_frequency` | string | Enricher | `"annual"` | Yes |
+| `escalation_start_date` | string | Manual | `"2026-09-01"` (MOH01) | Yes |
+
+#### Available Energy Section (Annexure G)
+
+| Key | Type | Source | Example | Required |
+|-----|------|--------|---------|----------|
+| `available_energy_method` | string | Extraction | `"irradiance_interval_adjusted"` | Yes |
+| `available_energy_formula` | string | Extraction | `"E_Available(x) = ..."` | Yes |
+| `available_energy_variables` | list | Manual | 5 variable definitions | Yes |
+| `monthly_production_formula` | string | Extraction | `"E_month = ..."` | Yes |
+| `irradiance_threshold_wm2` | int | Extraction | `100` | Yes |
+| `interval_minutes` | int | Extraction | `15` | Yes |
+| `excused_events` | list | Extraction | 5 event categories | Yes |
+
+#### Billing & Tax Section
+
+| Key | Type | Source | Example | Required |
+|-----|------|--------|---------|----------|
+| `billing_frequency` | string | Enricher | `"monthly"` | Yes |
+| `billing_taxes` | object | Manual | Ghana tax structure | Yes |
+| `annual_specific_yield` | int | Manual | `1451` (MOH01), `1443` (KAS01) | Yes |
+| `agreed_fx_rate_source` | string | Enricher | `"Central Bank"` | Optional |
+
+### Populating a New Project
+
+1. **Run contract extraction pipeline** (Steps 1-10): auto-populates extractable fields
+2. **Check unenriched fields**: review `source_metadata._enrichment_provenance` for gaps
+3. **Manual population** for fields that can't be auto-extracted:
+
+| Field | How to Derive |
+|-------|---------------|
+| `pricing_formula_text` | Summarize the pricing logic from Part I / pricing schedule |
+| `shortfall_formula_cap` | Look for LD cap clause; if none, state "No explicit cap" |
+| `shortfall_formula_variables` | List symbols from the shortfall formula with definitions |
+| `degradation_pct` | From Annexure D: `1 - (Year2_MWh / Year1_MWh)` |
+| `escalation_start_date` | COD date + escalation start year from contract |
+| `billing_taxes` | Country-specific: use Ghana template for GH projects |
+| `annual_specific_yield` | `Year1_MWh × 1000 / System_kWp` |
+| `available_energy_variables` | From Annexure G variable definitions |
+
+4. **Update via patch script** (see `scripts/patch_kas01_grp_template.py` for reference pattern)
+5. **Populate GRP observations** in `reference_price` table for the "Current Grid Reference Price" card:
+   - Pre-COD: upload 12 months of utility bills before COD (`operating_year=0`)
+   - Operating projects: ensure monthly GRP observations are populated (card auto-selects most recent 12 months)
+
+### Ghana Tax Template
+
+For Ghana-based projects, use this standard tax structure:
+
+```json
+{
+  "vat": {"code": "VAT", "rate": 0.15, "applies_to": {"base": "subtotal_after_levies"}},
+  "levies": [
+    {"code": "NHIL", "rate": 0.025, "applies_to": {"base": "energy_subtotal"}},
+    {"code": "GETFUND", "rate": 0.025, "applies_to": {"base": "energy_subtotal"}},
+    {"code": "COVID", "rate": 0.01, "applies_to": {"base": "energy_subtotal"}}
+  ],
+  "withholdings": [
+    {"code": "WHT", "rate": 0.03, "applies_to": {"base": "energy_subtotal"}},
+    {"code": "WHVAT", "rate": 0.07, "applies_to": {"base": "subtotal_after_levies"}}
+  ]
+}
+```
+
+Rates are as of January 2025. Update `effective_from` when rates change.
+
+### Key Differences: MOH01 vs KAS01
+
+| Parameter | MOH01 | KAS01 | Reason |
+|-----------|-------|-------|--------|
+| `degradation_pct` | 0.007 (0.7%) | 0.004 (0.4%) | Different system design/Annexure D |
+| `annual_specific_yield` | 1451 | 1443 | Different location/system size |
+| `grp_time_window_*` | 06:00–18:00 | Not specified | KAS01 GRP covers all kWh charges |
+| `shortfall_formula_cap` | 119,000 USD/year | No explicit cap | Contract-specific |
+| `escalation_start_date` | 2026-09-01 | 2018-09-30 | Different COD dates |
+| `agreed_fx_rate_source` | (not set) | Central Bank | KAS01 has FX conversion |
+
+---
+
+## Section 15: Invoice Extraction & Billing Population
+
+> Added: 2026-03-03
+
+### Overview
+
+The billing tab on the project dashboard requires fully populated expected invoice data to display correctly. This section documents the repeatable workflow for extracting invoice data from CBE invoices and populating the billing tables.
+
+### Prerequisites
+
+Before generating expected invoices for a project, the following must be in place:
+
+| Prerequisite | Table | Populated By |
+|---|---|---|
+| Contract lines with `clause_tariff_id` | `contract_line` | Billing fixture SQL |
+| Billing products linked to contract | `contract_billing_product` | Migration 049 |
+| Clause tariff with `logic_parameters.billing_taxes` | `clause_tariff` | Billing fixture SQL |
+| Tariff rates (monthly or annual) | `tariff_rate` | `recalc_*_tariff.py` or fixture |
+| Meter aggregate data for billing period | `meter_aggregate` | Migration 049 or CBE adapter |
+| Billing periods | `billing_period` | Migration 030 |
+
+### Billing Fixture Pattern
+
+Each project needs a billing fixture SQL file that prepares the project for invoice generation. These follow a standard template modeled on `database/scripts/fixtures/moh01_dec2025.sql`.
+
+**File naming:** `database/scripts/fixtures/{sage_id}_dec2025.sql`
+
+**Standard fixture steps:**
+
+```
+Step 1: Set project.country (required for billing_tax_rule lookup)
+Step 2: Link contract_lines → clause_tariff (if not already linked)
+Step 3: Seed billing_taxes into clause_tariff.logic_parameters
+Step 4: Seed reference_price (GRP) for the billing month
+Step 5: Seed tariff_rate monthly row (effective rate from invoice)
+Step 6: Ensure billing_tax_rule exists (org/country fallback)
+Step 7: Verify meter_aggregate data exists
+```
+
+### Tax Configuration (Two-Tier Fallback)
+
+The billing API (`POST /projects/{pid}/billing/generate-expected-invoice`) resolves tax rules in this order:
+
+1. **Primary:** `clause_tariff.logic_parameters.billing_taxes` (project-specific)
+2. **Fallback:** `billing_tax_rule` table (org + country + effective date range)
+
+If both exist, the clause_tariff override takes priority. This allows project-specific overrides (e.g., KAS01 has WHT 7.5% while Ghana standard is 3%).
+
+### Ghana Tax Chain Structure
+
+```json
+{
+  "rounding_mode": "ROUND_HALF_UP",
+  "rounding_precision": 2,
+  "invoice_rate_precision": 4,
+  "available_energy_line_mode": "single|per_meter",
+  "levies": [
+    {"code": "NHIL", "name": "NHIL", "rate": 0.025, "applies_to": {"base": "energy_subtotal"}, "sort_order": 10},
+    {"code": "GETFUND", "name": "GETFund", "rate": 0.025, "applies_to": {"base": "energy_subtotal"}, "sort_order": 11},
+    {"code": "COVID", "name": "COVID Levy", "rate": 0.01, "applies_to": {"base": "energy_subtotal"}, "sort_order": 12}
+  ],
+  "vat": {"code": "VAT", "name": "VAT", "rate": 0.15, "applies_to": {"base": "subtotal_after_levies"}, "sort_order": 20},
+  "withholdings": [
+    {"code": "WHT", "name": "Withholding Tax", "rate": <PROJECT_SPECIFIC>, "applies_to": {"base": "energy_subtotal"}, "sort_order": 30},
+    {"code": "WHVAT", "name": "Withholding VAT", "rate": 0.07, "applies_to": {"base": "subtotal_after_levies"}, "sort_order": 31}
+  ]
+}
+```
+
+**Project-Specific WHT Rates:**
+
+| Project | WHT Rate | Source |
+|---------|----------|--------|
+| MOH01 | 3% | Invoice SINMOH012512037 |
+| KAS01 | 7.5% | Invoice SINKAS012512035 |
+
+### Available Energy Line Mode
+
+| Mode | Behavior | When to Use |
+|------|----------|-------------|
+| `"single"` | One combined "Available Energy" line | Invoice shows single available energy row (KAS01) |
+| `"per_meter"` | One line per available-energy contract_line | Invoice shows per-meter available energy (MOH01) |
+
+### Invoice Calculation Chain
+
+```
+1. Energy Lines
+   ├── Available Energy: total_available_kwh × rate
+   └── Metered Energy (per contract_line): metered_kwh × rate
+
+2. Energy Subtotal = SUM(energy lines)
+
+3. Levies (on energy_subtotal)
+   ├── NHIL:    energy_subtotal × 2.5%
+   ├── GETFUND: energy_subtotal × 2.5%
+   └── COVID:   energy_subtotal × 1.0%
+
+4. Subtotal After Levies = energy_subtotal + levies_total
+
+5. VAT = subtotal_after_levies × 15%
+
+6. Invoice Total = subtotal_after_levies + VAT
+
+7. Withholdings (deductions, stored as negative amounts)
+   ├── WHT:   energy_subtotal × WHT_rate
+   └── WHVAT: subtotal_after_levies × 7%
+
+8. Net Due = invoice_total - withholdings_total
+```
+
+### Rate Resolution Chain
+
+The billing API resolves tariff rates for each contract_line in this order:
+
+1. **Monthly:** `tariff_rate WHERE clause_tariff_id = X AND billing_month = Y AND rate_granularity = 'monthly'`
+2. **Annual:** `tariff_rate WHERE clause_tariff_id = X AND rate_granularity = 'annual' AND period covers billing_month`
+3. **Base rate:** `clause_tariff.base_rate` (final fallback)
+
+For `REBASED_MARKET_PRICE` tariffs, monthly rates should exist (generated by `RebasedMarketPriceEngine`). For deterministic tariffs, annual rates suffice.
+
+### API Endpoint
+
+```
+POST /projects/{project_id}/billing/generate-expected-invoice
+
+Body: {
+  "billing_month": "2025-12",
+  "invoice_direction": "payable",     // optional, default "payable"
+  "idempotency_key": "kas01-dec2025"  // optional, prevents duplicates
+}
+
+Response: {
+  "success": true,
+  "header_id": 123,
+  "version_no": 1,
+  "billing_month": "2025-12",
+  "energy_subtotal": 167069.94,
+  "levies_total": 10024.20,
+  "subtotal_after_levies": 177094.14,
+  "vat_amount": 26564.12,
+  "invoice_total": 203658.26,
+  "withholdings_total": 24926.84,
+  "net_due": 178731.42,
+  "line_count": 10,
+  "currency_code": "GHS"
+}
+```
+
+### Repeatable Workflow (New Month / New Project)
+
+**For a new billing month on an existing project:**
+
+1. Ensure `meter_aggregate` data exists for the month (from CBE adapter or manual import)
+2. Ensure `tariff_rate` monthly row exists (from `RebasedMarketPriceEngine` or fixture)
+3. Call `POST /projects/{pid}/billing/generate-expected-invoice` with `billing_month`
+4. Compare with received invoice (manual upload or OCR)
+
+**For a new project:**
+
+1. Create billing fixture SQL from the template:
+   ```bash
+   cp database/scripts/fixtures/moh01_dec2025.sql database/scripts/fixtures/{sage_id}_dec2025.sql
+   ```
+2. Update the fixture with project-specific values:
+   - Project code (sage_id, external_project_id)
+   - Contract identifier (external_contract_id)
+   - Tax rates (especially WHT — verify from actual invoice)
+   - Available energy line mode (check invoice format)
+   - GRP value and effective rate (from invoice tariff section)
+3. Run the fixture against the database
+4. Generate expected invoice via API
+5. Verify against actual CBE invoice
+
+### Verification
+
+After running a billing fixture, verify with:
+
+```sql
+-- 1. Contract lines linked to tariff
+SELECT cl.contract_line_number, cl.product_desc,
+       cl.clause_tariff_id, cl.billing_product_id, cl.energy_category
+FROM contract_line cl
+JOIN contract c ON c.id = cl.contract_id
+JOIN project p ON p.id = c.project_id
+WHERE p.sage_id = 'KAS01' AND cl.is_active = true;
+
+-- 2. Billing taxes configured
+SELECT ct.name, ct.logic_parameters->'billing_taxes' AS taxes
+FROM clause_tariff ct
+JOIN project p ON ct.project_id = p.id
+WHERE p.sage_id = 'KAS01' AND ct.is_current = true;
+
+-- 3. Tariff rate for billing month
+SELECT tr.billing_month, tr.effective_rate_billing_ccy, tr.rate_binding
+FROM tariff_rate tr
+JOIN clause_tariff ct ON ct.id = tr.clause_tariff_id
+JOIN project p ON ct.project_id = p.id
+WHERE p.sage_id = 'KAS01' AND tr.rate_granularity = 'monthly';
+
+-- 4. Meter aggregate data
+SELECT cl.contract_line_number, cl.product_desc,
+       ma.energy_kwh, ma.available_energy_kwh,
+       ma.opening_reading, ma.closing_reading
+FROM meter_aggregate ma
+JOIN contract_line cl ON cl.id = ma.contract_line_id
+JOIN contract c ON c.id = cl.contract_id
+JOIN project p ON p.id = c.project_id
+WHERE p.sage_id = 'KAS01' AND ma.period_start = '2025-12-01';
+
+-- 5. Generated expected invoice
+SELECT eih.total_amount, eih.version_no, eih.generated_at,
+       eili.description, eili.quantity, eili.line_unit_price,
+       eili.line_total_amount, eili.component_code, eili.amount_sign
+FROM expected_invoice_header eih
+JOIN expected_invoice_line_item eili ON eili.expected_invoice_header_id = eih.id
+WHERE eih.project_id = (SELECT id FROM project WHERE sage_id = 'KAS01')
+  AND eih.is_current = true
+ORDER BY eili.sort_order;
+```
+
+### Existing Fixtures
+
+| Fixture | Project | Invoice Reference | Status |
+|---------|---------|-------------------|--------|
+| `moh01_dec2025.sql` | MOH01 (Mohinani) | SINMOH012512037 | Complete |
+| `kas01_dec2025.sql` | KAS01 (Kasapreko) | SINKAS012512035 | Complete |
+
+### Files
+
+| File | Purpose |
+|------|---------|
+| `database/scripts/fixtures/moh01_dec2025.sql` | MOH01 billing fixture (template) |
+| `database/scripts/fixtures/kas01_dec2025.sql` | KAS01 billing fixture |
+| `python-backend/api/billing.py` | Invoice generation API |
+| `python-backend/scripts/recalc_kas01_tariff.py` | KAS01 tariff recalculation |
 
 ---
 

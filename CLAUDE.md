@@ -184,6 +184,7 @@ aws secretsmanager create-secret --region us-east-1 --name frontiermind/backend/
 aws secretsmanager create-secret --region us-east-1 --name frontiermind/backend/database-url --secret-string "YOUR_URL"
 aws secretsmanager create-secret --region us-east-1 --name frontiermind/backend/encryption-key --secret-string "YOUR_KEY"
 aws secretsmanager create-secret --region us-east-1 --name frontiermind/supabase-url --secret-string "YOUR_URL"
+aws secretsmanager create-secret --region us-east-1 --name frontiermind/backend/sentry-dsn --secret-string "YOUR_DSN"
 ```
 
 **IAM Policy for Secrets Manager Access:**

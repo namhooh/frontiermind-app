@@ -130,7 +130,10 @@ export interface PortfolioProjectSummary {
   project_id: number
   project_name: string
   country: string | null
+  customer_name: string | null
+  industry: string | null
   total_actual_kwh: number | null
+  total_forecast_kwh: number | null
   total_revenue_usd: number | null
   months_with_data: number
 }
@@ -435,6 +438,8 @@ export interface ExpectedInvoiceSummary {
   invoice_total: number
   withholdings_total: number
   net_due: number
+  net_due_hard_ccy: number | null
+  fx_rate: number | null
   line_items: ExpectedInvoiceLineItem[]
 }
 
@@ -445,6 +450,7 @@ export interface MeterBillingMonth {
   total_available_kwh: number | null
   total_energy_kwh: number | null
   total_amount: number | null
+  total_amount_hard_ccy: number | null
   expected_invoice: ExpectedInvoiceSummary | null
 }
 

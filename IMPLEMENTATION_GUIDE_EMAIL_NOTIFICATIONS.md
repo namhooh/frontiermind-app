@@ -1,18 +1,68 @@
 # Email & Notification Engine - Implementation Guide
 
-**Version:** 1.0
-**Date:** 2026-02-15
+**Version:** 1.1
+**Date:** 2026-03-03
 **Migration:** `database/migrations/032_email_notification_engine.sql`
 
 ---
 
 ## Overview
 
-Automated email notification system for sending invoice reminders, compliance alerts, and other notifications to external counterparties. Includes a secure token-based submission system for collecting responses (PO numbers, payment confirmations) without requiring counterparties to have FrontierMind accounts.
+Bidirectional email system for counterparty communication and document ingestion. Supports two ingestion methods:
+
+1. **Primary — SES Inbound Email:** Counterparties send invoices, meter data, and documents to a dedicated per-organization email address (e.g., `cbe@mail.frontiermind.co`). SES receives the email, stores raw MIME in S3, and triggers the backend pipeline for parsing and extraction. The same address is used for outbound notifications (reminders, alerts), so clients interact with a single address per project.
+
+2. **Secondary — Token URL Upload:** Secure token-based submission links for structured data collection (PO numbers, payment confirmations, GRP utility invoice uploads). Used as a fallback when email-based ingestion is not suitable (large files, structured form input, initial onboarding).
+
+Both methods converge into the same review queue and processing pipeline.
 
 ### Architecture
 
 ```
+                         ┌─────────────────────────┐
+  Counterparty emails    │  AWS SES                 │    Outbound notifications
+  invoices/data to       │  mail.frontiermind.co    │    sent from same address
+  cbe@mail.frontiermind  │                          │
+─────────────────────►   │  INBOUND:                │   ◄─────────────────────
+                         │  Receipt Rule → S3 → SNS │
+                         │                          │
+                         │  OUTBOUND:               │
+                         │  SES SendEmail API       │
+                         └────────┬────────┬────────┘
+                           inbound│        │outbound
+                                  ▼        │
+                         ┌────────────────┐│
+                         │  S3 Bucket     ││
+                         │  ingest/{org}/ ││
+                         │  raw/YYYY/MM/  ││
+                         └───────┬────────┘│
+                              SNS│         │
+                                 ▼         │
+┌────────────────────────────────────────────────────────────────┐
+│  ECS Python Backend (FastAPI)                                  │
+│                                                                │
+│  ┌─────────────────┐  ┌──────────────────┐  ┌───────────────┐ │
+│  │IngestService    │  │NotificationService│  │TokenService   │ │
+│  │(primary)        │  │(orchestrator)     │  │(secondary)    │ │
+│  │• MIME parsing   │  │• Immediate send   │  │• SHA-256      │ │
+│  │• Attachment     │  │• Scheduled send   │  │• Generate     │ │
+│  │  extraction     │  │• Bounce handling  │  │• Validate     │ │
+│  │• Sender allow-  │  └──────────────────┘  │• Use + record │ │
+│  │  list check     │         │               └───────────────┘ │
+│  │• Review queue   │  ┌──────┴──────┐                          │
+│  └────────┬────────┘  │             │                          │
+│           │    ┌──────▼──────┐ ┌────▼──────┐                   │
+│           │    │SESClient    │ │Template   │                    │
+│           │    │(boto3)      │ │Renderer   │                    │
+│           │    └─────────────┘ └───────────┘                    │
+│           ▼                                                     │
+│  ┌──────────────────┐                                          │
+│  │Review Queue      │  ← Both ingest paths converge here       │
+│  │(staging table)   │                                          │
+│  └──────────────────┘                                          │
+└────────────────────────────────────────────────────────────────┘
+          │                                        │
+          ▼                                        ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  Supabase PostgreSQL                                            │
 │  ┌──────────────┐ ┌──────────────────┐ ┌──────────────────────┐ │
@@ -20,44 +70,28 @@ Automated email notification system for sending invoice reminders, compliance al
 │  │              │ │_schedule          │ │                      │ │
 │  └──────────────┘ └──────────────────┘ └──────────────────────┘ │
 │  ┌──────────────┐ ┌──────────────────┐ ┌──────────────────────┐ │
-│  │submission    │ │submission        │ │customer_contact      │ │
-│  │_token        │ │_response         │ │(migration 028)       │ │
+│  │ingest_email  │ │submission        │ │customer_contact      │ │
+│  │(new)         │ │_token / _response│ │(migration 028)       │ │
 │  └──────────────┘ └──────────────────┘ └──────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
-          │                │                       │
-          ▼                ▼                       ▼
-┌─────────────────────────────────────────────────────────────────┐
-│  ECS Python Backend (FastAPI)                                   │
-│                                                                 │
-│  ┌────────────────┐  ┌──────────────────┐  ┌─────────────────┐ │
-│  │APScheduler     │  │NotificationService│  │TokenService     │ │
-│  │(in-process)    │──│(orchestrator)     │──│(SHA-256 tokens) │ │
-│  │• 5-min poll    │  │• Immediate send   │  │• Generate       │ │
-│  │• Token expiry  │  │• Scheduled send   │  │• Validate       │ │
-│  └────────────────┘  └──────────────────┘  │• Use + record   │ │
-│                             │               └─────────────────┘ │
-│                    ┌────────┴────────┐                          │
-│                    │                 │                           │
-│            ┌───────▼──────┐  ┌──────▼──────┐                   │
-│            │SESClient     │  │Template     │                    │
-│            │(boto3)       │  │Renderer     │                    │
-│            │              │  │(Jinja2)     │                    │
-│            └──────────────┘  └─────────────┘                    │
-└─────────────────────────────────────────────────────────────────┘
-          │                                        │
-          ▼                                        ▼
-┌──────────────────┐              ┌────────────────────────────┐
-│  AWS SES         │              │  Next.js Frontend          │
-│  • Email delivery│              │  /notifications  (admin)   │
-│  • Bounce/bounce │              │  /submit/[token] (public)  │
-│    tracking      │              └────────────────────────────┘
-└──────────────────┘
+          │
+          ▼
+┌────────────────────────────────┐
+│  Next.js Frontend              │
+│  /notifications  (admin)       │
+│  /submit/[token] (public)      │
+│  /ingest/review  (admin, new)  │
+└────────────────────────────────┘
 ```
 
 ### Key Design Decisions
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
+| **Primary ingestion** | SES inbound email | Counterparties already email invoices/data — fits their existing workflow, provides full audit trail (raw MIME in S3), captures sender, subject, body context for parsing |
+| **Secondary ingestion** | Token URL upload | Fallback for large files (>25MB), structured form input, onboarding before sender allowlist setup |
+| **Email domain** | `mail.frontiermind.co` subdomain | Keeps MX separate from Google Workspace on `frontiermind.co`. Per-org addresses (e.g., `cbe@mail.frontiermind.co`) provide isolation |
+| **Same address for inbound + outbound** | Yes | Clients interact with one address per org. Replies/forwards naturally route to ingestion pipeline |
 | Scheduler | APScheduler in-process | Schedule state in PostgreSQL; APScheduler only runs the poll loop. Emails only send when ECS desired-count >= 1 |
 | Email delivery | AWS SES | Already in AWS ecosystem, boto3 already a dependency |
 | Templates | Jinja2 | Same engine as existing PDF report templates |
@@ -65,6 +99,200 @@ Automated email notification system for sending invoice reminders, compliance al
 | Recipient resolution | `customer_contact` table | Reuses migration 028 with `include_in_invoice_email` / `escalation_only` flags |
 | Schedule timing | `calculate_next_run_time()` | Reuses function from migration 018 (report scheduling) |
 | Shared scheduler | Report schedule job also hosted here | The `services/email/scheduler.py` APScheduler instance hosts a third job (`process_due_report_schedules`) that processes `scheduled_report` rows — see `services/reports/scheduler.py` |
+
+---
+
+## Domain & DNS Setup
+
+### Subdomain: `mail.frontiermind.co`
+
+The `mail.frontiermind.co` subdomain is dedicated to SES for both inbound and outbound email. The root domain `frontiermind.co` remains on Google Workspace for team email — no changes to existing Google Workspace setup.
+
+### DNS Records
+
+```
+# MX record — route inbound email to SES
+mail.frontiermind.co    MX    10    inbound-smtp.us-east-1.amazonaws.com
+
+# SPF — authorize SES to send on behalf of this subdomain
+mail.frontiermind.co    TXT   "v=spf1 include:amazonses.com ~all"
+
+# DKIM — SES generates 3 CNAME records during domain verification
+# (exact values provided by SES console after domain setup)
+selector1._domainkey.mail.frontiermind.co    CNAME    selector1.dkim.amazonses.com
+selector2._domainkey.mail.frontiermind.co    CNAME    selector2.dkim.amazonses.com
+selector3._domainkey.mail.frontiermind.co    CNAME    selector3.dkim.amazonses.com
+
+# DMARC — reject emails that fail SPF/DKIM alignment
+_dmarc.mail.frontiermind.co    TXT    "v=DMARC1; p=reject; rua=mailto:dmarc@frontiermind.co"
+```
+
+### Per-Organization Email Addresses
+
+Each organization gets a dedicated address. The mapping is stored in Supabase:
+
+| Organization | Email Address | Purpose |
+|-------------|---------------|---------|
+| CBE | `cbe@mail.frontiermind.co` | Inbound ingestion + outbound notifications |
+| KAS01 | `kas01@mail.frontiermind.co` | Inbound ingestion + outbound notifications |
+| Acme Solar | `acme-solar@mail.frontiermind.co` | Inbound ingestion + outbound notifications |
+
+No DNS changes needed when adding new organizations — SES uses a wildcard receipt rule on `*@mail.frontiermind.co` and the backend routes by recipient prefix.
+
+### SES Setup Steps
+
+1. **Verify domain** in SES console → add `mail.frontiermind.co`
+2. **Add DNS records** (MX, SPF, DKIM, DMARC) via domain registrar
+3. **Create receipt rule set** with a single rule:
+   - Recipients: `*@mail.frontiermind.co` (catch-all)
+   - Action 1: Store to S3 bucket `frontiermind-email-ingest`
+   - Action 2: SNS notification to `frontiermind-email-ingest` topic
+4. **Request production access** (exit SES sandbox) for outbound sending
+5. **Create SNS subscription** → HTTPS endpoint on ECS backend
+
+---
+
+## Inbound Email Ingestion (Primary)
+
+### Flow
+
+```
+1. Counterparty sends email to cbe@mail.frontiermind.co
+   (invoice PDF attached, subject: "KAS01 - Dec 2025 Invoice")
+        │
+        ▼
+2. SES receives → Receipt Rule triggers:
+   a. Store raw MIME to S3: s3://frontiermind-email-ingest/{message-id}
+   b. Publish SNS notification with message-id + recipients
+        │
+        ▼
+3. SNS → POST /api/ingest/email (ECS backend)
+        │
+        ▼
+4. Backend IngestService:
+   a. Download raw MIME from S3
+   b. Parse email: sender, subject, body, timestamps
+   c. Extract attachments (PDF, Excel, images)
+   d. Resolve org from recipient prefix (cbe@ → org_id=1)
+   e. Check sender against allowlist (customer_contact table)
+   f. Filter noise: auto-replies, bounces, no-attachment emails
+        │
+        ▼
+5. Create ingest_email record (status=pending_review)
+   Store attachments to S3: ingest/{org_id}/attachments/{hash}{ext}
+        │
+        ▼
+6. Review queue: admin reviews in /ingest/review
+   → Approve: triggers parsing pipeline (contract parser, GRP extractor, etc.)
+   → Reject: mark as rejected with reason
+   → Ignore: mark as noise (auto-reply, spam)
+```
+
+### Sender Allowlist
+
+Inbound emails are filtered by sender domain/address per organization. Only emails from known counterparty contacts are accepted into the review queue. Unknown senders are quarantined.
+
+The allowlist uses the existing `customer_contact` table (migration 028):
+- Contacts with `include_in_invoice_email = true` are automatically allowlisted
+- Additional sender domains can be configured per organization
+
+### Noise Filtering
+
+Auto-replies and bounces are discarded before reaching the review queue:
+
+| Signal | Action |
+|--------|--------|
+| `Auto-Submitted: auto-replied` header | Discard |
+| `Auto-Submitted: auto-generated` header | Discard |
+| `Content-Type: multipart/report` (DSN/bounce) | Route to bounce handler |
+| `X-Auto-Response-Suppress` header present | Discard |
+| No attachments + body < 50 chars | Log only, skip review queue |
+| Sender on suppression list | Discard |
+
+### Audit Trail
+
+Every inbound email provides a complete audit record:
+
+| Data Point | Source | Stored In |
+|-----------|--------|-----------|
+| Who sent it | `From` header | `ingest_email.sender_address` |
+| When | `Date` header + SES receipt timestamp | `ingest_email.received_at` |
+| Subject context | `Subject` header | `ingest_email.subject` |
+| Body context | Email body (text/plain) | `ingest_email.body_text` |
+| Original file | Email attachment | S3 `ingest/{org_id}/attachments/` |
+| Raw email | Full MIME | S3 `frontiermind-email-ingest/{message-id}` |
+| Processing result | Pipeline output | `ingest_email.status`, `ingest_email.processing_result` |
+
+If a counterparty disputes a parsed value, the raw MIME in S3 is the immutable source of truth.
+
+### API Endpoints (Inbound Ingestion)
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/api/ingest/email` | SNS signature verification | Webhook — receives SNS notification, processes inbound email |
+| `GET` | `/api/ingest/emails` | Authenticated | List ingested emails with status filter |
+| `GET` | `/api/ingest/emails/{id}` | Authenticated | Get ingested email details + attachments |
+| `POST` | `/api/ingest/emails/{id}/approve` | Authenticated | Approve for parsing pipeline |
+| `POST` | `/api/ingest/emails/{id}/reject` | Authenticated | Reject with reason |
+
+### Database: `ingest_email` Table (New)
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | BIGSERIAL | Primary key |
+| `organization_id` | BIGINT | Resolved from recipient prefix |
+| `sender_address` | VARCHAR(320) | From header email address |
+| `sender_name` | VARCHAR(255) | From header display name |
+| `subject` | TEXT | Email subject line |
+| `body_text` | TEXT | Plain text body (truncated to 10KB) |
+| `received_at` | TIMESTAMPTZ | SES receipt timestamp |
+| `s3_raw_key` | VARCHAR(500) | S3 key for raw MIME |
+| `s3_attachments` | JSONB | Array of `{filename, s3_key, content_type, size_bytes, sha256}` |
+| `status` | `ingest_email_status` | `received`, `pending_review`, `approved`, `rejected`, `noise`, `processing`, `processed`, `failed` |
+| `processing_result` | JSONB | Pipeline output (extracted data, confidence, errors) |
+| `reviewed_by` | UUID | User who approved/rejected |
+| `reviewed_at` | TIMESTAMPTZ | Review timestamp |
+| `created_at` | TIMESTAMPTZ | Record creation |
+
+### Database: `org_email_address` Table (New)
+
+Maps organization slugs to `mail.frontiermind.co` addresses.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | BIGSERIAL | Primary key |
+| `organization_id` | BIGINT | FK to organization |
+| `email_prefix` | VARCHAR(63) | Local part (e.g., `cbe`, `kas01`) — unique |
+| `is_active` | BOOLEAN | Enable/disable ingestion for this address |
+| `sender_allowlist` | JSONB | Additional allowed sender domains beyond `customer_contact` |
+| `created_at` | TIMESTAMPTZ | Record creation |
+
+---
+
+## Outbound Notifications
+
+Outbound emails are sent FROM the same per-organization address (e.g., `cbe@mail.frontiermind.co`) via SES. When a counterparty replies, the reply routes back through SES inbound into the ingestion pipeline.
+
+### Outbound SES Configuration
+
+| Setting | Value |
+|---------|-------|
+| `SES_SENDER_DOMAIN` | `mail.frontiermind.co` |
+| From address | `{org_prefix}@mail.frontiermind.co` (resolved per org from `org_email_address`) |
+| Reply-To | Same as From |
+| Configuration Set | `frontiermind-email-tracking` (bounce/complaint/delivery notifications) |
+
+---
+
+## Token URL Submission (Secondary)
+
+Secure token-based submission links for structured data collection. Used when email-based ingestion is not suitable:
+
+- **Large files** exceeding email attachment limits (>25MB)
+- **Structured form input** (PO numbers, payment dates, confirmations)
+- **GRP utility invoice uploads** with immediate extraction feedback
+- **Initial onboarding** before sender allowlist is configured
+- **Client firewall restrictions** preventing email to external domains
 
 ---
 
@@ -164,20 +392,23 @@ Data submitted by counterparties via token links.
 python-backend/
 ├── api/
 │   ├── notifications.py          # /api/notifications/* (authenticated)
-│   └── submissions.py            # /api/submit/*        (public, no auth)
+│   ├── submissions.py            # /api/submit/*        (public, no auth)
+│   └── ingest.py                 # /api/ingest/*        (SNS webhook + authenticated)
 ├── db/
-│   └── notification_repository.py # All DB operations
+│   ├── notification_repository.py # Notification/token DB operations
+│   └── ingest_repository.py      # Ingest email DB operations (new)
 ├── models/
-│   └── notifications.py          # Pydantic models
+│   ├── notifications.py          # Pydantic models (outbound + tokens)
+│   └── ingest.py                 # Pydantic models (inbound email) (new)
 ├── services/
 │   ├── email/
 │   │   ├── __init__.py
-│   │   ├── ses_client.py          # AWS SES wrapper
+│   │   ├── ses_client.py          # AWS SES wrapper (send + receive)
 │   │   ├── template_renderer.py   # Jinja2 rendering
-│   │   ├── notification_service.py# Core orchestrator
+│   │   ├── notification_service.py# Outbound orchestrator
 │   │   ├── condition_evaluator.py # Schedule condition matching
 │   │   ├── scheduler.py          # APScheduler integration (also hosts report schedule job)
-│   │   ├── token_service.py      # Submission token management
+│   │   ├── token_service.py      # Submission token management (secondary)
 │   │   └── templates/            # HTML email templates
 │   │       ├── base_email.html
 │   │       ├── invoice_initial.html
@@ -185,6 +416,11 @@ python-backend/
 │   │       ├── invoice_escalation.html
 │   │       ├── compliance_alert.html
 │   │       └── report_ready.html  # Scheduled report delivery notification
+│   └── ingest/                    # Inbound email processing (new)
+│       ├── __init__.py
+│       ├── email_ingest_service.py # MIME parsing, attachment extraction, routing
+│       ├── sender_allowlist.py    # Sender verification against customer_contact
+│       └── noise_filter.py        # Auto-reply/bounce detection
 ```
 
 ### API Endpoints
@@ -333,34 +569,56 @@ Four-tab dashboard:
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `SES_SENDER_EMAIL` | Yes | Verified SES sender email |
+| `SES_SENDER_DOMAIN` | Yes | Verified SES sender domain (`mail.frontiermind.co`) |
 | `SES_SENDER_NAME` | No | Display name (default: "FrontierMind") |
 | `SES_CONFIGURATION_SET` | No | SES configuration set for tracking |
+| `SES_INGEST_BUCKET` | Yes | S3 bucket for raw inbound emails (`frontiermind-email-ingest`) |
+| `SES_INGEST_SNS_TOPIC_ARN` | Yes | SNS topic ARN for inbound email notifications |
 | `APP_BASE_URL` | Yes | Base URL for submission links (set in ECS `task-definition.json`; default: `http://localhost:3000`) |
 
 ### AWS Secrets Manager
 
 | Secret | Path |
 |--------|------|
-| SES sender email | `frontiermind/backend/ses-sender-email` |
+| SES sender domain | `frontiermind/backend/ses-sender-domain` |
 
 ### AWS IAM (ECS Task Role)
 
-Required SES permissions:
+Required permissions:
 ```json
 {
-  "Effect": "Allow",
-  "Action": ["ses:SendEmail", "ses:SendRawEmail", "ses:GetSendQuota"],
-  "Resource": "*"
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "SESSend",
+      "Effect": "Allow",
+      "Action": ["ses:SendEmail", "ses:SendRawEmail", "ses:GetSendQuota"],
+      "Resource": "*"
+    },
+    {
+      "Sid": "S3IngestRead",
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject"],
+      "Resource": "arn:aws:s3:::frontiermind-email-ingest/*"
+    },
+    {
+      "Sid": "SNSConfirm",
+      "Effect": "Allow",
+      "Action": ["sns:ConfirmSubscription"],
+      "Resource": "*"
+    }
+  ]
 }
 ```
 
 ### SES Domain Verification
 
-Before sending emails, the sender domain must be verified in SES:
-1. Add and verify domain in AWS SES console
-2. Add DKIM DNS records
-3. If in SES sandbox: also verify recipient emails (or request production access)
+Before sending/receiving emails, the subdomain must be verified in SES:
+1. Add and verify `mail.frontiermind.co` domain in AWS SES console
+2. Add DNS records: MX, SPF (TXT), DKIM (3 CNAMEs), DMARC (TXT)
+3. Create receipt rule set with S3 + SNS actions
+4. Request production access (exit SES sandbox) for outbound sending
+5. Create SNS subscription pointing to ECS backend `/api/ingest/email`
 
 ---
 
@@ -471,6 +729,7 @@ quota = client.check_sending_quota()
 |------------|--------|------------|
 | **Auth model: header-only `X-Organization-ID`** | All notification endpoints rely on a client-supplied header with no server-side ownership check. A user with a valid JWT could pass any org ID. | Systemic issue shared with all routers (reports, contracts, etc.). Fix globally when RLS-backed org scoping is added to the API layer. |
 | **Non-invoice schedule types not implemented** | `compliance_alert`, `meter_data_missing`, `report_ready`, and `custom` schedule types are defined in the enum but `_process_single_schedule()` only handles invoice types (`invoice_reminder`, `invoice_initial`, `invoice_escalation`). Unsupported types are silently skipped with a debug log. | Extend `_process_single_schedule()` with type-specific handlers when these features are needed. |
+| **Inbound email ingestion not yet implemented** | `ingest_email`, `org_email_address` tables, `IngestService`, SNS webhook, and review queue are planned but not yet built. | Implement as next phase — DNS + SES setup, then backend, then frontend review UI. |
 | **No test coverage** | No unit or integration tests for the notification system. | Add tests as a separate PR. |
 | **`invoice_direction` now in report GET responses** | Fixed — `invoice_direction` is now returned in `GET /api/reports/generated` and `GET /api/reports/generated/{id}` responses. | Fixed (Round 2 remediation) |
 | **Report-ready emails logged to `email_log`** | Report delivery emails sent via `ReportDeliveryService` are now recorded in `email_log` for audit trail, providing visibility in the notification email history tab. | Fixed (Round 2 remediation) |
@@ -479,10 +738,26 @@ quota = client.check_sending_quota()
 
 ---
 
-## Future Enhancements (Phase 6)
+## Implementation Phases
 
+### Phase 1: Outbound Notifications + Token URL (Implemented ✓)
+- Email templates, schedules, SES sending
+- Token-based submission system
+- GRP upload via token URL
+- Frontend: `/notifications`, `/submit/[token]`
+
+### Phase 2: SES Inbound Email Ingestion (Next)
+1. **DNS setup** — MX, SPF, DKIM, DMARC for `mail.frontiermind.co`
+2. **SES configuration** — Domain verification, receipt rule set, S3 bucket, SNS topic
+3. **Database migration** — `ingest_email`, `org_email_address` tables
+4. **Backend** — SNS webhook (`/api/ingest/email`), `EmailIngestService` (MIME parsing, attachment extraction, sender allowlist, noise filter), review queue endpoints
+5. **Frontend** — `/ingest/review` admin page for reviewing/approving ingested emails
+6. **Outbound sender migration** — Update `SES_SENDER_EMAIL` to per-org addresses from `org_email_address`
+
+### Phase 3: Future Enhancements
 - **SES bounce/complaint handling:** SNS webhook → update `email_log.email_status` on bounces
 - **Organization-level daily email quota:** Prevent runaway sends
 - **Email attachment support:** Attach invoice PDFs via SES raw email
 - **Template preview endpoint:** Render template with sample data without sending
-- **Comprehensive test suite:** Unit tests for notification_service, condition_evaluator, token_service
+- **Auto-classification:** Use email subject/body to auto-categorize ingested documents (invoice, meter data, amendment) before review
+- **Comprehensive test suite:** Unit tests for notification_service, condition_evaluator, token_service, email_ingest_service

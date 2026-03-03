@@ -1,0 +1,5 @@
+# Known tariff type overrides by sage_id.
+# Add new project sage_ids here instead of editing tariff_type_detector.py.
+fixed: [GC01, LOI01, XF-AB, QMM01, UNSOS, CAL01]
+grid: [UGL01, KAS01, JAB01, GBL01]
+generator: [NBL01, NBL02]

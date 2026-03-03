@@ -46,10 +46,10 @@ ENRICHMENT_USER_PROMPT_TEMPLATE = """Enrich the normalized_payload for this clau
 
 ## INSTRUCTIONS
 
-1. Extract ALL fields shown in the example that are present in the clause's raw_text
+1. Extract ONLY fields whose values are EXPLICITLY STATED in the clause's raw_text. Do NOT calculate or derive values.
 2. Use the same field names and value formats as the example
 3. If a field is not applicable or not mentioned, set it to null
-4. Add any additional relevant fields you discover
+4. You may add fields ONLY if their values are explicitly stated in the raw_text.
 5. Preserve the original clause_id, clause_name, and other metadata
 
 ## RESPONSE FORMAT

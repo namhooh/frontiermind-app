@@ -372,8 +372,8 @@ class RebasedMarketPriceEngine:
                     usd_row = cur.fetchone()
                     usd_currency_id = usd_row["id"] if usd_row else None
 
-                    # hard = clause_tariff.currency_id (USD — contract/billing currency)
-                    hard_ccy_from_tariff = currency_id
+                    # hard = USD (floor/ceiling are denominated in USD)
+                    hard_ccy_from_tariff = usd_currency_id or currency_id
                     # local = market_ref_currency (GHS — local market currency where GRP is denominated)
                     local_ccy_from_tariff = tariff.get("market_ref_currency_id") or currency_id
 
