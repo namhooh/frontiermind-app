@@ -1,6 +1,7 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, Suspense } from 'react'
+import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { ArrowLeft, Loader2, Pencil, PencilOff } from 'lucide-react'
 import { IS_DEMO } from '@/lib/demoMode'
@@ -15,9 +16,19 @@ import { TechnicalTab } from './components/TechnicalTab'
 // ForecastsGuaranteesTab — content moved into TechnicalTab
 import { MonthlyBillingTab } from './components/MonthlyBillingTab'
 import { PlantPerformanceTab } from './components/PlantPerformanceTab'
+import { PortfolioHome } from './components/PortfolioHome'
 // import { SpreadsheetTab } from './components/SpreadsheetTab'
 
 export default function ProjectsPage() {
+  return (
+    <Suspense>
+      <ProjectsPageContent />
+    </Suspense>
+  )
+}
+
+function ProjectsPageContent() {
+  const searchParams = useSearchParams()
   const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null)
   const [dashboard, setDashboard] = useState<ProjectDashboardResponse | null>(null)
   const [loading, setLoading] = useState(false)
@@ -58,9 +69,27 @@ export default function ProjectsPage() {
     }
   }, [selectedProjectId, fetchGrpData])
 
+  // Load project from URL ?id= on mount
+  useEffect(() => {
+    const idParam = searchParams.get('id')
+    if (idParam) {
+      const id = parseInt(idParam, 10)
+      if (!isNaN(id)) handleSelectProject(id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  function handleSelectHome() {
+    setSelectedProjectId(null)
+    setDashboard(null)
+    setError(null)
+    window.history.replaceState(null, '', '/projects')
+  }
+
   async function handleSelectProject(projectId: number) {
     if (projectId === selectedProjectId) return
     setSelectedProjectId(projectId)
+    window.history.replaceState(null, '', `/projects?id=${projectId}`)
     setLoading(true)
     setError(null)
     try {
@@ -226,16 +255,15 @@ export default function ProjectsPage() {
               <ProjectSidebar
                 selectedProjectId={selectedProjectId}
                 onSelectProject={handleSelectProject}
+                onSelectHome={handleSelectHome}
               />
             </div>
           </div>
 
           {/* Main Content */}
           <div className="flex-1 min-w-0">
-            {!selectedProjectId && (
-              <div className="bg-white rounded-lg border border-slate-200 flex items-center justify-center h-64">
-                <p className="text-sm text-slate-400">Select a project to view its data</p>
-              </div>
+            {!selectedProjectId && !loading && (
+              <PortfolioHome />
             )}
 
             {selectedProjectId && loading && (
