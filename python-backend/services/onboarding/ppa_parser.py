@@ -23,7 +23,7 @@ from models.onboarding import (
     AvailableEnergyExtraction,
     DefaultRateExtraction,
     EscalationRule,
-    GRPExtraction,
+    MRPExtraction,
     GuaranteeYearRow,
     PPAContractData,
     ShortfallExtraction,
@@ -285,19 +285,19 @@ class PPAOnboardingExtractor:
             confidence=0.9 if regex_pricing else llm_data.get("confidence_scores", {}).get("solar_discount_pct", 0.5),
         )
 
-        # Build GRP from LLM tariff
-        llm_grp = llm_tariff.get("grp", {}) or {}
-        grp = None
-        if any(v is not None for v in llm_grp.values()):
-            grp = GRPExtraction(
-                exclude_vat=llm_grp.get("exclude_vat"),
-                exclude_demand_charges=llm_grp.get("exclude_demand_charges"),
-                exclude_savings_charges=llm_grp.get("exclude_savings_charges"),
-                time_window_start=llm_grp.get("time_window_start"),
-                time_window_end=llm_grp.get("time_window_end"),
-                calculation_due_days=llm_grp.get("calculation_due_days"),
-                verification_deadline_days=llm_grp.get("verification_deadline_days"),
-                confidence=llm_data.get("confidence_scores", {}).get("grp_parameters", 0.5),
+        # Build MRP from LLM tariff
+        llm_mrp = llm_tariff.get("mrp", {}) or {}
+        mrp = None
+        if any(v is not None for v in llm_mrp.values()):
+            mrp = MRPExtraction(
+                exclude_vat=llm_mrp.get("exclude_vat"),
+                exclude_demand_charges=llm_mrp.get("exclude_demand_charges"),
+                exclude_savings_charges=llm_mrp.get("exclude_savings_charges"),
+                time_window_start=llm_mrp.get("time_window_start"),
+                time_window_end=llm_mrp.get("time_window_end"),
+                calculation_due_days=llm_mrp.get("calculation_due_days"),
+                verification_deadline_days=llm_mrp.get("verification_deadline_days"),
+                confidence=llm_data.get("confidence_scores", {}).get("mrp_parameters", 0.5),
             )
 
         # Build shortfall from LLM
@@ -347,7 +347,7 @@ class PPAOnboardingExtractor:
             tariff=tariff,
             guarantee_table=guarantee_table,
             shortfall=shortfall,
-            grp=grp,
+            mrp=mrp,
             payment_terms=llm_data.get("payment_terms"),
             default_interest_rate=llm_data.get("default_interest_rate"),
             default_rate=default_rate,

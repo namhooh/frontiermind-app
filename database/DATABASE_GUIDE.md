@@ -77,9 +77,9 @@ database/
 │   ├── 033_project_onboarding.sql                     # Phase 9.0: COD data capture, amendment versioning, reference_price, contract_amendment, upsert indexes, preview table
 │   ├── 034_billing_product_and_rate_period.sql         # Phase 9: billing_product, contract_billing_product, tariff_annual_rate (was tariff_rate_period), CBE seed data, tariff classification cleanup, payment_terms
 │   ├── 036_monthly_tariff_and_fx.sql                  # Phase 9.1: Rename tariff_rate_period→tariff_annual_rate, final_effective_tariff, tariff_monthly_rate
-│   ├── 037_grp_ingestion.sql                          # Phase 9.3: GRP ingestion — monthly observations, file upload, submission_token extensions
+│   ├── 037_grp_ingestion.sql                          # Phase 9.3: MRP ingestion — monthly observations, file upload, submission_token extensions
 │   ├── 038_moh01_amendment_version_history.sql         # Phase 10.2: Amendment version chain for MOH01 (original tariff row + supersedes linkage)
-│   ├── 039_pipeline_integrity_fixes.sql               # Phase 10.1: Annual ref_price partial unique index, asset_type seeds, metering_type CHECK, idempotent GRP seed
+│   ├── 039_pipeline_integrity_fixes.sql               # Phase 10.1: Annual ref_price partial unique index, asset_type seeds, metering_type CHECK, idempotent MRP seed
 │   ├── 040_merge_tariff_rate_tables.sql               # Phase 10.3: Unified tariff_rate table (merges + drops tariff_annual_rate + tariff_monthly_rate), four-currency, JSONB calc_detail, FX audit trail, integrity constraints
 │   ├── 041_multi_meter_billing_and_performance.sql    # Phase 10.4: contract_line, plant_performance, meter_aggregate enhancements, meter names, dedup index fix, external_line_id unique index
 │   ├── 042_invoice_generation_prerequisites.sql       # Phase 10.5: clean dedup index, billing_tax_rule (GiST), invoice header versioning, line item audit/sign, new line item types
@@ -89,6 +89,8 @@ database/
 │   ├── 046_populate_portfolio_base_data.sql           # Phase 10.9: CBE portfolio population — parent_contract_id, legal entities, counterparties, 33 projects, contracts, amendments, exchange rates (10 currencies × 14 months from xe.com)
 │   ├── 047_populate_sage_contract_ids.sql             # Phase 10.10: SAGE contract IDs + parent_contract_line_id hierarchy + MOH01 mother line 1000
 │   ├── 049_pilot_project_data_population.sql          # Phase 10.11: Pilot data — contract_lines, clause_tariffs, meter_aggregates for KAS01, NBL01, LOI01
+│   ├── 050_rename_grp_to_mrp.sql                      # Phase 10.13: Rename GRP (Grid Reference Price) → MRP (Market Reference Price) — terminology only
+│   ├── 051_org_email_address.sql                      # Phase 8.1: Org → email address mapping for bidirectional email on mail.frontiermind.co
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -1063,9 +1065,9 @@ database/
 - Views: `clause_current_v`, `clause_tariff_current_v`
 - Renamed: `contract.updated_by` → `contract.created_by`
 - Dropped: `project_document`, `project_onboarding_snapshot`, `received_invoice_line_item` ALTERs (charge_type/is_tax/tou_bucket)
-- Seeded: `asset_type` (8 codes), `invoice_line_item_type` (4 GRP charge types)
+- Seeded: `asset_type` (8 codes), `invoice_line_item_type` (4 MRP charge types)
 - ETL script: `database/scripts/project-onboarding/onboard_project.sql`
-- Python: Amendment diff service, GRP calculator refactored for invoice_line_item_type_code
+- Python: Amendment diff service, MRP calculator refactored for invoice_line_item_type_code
 - Reference: `database/docs/IMPLEMENTATION_GUIDE_PROJECT_ONBOARDING.md`
 
 **v10.0 (Default Rate & Late Payment via clause Table)** - Completed

@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 #     "category": "PRICING",           # clause_category.code
 #     "name_pattern": "%Grid Tariff%",  # SQL ILIKE pattern (None = any in category)
 #     "source_field": "included_components",  # key in normalized_payload
-#     "target_key": "grp_exclude_vat",        # key in logic_parameters
+#     "target_key": "mrp_exclude_vat",        # key in logic_parameters
 #     "derivation": callable or None,         # transform function
 #   }
 
@@ -71,49 +71,49 @@ ENRICHMENT_RULES: List[Dict[str, Any]] = [
         "category": "PRICING",
         "name_pattern": "%Grid Tariff Calculation%",
         "source_field": "included_components",
-        "target_key": "grp_exclude_vat",
+        "target_key": "mrp_exclude_vat",
         "derivation": _derive_exclude_vat,
     },
     {
         "category": "PRICING",
         "name_pattern": "%Grid Tariff Calculation%",
         "source_field": "_raw_text",  # special: pulls clause.raw_text
-        "target_key": "grp_clause_text",
+        "target_key": "mrp_clause_text",
         "derivation": None,
     },
     {
         "category": "PRICING",
         "name_pattern": "%Demand Charge%Exclusion%",
         "source_field": "excluded_components",
-        "target_key": "grp_exclude_demand_charges",
+        "target_key": "mrp_exclude_demand_charges",
         "derivation": _derive_exclude_demand_charges,
     },
     {
         "category": "PRICING",
         "name_pattern": None,
-        "source_field": "grp_method",
-        "target_key": "grp_method",
+        "source_field": "mrp_method",
+        "target_key": "mrp_method",
         "derivation": None,
     },
     {
         "category": "PRICING",
         "name_pattern": None,
-        "source_field": "grp_time_window_start",
-        "target_key": "grp_time_window_start",
+        "source_field": "mrp_time_window_start",
+        "target_key": "mrp_time_window_start",
         "derivation": None,
     },
     {
         "category": "PRICING",
         "name_pattern": None,
-        "source_field": "grp_time_window_end",
-        "target_key": "grp_time_window_end",
+        "source_field": "mrp_time_window_end",
+        "target_key": "mrp_time_window_end",
         "derivation": None,
     },
     {
         "category": "PRICING",
         "name_pattern": None,
-        "source_field": "grp_verification_deadline_days",
-        "target_key": "grp_verification_deadline_days",
+        "source_field": "mrp_verification_deadline_days",
+        "target_key": "mrp_verification_deadline_days",
         "derivation": None,
     },
     {
@@ -169,7 +169,7 @@ ENRICHMENT_RULES: List[Dict[str, Any]] = [
         "category": "PRICING",
         "name_pattern": "%Solar Tariff Calculation%",
         "source_field": "recalculation_deadline_days",
-        "target_key": "grp_calculation_due_days",
+        "target_key": "mrp_calculation_due_days",
         "derivation": None,
     },
     # --- PAYMENT_TERMS clauses ---

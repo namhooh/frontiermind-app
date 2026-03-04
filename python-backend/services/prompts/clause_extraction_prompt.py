@@ -115,7 +115,7 @@ Extract and normalize:
 
 ### 5. PRICING
 **Code:** PRICING
-**Description:** Energy rates, price escalation, indexing, adjustment mechanisms, and grid reference pricing
+**Description:** Energy rates, price escalation, indexing, adjustment mechanisms, and market reference pricing
 **Look for:** "price", "rate", "$/kWh", "$/MWh", "escalation", "price adjustment", "tariff",
   "Grid Tariff", "Grid Reference Price", "Reference Bill", "Reference Invoice", "Current Grid Tariff",
   "discount", "floor", "ceiling", "solar tariff", "solar discount"
@@ -130,13 +130,13 @@ Extract and normalize (use these canonical field names):
 - includes_environmental_attributes [C]: Whether rate includes RECs
 - rate_schedule [S]: Rate schedule for tiered/time-varying pricing (list of {period, rate, unit})
 - billing_currency [C]: Currency for billing and invoicing
-- grp_method [C]: Grid Reference Price calculation method (e.g., "utility_variable_charges_tou", "utility_total_charges")
-- grp_included_components [S]: Which utility bill line items are included in GRP (e.g., ["energy_charge", "subsidy", "streetlight_levy"])
-- grp_excluded_components [S]: Which utility bill line items are excluded from GRP (e.g., ["VAT", "demand_charges"])
-- grp_time_window_start [C]: Operating window start time if GRP is time-of-use restricted (e.g., "06:00")
-- grp_time_window_end [C]: Operating window end time (e.g., "18:00")
-- grp_calculation_due_days [C]: Days after month-end for GRP calculation to be delivered
-- grp_verification_deadline_days [C]: Days for joint verification of GRP after receipt
+- mrp_method [C]: Market Reference Price calculation method (e.g., "utility_variable_charges_tou", "utility_total_charges")
+- mrp_included_components [S]: Which utility bill line items are included in MRP (e.g., ["energy_charge", "subsidy", "streetlight_levy"])
+- mrp_excluded_components [S]: Which utility bill line items are excluded from MRP (e.g., ["VAT", "demand_charges"])
+- mrp_time_window_start [C]: Operating window start time if MRP is time-of-use restricted (e.g., "06:00")
+- mrp_time_window_end [C]: Operating window end time (e.g., "18:00")
+- mrp_calculation_due_days [C]: Days after month-end for MRP calculation to be delivered
+- mrp_verification_deadline_days [C]: Days for joint verification of MRP after receipt
 - pricing_formula_text [FD]: Full pricing/payment formula as stated in the contract
 - discount_pct [FI]: Solar discount percentage off grid tariff (e.g., 18.5 for 18.5%)
 - floor_rate [FI]: Minimum solar price / floor tariff per kWh

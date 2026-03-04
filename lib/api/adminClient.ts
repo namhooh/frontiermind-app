@@ -107,7 +107,7 @@ export interface ProjectDashboardResponse {
   clauses: Record<string, unknown>[]
   amendments: Record<string, unknown>[]
   exchange_rates: Record<string, unknown>[]
-  baseline_grp: Record<string, unknown>[]
+  baseline_mrp: Record<string, unknown>[]
   contract_lines: Record<string, unknown>[]
   lookups: Record<string, { id: number; code?: string; name: string }[]>
 }
@@ -170,17 +170,17 @@ export interface PatchEntityRequest {
 }
 
 // ============================================================================
-// GRP (Grid Reference Price) Types
+// MRP (Market Reference Price) Types
 // ============================================================================
 
-export interface GRPObservation {
+export interface MRPObservation {
   id: number
   project_id: number
   operating_year: number
   period_start: string
   period_end: string
   observation_type: 'monthly' | 'annual'
-  calculated_grp_per_kwh: number | null
+  calculated_mrp_per_kwh: number | null
   total_variable_charges: number | null
   total_kwh_invoiced: number | null
   verification_status: 'pending' | 'jointly_verified' | 'disputed' | 'estimated'
@@ -190,16 +190,16 @@ export interface GRPObservation {
   updated_at: string | null
 }
 
-export interface GRPObservationsResponse {
+export interface MRPObservationsResponse {
   success: boolean
-  observations: GRPObservation[]
+  observations: MRPObservation[]
   total: number
 }
 
-export interface AggregateGRPResponse {
+export interface AggregateMRPResponse {
   success: boolean
   observation_id: number
-  annual_grp_per_kwh: number
+  annual_mrp_per_kwh: number
   operating_year: number
   months_included: number
   months_excluded: number
@@ -216,7 +216,7 @@ export interface VerifyObservationResponse {
   message: string
 }
 
-export interface GRPCollectionResponse {
+export interface MRPCollectionResponse {
   success: boolean
   token_id: number
   submission_url: string
@@ -244,23 +244,23 @@ export interface SubmissionTokenListResponse {
 }
 
 // ============================================================================
-// Manual GRP Entry Types
+// Manual MRP Entry Types
 // ============================================================================
 
-export interface ManualGRPRateEntry {
+export interface ManualMRPRateEntry {
   billing_month: string // YYYY-MM
-  grp_per_kwh: number
+  mrp_per_kwh: number
   tariff_components?: Record<string, number>
   notes?: string
 }
 
-export interface ManualGRPBatchRequest {
-  entries: ManualGRPRateEntry[]
+export interface ManualMRPBatchRequest {
+  entries: ManualMRPRateEntry[]
   is_baseline: boolean
   currency_code?: string
 }
 
-export interface ManualGRPBatchResponse {
+export interface ManualMRPBatchResponse {
   success: boolean
   inserted_count: number
   observation_ids: number[]
@@ -270,7 +270,7 @@ export interface ManualGRPBatchResponse {
 export interface AdminUploadResponse {
   success: boolean
   observation_id: number
-  grp_per_kwh: number
+  mrp_per_kwh: number
   total_variable_charges: number
   total_kwh_invoiced: number
   line_items_count: number
@@ -763,16 +763,16 @@ export class AdminClient {
   }
 
   // =========================================================================
-  // GRP (Grid Reference Price)
+  // MRP (Market Reference Price)
   // =========================================================================
 
-  async refreshGRP(
+  async refreshMRP(
     projectId: number,
     orgId: number
   ): Promise<{ success: boolean; refreshed_operating_years: number[] }> {
-    this.log('Refreshing stale GRP annuals', { projectId, orgId })
+    this.log('Refreshing stale MRP annuals', { projectId, orgId })
     const response = await fetch(
-      `${this.baseUrl}/api/projects/${projectId}/grp-refresh`,
+      `${this.baseUrl}/api/projects/${projectId}/mrp-refresh`,
       {
         method: 'POST',
         headers: { 'X-Organization-ID': String(orgId) },
@@ -781,39 +781,39 @@ export class AdminClient {
     return this.handleResponse<{ success: boolean; refreshed_operating_years: number[] }>(response)
   }
 
-  async listGRPObservations(
+  async listMRPObservations(
     projectId: number,
     orgId: number,
     params?: { observation_type?: string; operating_year?: number; verification_status?: string }
-  ): Promise<GRPObservationsResponse> {
-    this.log('Listing GRP observations', { projectId, orgId, params })
+  ): Promise<MRPObservationsResponse> {
+    this.log('Listing MRP observations', { projectId, orgId, params })
     const searchParams = new URLSearchParams()
     if (params?.observation_type) searchParams.set('observation_type', params.observation_type)
     if (params?.operating_year != null) searchParams.set('operating_year', String(params.operating_year))
     if (params?.verification_status) searchParams.set('verification_status', params.verification_status)
     const qs = searchParams.toString()
     const response = await fetch(
-      `${this.baseUrl}/api/projects/${projectId}/grp-observations${qs ? `?${qs}` : ''}`,
+      `${this.baseUrl}/api/projects/${projectId}/mrp-observations${qs ? `?${qs}` : ''}`,
       { headers: { 'X-Organization-ID': String(orgId) } }
     )
-    return this.handleResponse<GRPObservationsResponse>(response)
+    return this.handleResponse<MRPObservationsResponse>(response)
   }
 
-  async aggregateGRP(
+  async aggregateMRP(
     projectId: number,
     orgId: number,
     body: { operating_year: number; include_pending: boolean }
-  ): Promise<AggregateGRPResponse> {
-    this.log('Aggregating GRP', { projectId, orgId, body })
+  ): Promise<AggregateMRPResponse> {
+    this.log('Aggregating MRP', { projectId, orgId, body })
     const response = await fetch(
-      `${this.baseUrl}/api/projects/${projectId}/grp-aggregate`,
+      `${this.baseUrl}/api/projects/${projectId}/mrp-aggregate`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Organization-ID': String(orgId) },
         body: JSON.stringify(body),
       }
     )
-    return this.handleResponse<AggregateGRPResponse>(response)
+    return this.handleResponse<AggregateMRPResponse>(response)
   }
 
   async verifyObservation(
@@ -822,9 +822,9 @@ export class AdminClient {
     observationId: number,
     body: { verification_status: string; notes?: string }
   ): Promise<VerifyObservationResponse> {
-    this.log('Verifying GRP observation', { projectId, orgId, observationId, body })
+    this.log('Verifying MRP observation', { projectId, orgId, observationId, body })
     const response = await fetch(
-      `${this.baseUrl}/api/projects/${projectId}/grp-observations/${observationId}`,
+      `${this.baseUrl}/api/projects/${projectId}/mrp-observations/${observationId}`,
       {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'X-Organization-ID': String(orgId) },
@@ -834,14 +834,14 @@ export class AdminClient {
     return this.handleResponse<VerifyObservationResponse>(response)
   }
 
-  async deleteGRPObservation(
+  async deleteMRPObservation(
     projectId: number,
     orgId: number,
     observationId: number
   ): Promise<{ success: boolean; message: string }> {
-    this.log('Deleting GRP observation', { projectId, orgId, observationId })
+    this.log('Deleting MRP observation', { projectId, orgId, observationId })
     const response = await fetch(
-      `${this.baseUrl}/api/projects/${projectId}/grp-observations/${observationId}`,
+      `${this.baseUrl}/api/projects/${projectId}/mrp-observations/${observationId}`,
       {
         method: 'DELETE',
         headers: { 'X-Organization-ID': String(orgId) },
@@ -850,13 +850,13 @@ export class AdminClient {
     return this.handleResponse<{ success: boolean; message: string }>(response)
   }
 
-  async generateGRPToken(
+  async generateMRPToken(
     orgId: number,
     body: { project_id: number; operating_year: number; max_uses?: number }
-  ): Promise<GRPCollectionResponse> {
-    this.log('Generating GRP collection token', { orgId, body })
+  ): Promise<MRPCollectionResponse> {
+    this.log('Generating MRP collection token', { orgId, body })
     const response = await fetch(
-      `${this.baseUrl}/api/notifications/grp-collection`,
+      `${this.baseUrl}/api/notifications/mrp-collection`,
       {
         method: 'POST',
         headers: {
@@ -867,17 +867,17 @@ export class AdminClient {
         body: JSON.stringify(body),
       }
     )
-    return this.handleResponse<GRPCollectionResponse>(response)
+    return this.handleResponse<MRPCollectionResponse>(response)
   }
 
-  async uploadGRPInvoice(
+  async uploadMRPInvoice(
     projectId: number,
     orgId: number,
     formData: FormData
   ): Promise<AdminUploadResponse> {
-    this.log('Uploading GRP invoice', { projectId, orgId })
+    this.log('Uploading MRP invoice', { projectId, orgId })
     const response = await fetch(
-      `${this.baseUrl}/api/projects/${projectId}/grp-upload`,
+      `${this.baseUrl}/api/projects/${projectId}/mrp-upload`,
       {
         method: 'POST',
         headers: { 'X-Organization-ID': String(orgId) },
@@ -887,21 +887,21 @@ export class AdminClient {
     return this.handleResponse<AdminUploadResponse>(response)
   }
 
-  async submitManualGRPRates(
+  async submitManualMRPRates(
     projectId: number,
     orgId: number,
-    body: ManualGRPBatchRequest
-  ): Promise<ManualGRPBatchResponse> {
-    this.log('Submitting manual GRP rates', { projectId, orgId, count: body.entries.length })
+    body: ManualMRPBatchRequest
+  ): Promise<ManualMRPBatchResponse> {
+    this.log('Submitting manual MRP rates', { projectId, orgId, count: body.entries.length })
     const response = await fetch(
-      `${this.baseUrl}/api/projects/${projectId}/grp-manual`,
+      `${this.baseUrl}/api/projects/${projectId}/mrp-manual`,
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Organization-ID': String(orgId) },
         body: JSON.stringify(body),
       }
     )
-    return this.handleResponse<ManualGRPBatchResponse>(response)
+    return this.handleResponse<ManualMRPBatchResponse>(response)
   }
 
   async revokeToken(

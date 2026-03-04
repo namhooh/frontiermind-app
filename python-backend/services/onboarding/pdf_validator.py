@@ -17,7 +17,7 @@ PDF-only enrichments (inserted as NEW records, not overwriting):
   - available energy calculation method
   - default interest rate, early termination schedule
   - force majeure definitions
-  - GRP calculation parameters
+  - MRP calculation parameters
 """
 
 import logging
@@ -44,7 +44,7 @@ PDF_ENRICHMENT_FIELDS = [
     "available_energy_method",
     "default_interest_rate",
     "early_termination_schedule",
-    "grp_parameters",
+    "mrp_parameters",
 ]
 
 

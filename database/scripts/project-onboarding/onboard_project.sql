@@ -93,7 +93,7 @@ CREATE TEMP TABLE stg_tariff_lines (
   floor_rate              DECIMAL,
   ceiling_rate            DECIMAL,
   escalation_value        DECIMAL,
-  grp_method              VARCHAR(100),
+  mrp_method              VARCHAR(100),
   logic_parameters_extra  JSONB DEFAULT '{}'
 );
 
@@ -426,7 +426,7 @@ SELECT
     'floor_rate', stl.floor_rate,
     'ceiling_rate', stl.ceiling_rate,
     'escalation_value', stl.escalation_value,
-    'grp_method', stl.grp_method
+    'mrp_method', stl.mrp_method
   ) || stl.logic_parameters_extra,
   true,
   spc.agreed_fx_rate_source
@@ -646,7 +646,7 @@ SELECT
        ELSE 'computed'::calc_status END,
   CASE WHEN esc.code != 'REBASED_MARKET_PRICE'
        THEN 'Year 1: original contractual base rate'
-       ELSE 'Pending: awaiting GRP data' END,
+       ELSE 'Pending: awaiting MRP data' END,
   true
 FROM clause_tariff ct
 JOIN contract c ON ct.contract_id = c.id

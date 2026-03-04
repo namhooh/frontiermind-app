@@ -183,21 +183,21 @@ def detect_tariff_type(
     signals["inferred_energy_sale_type"] = energy_sale_type
     signals["inferred_escalation_type"] = escalation_type
 
-    # Derive grp_method from formula_type:
-    # - GRID-based formulas → GRP = sum of utility variable charges (ToU)
-    # - GENERATOR-based formulas → GRP = utility total charges
-    # - FIXED → no GRP needed
-    grp_method: Optional[str] = None
+    # Derive mrp_method from formula_type:
+    # - GRID-based formulas → MRP = sum of utility variable charges (ToU)
+    # - GENERATOR-based formulas → MRP = utility total charges
+    # - FIXED → no MRP needed
+    mrp_method: Optional[str] = None
     if formula_type in ("FLOATING_GRID", "GRID_DISCOUNT_BOUNDED"):
-        grp_method = "utility_variable_charges_tou"
+        mrp_method = "utility_variable_charges_tou"
     elif formula_type == "FLOATING_GENERATOR":
-        grp_method = "utility_total_charges"
+        mrp_method = "utility_total_charges"
 
     return TariffTypeResult(
         energy_sale_type_id=energy_sale_type,
         escalation_type_id=escalation_type,
         formula_type=formula_type,
-        grp_method=grp_method,
+        mrp_method=mrp_method,
         signals=signals,
         confidence=confidence,
     )

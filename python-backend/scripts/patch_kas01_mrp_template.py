@@ -1,7 +1,7 @@
 """
-One-time patch: Populate KAS01 tariff (id=11) with missing GRP template fields.
+One-time patch: Populate KAS01 tariff (id=11) with missing MRP template fields.
 
-Uses MOH01 (tariff id=2) as the canonical GRP template. Adds fields that are
+Uses MOH01 (tariff id=2) as the canonical MRP template. Adds fields that are
 present in MOH01 but missing in KAS01, with KAS01-specific values extracted
 from the contract PDF.
 
@@ -14,7 +14,7 @@ Fields added to clause_tariff.logic_parameters:
   - shortfall_formula_variables: 5 variables from Section 3.3
   - degradation_pct: 0.004 (derived from Annexure D: 577→574.69 MWh)
   - escalation_start_date: 2018-09-30 (COD Sep 2017 + 1 year)
-  - grp_verification_deadline_days: 30 (Part I: "one month prior")
+  - mrp_verification_deadline_days: 30 (Part I: "one month prior")
   - billing_taxes: Ghana tax structure (same jurisdiction as MOH01)
   - annual_specific_yield: 1443 (577 MWh / 400 kWp)
 """
@@ -32,7 +32,7 @@ from db.database import get_db_connection, init_connection_pool
 
 TARIFF_ID = 11  # GH-KAS01 Main Tariff
 
-GRP_TEMPLATE_FIELDS = {
+MRP_TEMPLATE_FIELDS = {
     "pricing_formula_text": (
         "Payment = (1 − Fixed Solar Discount) × Energy Output × Current Grid Tariff\n\n"
         "subject to Floor:\n"
@@ -71,7 +71,7 @@ GRP_TEMPLATE_FIELDS = {
     ],
     "degradation_pct": 0.004,
     "escalation_start_date": "2018-09-30",
-    "grp_verification_deadline_days": 30,
+    "mrp_verification_deadline_days": 30,
     "billing_taxes": {
         "vat": {
             "code": "VAT",
@@ -148,7 +148,7 @@ def main():
             existing_lp = row["logic_parameters"] or {}
 
             # Show which keys will be added vs already exist
-            for k in GRP_TEMPLATE_FIELDS:
+            for k in MRP_TEMPLATE_FIELDS:
                 status = "EXISTS (will overwrite)" if k in existing_lp else "NEW"
                 print(f"  {k}: {status}")
 
@@ -161,13 +161,13 @@ def main():
                 WHERE id = %s
                 RETURNING id
                 """,
-                (json.dumps(GRP_TEMPLATE_FIELDS), TARIFF_ID),
+                (json.dumps(MRP_TEMPLATE_FIELDS), TARIFF_ID),
             )
             result = cur.fetchone()
             conn.commit()
 
-            print(f"\nUpdated tariff {result['id']} with GRP template fields:")
-            for k, v in GRP_TEMPLATE_FIELDS.items():
+            print(f"\nUpdated tariff {result['id']} with MRP template fields:")
+            for k, v in MRP_TEMPLATE_FIELDS.items():
                 if isinstance(v, (list, dict)):
                     if isinstance(v, list):
                         print(f"  {k}: [{len(v)} items]")

@@ -109,7 +109,7 @@ class ExcelOnboardingData(BaseModel):
     floor_rate: Optional[float] = None
     ceiling_rate: Optional[float] = None
     escalation_value: Optional[float] = None
-    grp_method: Optional[str] = None
+    mrp_method: Optional[str] = None
     payment_terms: Optional[str] = None
 
     # Billing product
@@ -177,7 +177,7 @@ class ShortfallExtraction(BaseModel):
     confidence: float = 0.0
 
 
-class GRPExtraction(BaseModel):
+class MRPExtraction(BaseModel):
     exclude_vat: Optional[bool] = None
     exclude_demand_charges: Optional[bool] = None
     exclude_savings_charges: Optional[bool] = None
@@ -226,8 +226,8 @@ class PPAContractData(BaseModel):
     # Shortfall
     shortfall: Optional[ShortfallExtraction] = None
 
-    # GRP
-    grp: Optional[GRPExtraction] = None
+    # MRP
+    mrp: Optional[MRPExtraction] = None
 
     # Payment
     payment_terms: Optional[str] = None
@@ -578,7 +578,7 @@ class TariffTypeResult(BaseModel):
     energy_sale_type_id: Optional[str] = None  # FIXED_SOLAR, FLOATING_GRID, etc.
     escalation_type_id: Optional[str] = None   # NONE, PERCENTAGE, US_CPI, etc.
     formula_type: Optional[str] = None         # For logic_parameters
-    grp_method: Optional[str] = None           # GRP calculation method for tariff engine
+    mrp_method: Optional[str] = None           # MRP calculation method for tariff engine
     signals: Dict[str, Any] = Field(default_factory=dict)
     confidence: float = 0.75
 

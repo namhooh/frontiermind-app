@@ -331,8 +331,8 @@ class CrossVerifier:
             merged["energy_sale_type_id"] = tariff_type.energy_sale_type_id
             merged["escalation_type_id"] = tariff_type.escalation_type_id
             merged["formula_type"] = tariff_type.formula_type
-            if tariff_type.grp_method:
-                merged["grp_method"] = tariff_type.grp_method
+            if tariff_type.mrp_method:
+                merged["mrp_method"] = tariff_type.mrp_method
 
         # ─── Build Single Tariff (MOH01 pattern) ─────────────────────
         # One clause_tariff row with floor/ceiling/discount in logic_parameters

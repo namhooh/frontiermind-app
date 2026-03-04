@@ -1,5 +1,5 @@
 """
-Pydantic models for GRP (Grid Reference Price) management endpoints.
+Pydantic models for MRP (Market Reference Price) management endpoints.
 
 Covers: listing observations, aggregation, verification, and admin upload.
 Database Reference: migrations 033 + 037 (reference_price table).
@@ -31,8 +31,8 @@ class ObservationType(str, Enum):
 # REQUEST MODELS
 # =============================================================================
 
-class AggregateGRPRequest(BaseModel):
-    """Request to aggregate monthly observations into an annual GRP."""
+class AggregateMRPRequest(BaseModel):
+    """Request to aggregate monthly observations into an annual MRP."""
     operating_year: int = Field(..., ge=1, description="Contract operating year to aggregate")
     include_pending: bool = Field(False, description="Include pending (unverified) observations")
 
@@ -47,7 +47,7 @@ class AggregateGRPRequest(BaseModel):
 
 
 class VerifyObservationRequest(BaseModel):
-    """Request to verify or dispute a GRP observation."""
+    """Request to verify or dispute an MRP observation."""
     verification_status: VerificationStatus = Field(
         ..., description="New status: jointly_verified, disputed, or estimated"
     )
@@ -67,15 +67,15 @@ class VerifyObservationRequest(BaseModel):
 # RESPONSE MODELS
 # =============================================================================
 
-class GRPObservation(BaseModel):
-    """Single GRP observation (monthly or annual)."""
+class MRPObservation(BaseModel):
+    """Single MRP observation (monthly or annual)."""
     id: int
     project_id: int
     operating_year: int
     period_start: date
     period_end: date
     observation_type: str
-    calculated_grp_per_kwh: Optional[float] = None
+    calculated_mrp_per_kwh: Optional[float] = None
     total_variable_charges: Optional[float] = None
     total_kwh_invoiced: Optional[float] = None
     verification_status: str
@@ -87,16 +87,16 @@ class GRPObservation(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class GRPObservationListResponse(BaseModel):
+class MRPObservationListResponse(BaseModel):
     success: bool = True
-    observations: List[GRPObservation]
+    observations: List[MRPObservation]
     total: int
 
 
-class AggregateGRPResponse(BaseModel):
+class AggregateMRPResponse(BaseModel):
     success: bool = True
     observation_id: int
-    annual_grp_per_kwh: float
+    annual_mrp_per_kwh: float
     operating_year: int
     months_included: int
     months_excluded: int
@@ -116,7 +116,7 @@ class VerifyObservationResponse(BaseModel):
 class AdminUploadResponse(BaseModel):
     success: bool = True
     observation_id: int
-    grp_per_kwh: float
+    mrp_per_kwh: float
     total_variable_charges: float
     total_kwh_invoiced: float
     line_items_count: int
@@ -127,13 +127,13 @@ class AdminUploadResponse(BaseModel):
 
 
 # =============================================================================
-# MANUAL GRP ENTRY MODELS
+# MANUAL MRP ENTRY MODELS
 # =============================================================================
 
-class ManualGRPRateEntry(BaseModel):
+class ManualMRPRateEntry(BaseModel):
     """A single monthly tariff rate entry."""
     billing_month: str = Field(..., pattern=r"^\d{4}-\d{2}$", description="Billing month in YYYY-MM format")
-    grp_per_kwh: float = Field(..., gt=0, description="Grid reference price per kWh")
+    mrp_per_kwh: float = Field(..., gt=0, description="Market reference price per kWh")
     tariff_components: Optional[Dict[str, float]] = Field(
         None, description="Breakdown by component, e.g. {'energy_charge': 0.50, 'govt_levy': 0.05}"
     )
@@ -143,7 +143,7 @@ class ManualGRPRateEntry(BaseModel):
         json_schema_extra={
             "example": {
                 "billing_month": "2024-09",
-                "grp_per_kwh": 0.6042,
+                "mrp_per_kwh": 0.6042,
                 "tariff_components": {
                     "energy_charge": 0.5200,
                     "govt_levy": 0.0542,
@@ -155,9 +155,9 @@ class ManualGRPRateEntry(BaseModel):
     )
 
 
-class ManualGRPBatchRequest(BaseModel):
-    """Batch request to manually insert GRP tariff rates."""
-    entries: List[ManualGRPRateEntry] = Field(..., min_length=1, max_length=60)
+class ManualMRPBatchRequest(BaseModel):
+    """Batch request to manually insert MRP tariff rates."""
+    entries: List[ManualMRPRateEntry] = Field(..., min_length=1, max_length=60)
     is_baseline: bool = Field(False, description="Allow pre-COD months with operating_year=0")
     currency_code: Optional[str] = Field(None, description="ISO currency code (e.g. GHS). Falls back to project tariff currency.")
 
@@ -165,8 +165,8 @@ class ManualGRPBatchRequest(BaseModel):
         json_schema_extra={
             "example": {
                 "entries": [
-                    {"billing_month": "2024-09", "grp_per_kwh": 0.6042},
-                    {"billing_month": "2024-10", "grp_per_kwh": 0.6042},
+                    {"billing_month": "2024-09", "mrp_per_kwh": 0.6042},
+                    {"billing_month": "2024-10", "mrp_per_kwh": 0.6042},
                 ],
                 "is_baseline": True,
                 "currency_code": "GHS",
@@ -175,7 +175,7 @@ class ManualGRPBatchRequest(BaseModel):
     )
 
 
-class ManualGRPBatchResponse(BaseModel):
+class ManualMRPBatchResponse(BaseModel):
     success: bool = True
     inserted_count: int
     observation_ids: List[int]

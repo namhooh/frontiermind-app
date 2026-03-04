@@ -1,6 +1,6 @@
 -- KAS01 December 2025 Fixture Data
 -- Seeds clause_tariff linkages, billing_taxes config, tariff_rate,
--- and reference_price (GRP) for KAS01 (Kasapreko Phase I & II).
+-- and reference_price (MRP) for KAS01 (Kasapreko Phase I & II).
 --
 -- All lookups use stable keys (sage_id, external_contract_id) — no hardcoded IDs.
 -- Verified against invoice SINKAS012512035 (December 2025).
@@ -19,8 +19,8 @@
 --   Net Due: 178,731.42 GHS
 --
 -- Tariff (from invoice page 2):
---   Grid Reference Price (GRP): 1.5540 GHS/kWh
---   Grid Discount: 19.2000%
+--   Market Reference Price (MRP): 1.5540 GHS/kWh
+--   MRP Discount: 19.2000%
 --   Effective Rate: 1.5540 × (1 - 0.192) = 1.2556 GHS/kWh (4dp)
 --   Minimum Solar Price: 0.0989 USD/kWh (escalated floor)
 --   Ceiling: 0.3000 USD/kWh
@@ -93,14 +93,14 @@ WHERE ct.project_id = p.id
   AND ct.is_current = true;
 
 -- ============================================================================
--- 4. Seed reference_price (GRP) for Dec 2025
+-- 4. Seed reference_price (MRP) for Dec 2025
 -- ============================================================================
--- GRP = 1.5540 GHS/kWh (from invoice: Grid Reference Price)
+-- MRP = 1.5540 GHS/kWh (from invoice: Market Reference Price)
 -- Operating Year 8 (COD Oct 2018, Year 8 = Oct 2025-Oct 2026)
 
 INSERT INTO reference_price (
   project_id, organization_id, operating_year,
-  period_start, period_end, calculated_grp_per_kwh,
+  period_start, period_end, calculated_mrp_per_kwh,
   currency_id, observation_type, verification_status
 )
 SELECT
@@ -157,7 +157,7 @@ SELECT
   rp.id,
   'computed', true,
   json_build_object(
-    'grp_per_kwh', 1.5540,
+    'mrp_per_kwh', 1.5540,
     'discount_pct', 0.192,
     'discounted_base_ghs', 1.255632,
     'escalated_floor_usd', 0.0989,

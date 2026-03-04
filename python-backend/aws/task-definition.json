@@ -50,6 +50,14 @@
         {
           "name": "GIT_HASH",
           "value": "__GIT_HASH__"
+        },
+        {
+          "name": "SES_INGEST_BUCKET",
+          "value": "frontiermind-email-ingest"
+        },
+        {
+          "name": "SES_SENDER_DOMAIN",
+          "value": "mail.frontiermind.co"
         }
       ],
       "secrets": [

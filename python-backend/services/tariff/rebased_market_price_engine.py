@@ -2,13 +2,13 @@
 Rebased Market Price Engine.
 
 Computes effective rates for REBASED_MARKET_PRICE tariffs where the rate is
-rebased annually to the Grid Reference Price (GRP) from utility invoices.
+rebased annually to the Market Reference Price (MRP) from utility invoices.
 
 The formula is dispatched via `formula_type` in logic_parameters — different
 projects can use different formula implementations. Floor/ceiling are re-evaluated
 monthly because USD→GHS conversion uses that month's FX rate.
 
-GHS is the system of record: GRP is in GHS, floor/ceiling are converted from USD
+GHS is the system of record: MRP is in GHS, floor/ceiling are converted from USD
 to GHS at the monthly FX rate. USD billing amounts are derived from the GHS rate.
 """
 
@@ -19,7 +19,7 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, List, Optional
 
 from db.database import get_db_connection
-from services.calculations.grid_reference_price import calculate_grp
+from services.calculations.market_reference_price import calculate_mrp
 
 logger = logging.getLogger(__name__)
 
@@ -29,17 +29,17 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 def _formula_grid_discount_bounded(
-    grp_local: Decimal,
+    mrp_local: Decimal,
     discount_pct: Decimal,
     floor_local: Decimal,
     ceiling_local: Decimal,
 ) -> tuple[Decimal, str]:
     """
-    effective = MAX(floor, MIN(GRP × (1 - discount), ceiling))
+    effective = MAX(floor, MIN(MRP × (1 - discount), ceiling))
 
     Returns (effective_rate, rate_binding).
     """
-    discounted = grp_local * (1 - discount_pct)
+    discounted = mrp_local * (1 - discount_pct)
 
     if discounted <= floor_local:
         return floor_local, "floor"
@@ -118,7 +118,7 @@ class RebasedMarketPriceEngine:
         self,
         project_id: int,
         operating_year: int,
-        grp_per_kwh: Optional[float] = None,
+        mrp_per_kwh: Optional[float] = None,
         invoice_line_items: Optional[List[dict]] = None,
         monthly_fx_rates: Optional[List[Dict[str, Any]]] = None,
         verification_status: str = "pending",
@@ -129,9 +129,9 @@ class RebasedMarketPriceEngine:
         Args:
             project_id: Project ID
             operating_year: Contract operating year (>= 2)
-            grp_per_kwh: Pre-calculated GRP in local currency/kWh. If None,
+            mrp_per_kwh: Pre-calculated MRP in local currency/kWh. If None,
                          calculated from invoice_line_items.
-            invoice_line_items: Utility invoice line items for GRP calculation.
+            invoice_line_items: Utility invoice line items for MRP calculation.
             monthly_fx_rates: List of {billing_month: date, fx_rate: float, rate_date: date}.
                               One per billing month in the contract year (1-12).
             verification_status: Status for the reference_price row.
@@ -155,17 +155,17 @@ class RebasedMarketPriceEngine:
         base_ceiling = Decimal(str(lp["ceiling_rate"]))
         escalation_rules = lp.get("escalation_rules", [])
 
-        # 3. Calculate or use provided GRP
-        grp_local: Optional[Decimal] = None
-        grp_totals: Dict[str, Any] = {}
+        # 3. Calculate or use provided MRP
+        mrp_local: Optional[Decimal] = None
+        mrp_totals: Dict[str, Any] = {}
 
-        if grp_per_kwh is not None:
-            grp_local = Decimal(str(grp_per_kwh))
+        if mrp_per_kwh is not None:
+            mrp_local = Decimal(str(mrp_per_kwh))
         elif invoice_line_items:
-            grp_local = calculate_grp(lp, invoice_line_items)
-            if grp_local is None:
-                raise ValueError("GRP calculation returned None — insufficient invoice data")
-            # Capture totals for reference_price
+            mrp_local = calculate_mrp(lp, invoice_line_items)
+            if mrp_local is None:
+                raise ValueError("MRP calculation returned None — insufficient invoice data")
+            # Capture totals for reference_price (MRP)
             total_charges = sum(
                 Decimal(str(item.get("line_total_amount", 0) or 0))
                 for item in invoice_line_items
@@ -176,19 +176,19 @@ class RebasedMarketPriceEngine:
                 for item in invoice_line_items
                 if item.get("invoice_line_item_type_code") == "VARIABLE_ENERGY"
             )
-            grp_totals = {
+            mrp_totals = {
                 "total_variable_charges": total_charges,
                 "total_kwh_invoiced": total_kwh,
             }
         else:
-            raise ValueError("Either grp_per_kwh or invoice_line_items must be provided")
+            raise ValueError("Either mrp_per_kwh or invoice_line_items must be provided")
 
         # 4. Escalate floor/ceiling
         escalated_floor = _escalate_component(base_floor, operating_year, escalation_rules, "min_solar_price")
         escalated_ceiling = _escalate_component(base_ceiling, operating_year, escalation_rules, "max_solar_price")
 
-        # 5. Calculate discounted GRP (constant for the year — GRP and discount don't vary monthly)
-        discounted_grp = grp_local * (1 - discount_pct)
+        # 5. Calculate discounted MRP (constant for the year — MRP and discount don't vary monthly)
+        discounted_mrp = mrp_local * (1 - discount_pct)
 
         # 6. For each billing month: convert floor/ceiling USD→GHS, apply formula
         monthly_results = []
@@ -207,7 +207,7 @@ class RebasedMarketPriceEngine:
             ceiling_ghs = (escalated_ceiling * fx_rate).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
 
             effective_rate, rate_binding = formula_fn(
-                grp_local=grp_local,
+                mrp_local=mrp_local,
                 discount_pct=discount_pct,
                 floor_local=floor_ghs,
                 ceiling_local=ceiling_ghs,
@@ -217,7 +217,7 @@ class RebasedMarketPriceEngine:
 
             disc_pct_display = int(discount_pct * 100) if discount_pct * 100 == int(discount_pct * 100) else float(discount_pct * 100)
             basis = (
-                f"GRP per kWh less {disc_pct_display}% solar discount, "
+                f"MRP per kWh less {disc_pct_display}% solar discount, "
                 f"bounded by floor/ceiling (USD→local at monthly FX rate), "
                 f"binding={rate_binding}"
             )
@@ -228,22 +228,22 @@ class RebasedMarketPriceEngine:
                 "rate_date": rate_date,
                 "floor_local": floor_ghs,
                 "ceiling_local": ceiling_ghs,
-                "discounted_grp_local": discounted_grp.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP),
+                "discounted_mrp_local": discounted_mrp.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP),
                 "effective_tariff_local": effective_rate,
                 "rate_binding": rate_binding,
                 "calculation_basis": basis,
             })
 
         # 7. Determine representative annual rate + final effective tariff
-        # Representative annual rate = discounted GRP (before floor/ceiling — the annual anchor)
-        representative_rate = discounted_grp.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+        # Representative annual rate = discounted MRP (before floor/ceiling — the annual anchor)
+        representative_rate = discounted_mrp.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
         # Final effective tariff = latest monthly effective rate
         latest_month = monthly_results[-1]
         final_effective_tariff = latest_month["effective_tariff_local"]
 
         disc_pct_display = int(discount_pct * 100) if discount_pct * 100 == int(discount_pct * 100) else float(discount_pct * 100)
         annual_basis = (
-            f"GRP per kWh less {disc_pct_display}% solar discount, "
+            f"MRP per kWh less {disc_pct_display}% solar discount, "
             f"bounded by floor/ceiling (USD), converted at monthly FX rate"
         )
 
@@ -251,8 +251,8 @@ class RebasedMarketPriceEngine:
         result = self._write_to_db(
             tariff=tariff,
             operating_year=operating_year,
-            grp_local=grp_local,
-            grp_totals=grp_totals,
+            mrp_local=mrp_local,
+            mrp_totals=mrp_totals,
             verification_status=verification_status,
             representative_rate=representative_rate,
             final_effective_tariff=final_effective_tariff,
@@ -265,7 +265,7 @@ class RebasedMarketPriceEngine:
 
         logger.info(
             f"Rebased rate calculated for project {project_id} year {operating_year}: "
-            f"GRP={grp_local}, final_effective_tariff={final_effective_tariff}, "
+            f"MRP={mrp_local}, final_effective_tariff={final_effective_tariff}, "
             f"months={len(monthly_results)}"
         )
 
@@ -273,7 +273,7 @@ class RebasedMarketPriceEngine:
             "success": True,
             "project_id": project_id,
             "operating_year": operating_year,
-            "grp_per_kwh": float(grp_local),
+            "mrp_per_kwh": float(mrp_local),
             "discount_pct": float(discount_pct),
             "escalated_floor_usd": float(escalated_floor),
             "escalated_ceiling_usd": float(escalated_ceiling),
@@ -287,7 +287,7 @@ class RebasedMarketPriceEngine:
                     "fx_rate": float(m["fx_rate"]),
                     "floor_ghs": float(m["floor_local"]),
                     "ceiling_ghs": float(m["ceiling_local"]),
-                    "discounted_grp_ghs": float(m["discounted_grp_local"]),
+                    "discounted_mrp_ghs": float(m["discounted_mrp_local"]),
                     "effective_tariff_ghs": float(m["effective_tariff_local"]),
                     "rate_binding": m["rate_binding"],
                 }
@@ -345,8 +345,8 @@ class RebasedMarketPriceEngine:
         self,
         tariff: dict,
         operating_year: int,
-        grp_local: Decimal,
-        grp_totals: dict,
+        mrp_local: Decimal,
+        mrp_totals: dict,
         verification_status: str,
         representative_rate: Decimal,
         final_effective_tariff: Decimal,
@@ -374,7 +374,7 @@ class RebasedMarketPriceEngine:
 
                     # hard = USD (floor/ceiling are denominated in USD)
                     hard_ccy_from_tariff = usd_currency_id or currency_id
-                    # local = market_ref_currency (GHS — local market currency where GRP is denominated)
+                    # local = market_ref_currency (GHS — local market currency where MRP is denominated)
                     local_ccy_from_tariff = tariff.get("market_ref_currency_id") or currency_id
 
                     # --- a. exchange_rate: 1 row per month ---
@@ -399,7 +399,7 @@ class RebasedMarketPriceEngine:
                         )
                         fx_id_map[m["billing_month"]] = cur.fetchone()["id"]
 
-                    # --- b. reference_price: annual GRP observation ---
+                    # --- b. reference_price: annual MRP observation ---
                     if hasattr(valid_from, "date"):
                         valid_from = valid_from.date()
 
@@ -410,14 +410,14 @@ class RebasedMarketPriceEngine:
                         """
                         INSERT INTO reference_price
                             (project_id, organization_id, operating_year, period_start,
-                             period_end, calculated_grp_per_kwh, currency_id,
+                             period_end, calculated_mrp_per_kwh, currency_id,
                              total_variable_charges, total_kwh_invoiced,
                              verification_status, observation_type)
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'annual')
                         ON CONFLICT (project_id, operating_year)
                             WHERE observation_type = 'annual'
                         DO UPDATE SET
-                            calculated_grp_per_kwh = EXCLUDED.calculated_grp_per_kwh,
+                            calculated_mrp_per_kwh = EXCLUDED.calculated_mrp_per_kwh,
                             period_start = EXCLUDED.period_start,
                             period_end = EXCLUDED.period_end,
                             total_variable_charges = EXCLUDED.total_variable_charges,
@@ -432,10 +432,10 @@ class RebasedMarketPriceEngine:
                             operating_year,
                             period_start,
                             period_end,
-                            grp_local,
+                            mrp_local,
                             local_ccy_from_tariff,
-                            grp_totals.get("total_variable_charges"),
-                            grp_totals.get("total_kwh_invoiced"),
+                            mrp_totals.get("total_variable_charges"),
+                            mrp_totals.get("total_kwh_invoiced"),
                             verification_status,
                         ),
                     )
@@ -453,7 +453,7 @@ class RebasedMarketPriceEngine:
                     billing_ccy_id = local_ccy_from_tariff  # billing in local currency (GHS)
 
                     # --- c1. Annual row in tariff_rate ---
-                    # For annual: representative_rate is discounted GRP in local ccy
+                    # For annual: representative_rate is discounted MRP in local ccy
                     # Convert to hard ccy using a reference FX rate (use latest month's rate)
                     latest_fx = monthly_results[-1]["fx_rate"]
                     annual_hard = (representative_rate / latest_fx).quantize(
@@ -572,7 +572,7 @@ class RebasedMarketPriceEngine:
                         ceiling_hard = (m["ceiling_local"] / fx_rate).quantize(
                             Decimal("0.00000001"), rounding=ROUND_HALF_UP
                         ) if fx_rate else None
-                        disc_hard = (m["discounted_grp_local"] / fx_rate).quantize(
+                        disc_hard = (m["discounted_mrp_local"] / fx_rate).quantize(
                             Decimal("0.00000001"), rounding=ROUND_HALF_UP
                         ) if fx_rate else None
 
@@ -592,13 +592,13 @@ class RebasedMarketPriceEngine:
                                 "contract_role": "hard",
                             },
                             "discounted_base": {
-                                "contract_ccy": float(m["discounted_grp_local"]),
+                                "contract_ccy": float(m["discounted_mrp_local"]),
                                 "hard_ccy": float(disc_hard) if disc_hard else None,
-                                "local_ccy": float(m["discounted_grp_local"]),
-                                "billing_ccy": float(m["discounted_grp_local"]),
+                                "local_ccy": float(m["discounted_mrp_local"]),
+                                "billing_ccy": float(m["discounted_mrp_local"]),
                                 "contract_role": "local",
                             },
-                            "grp_per_kwh": float(grp_local),
+                            "mrp_per_kwh": float(mrp_local),
                             "discount_pct": float(discount_pct),
                             "escalated_floor_usd": float(escalated_floor),
                             "escalated_ceiling_usd": float(escalated_ceiling),

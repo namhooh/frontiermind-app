@@ -1,8 +1,8 @@
 """
-GRP (Grid Reference Price) Management API Endpoints.
+MRP (Market Reference Price) Management API Endpoints.
 
 Admin endpoints for querying, verifying, aggregating, and uploading
-GRP observations. All endpoints require X-Organization-ID header.
+MRP observations. All endpoints require X-Organization-ID header.
 """
 
 import hashlib
@@ -19,14 +19,14 @@ from psycopg2.extras import Json
 from db.database import get_db_connection, init_connection_pool
 from middleware.api_key_auth import require_api_key
 from middleware.rate_limiter import limiter
-from models.grp import (
-    AggregateGRPRequest,
-    AggregateGRPResponse,
+from models.mrp import (
+    AggregateMRPRequest,
+    AggregateMRPResponse,
     AdminUploadResponse,
-    GRPObservation,
-    GRPObservationListResponse,
-    ManualGRPBatchRequest,
-    ManualGRPBatchResponse,
+    MRPObservation,
+    MRPObservationListResponse,
+    ManualMRPBatchRequest,
+    ManualMRPBatchResponse,
     ObservationType,
     VerificationStatus,
     VerifyObservationRequest,
@@ -37,7 +37,7 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/api",
-    tags=["grp"],
+    tags=["mrp"],
     responses={
         404: {"description": "Resource not found"},
         500: {"description": "Internal server error"},
@@ -48,7 +48,7 @@ router = APIRouter(
 try:
     init_connection_pool()
 except Exception as e:
-    logger.warning(f"GRP API: Database initialization failed: {e}")
+    logger.warning(f"MRP API: Database initialization failed: {e}")
 
 
 # File upload constraints (reuse values from submissions)
@@ -101,7 +101,7 @@ def _validate_project_ownership(project_id: int, org_id: int) -> None:
 
 
 def _reaggregate_annual(cur, project_id: int, org_id: int, operating_year: int) -> None:
-    """Re-aggregate the annual GRP observation if one already exists.
+    """Re-aggregate the annual MRP observation if one already exists.
 
     Preserves the original include_pending setting from source_metadata.
     Runs within the caller's transaction (no commit).
@@ -172,7 +172,7 @@ def _reaggregate_annual(cur, project_id: int, org_id: int, operating_year: int) 
     if total_kwh == 0:
         return  # Cannot divide by zero — leave existing annual
 
-    annual_grp = total_charges / total_kwh
+    annual_mrp = total_charges / total_kwh
 
     # Period boundaries
     period_start = monthly_rows[0]["period_start"]
@@ -196,7 +196,7 @@ def _reaggregate_annual(cur, project_id: int, org_id: int, operating_year: int) 
     cur.execute(
         """
         UPDATE reference_price
-        SET calculated_grp_per_kwh = %s,
+        SET calculated_mrp_per_kwh = %s,
             total_variable_charges = %s,
             total_kwh_invoiced = %s,
             period_start = %s,
@@ -208,29 +208,29 @@ def _reaggregate_annual(cur, project_id: int, org_id: int, operating_year: int) 
         WHERE id = %s
         """,
         (
-            annual_grp, total_charges, total_kwh,
+            annual_mrp, total_charges, total_kwh,
             period_start, period_end,
             Json(source_metadata),
             annual_row["id"],
         ),
     )
     logger.info(
-        f"Re-aggregated annual GRP for project {project_id}, OY {operating_year}: "
-        f"{float(annual_grp):.4f} from {months_included} months"
+        f"Re-aggregated annual MRP for project {project_id}, OY {operating_year}: "
+        f"{float(annual_mrp):.4f} from {months_included} months"
     )
 
 
 # =============================================================================
-# POST /api/projects/{project_id}/grp-refresh
+# POST /api/projects/{project_id}/mrp-refresh
 # =============================================================================
 
 @router.post(
-    "/projects/{project_id}/grp-refresh",
-    summary="Refresh stale annual GRP observations",
+    "/projects/{project_id}/mrp-refresh",
+    summary="Refresh stale annual MRP observations",
 )
-async def refresh_grp(request: Request, project_id: int):
+async def refresh_mrp(request: Request, project_id: int):
     """
-    Re-aggregate annual GRP observations that are stale.
+    Re-aggregate annual MRP observations that are stale.
 
     An annual observation is stale when any of its constituent monthly
     observations have been updated more recently than the annual itself.
@@ -273,29 +273,29 @@ async def refresh_grp(request: Request, project_id: int):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error refreshing GRP: {e}", exc_info=True)
+        logger.error(f"Error refreshing MRP: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail={"success": False, "message": str(e)})
 
     return {"success": True, "refreshed_operating_years": refreshed}
 
 
 # =============================================================================
-# GET /api/projects/{project_id}/grp-observations
+# GET /api/projects/{project_id}/mrp-observations
 # =============================================================================
 
 @router.get(
-    "/projects/{project_id}/grp-observations",
-    response_model=GRPObservationListResponse,
-    summary="List GRP observations for a project",
+    "/projects/{project_id}/mrp-observations",
+    response_model=MRPObservationListResponse,
+    summary="List MRP observations for a project",
 )
-async def list_grp_observations(
+async def list_mrp_observations(
     request: Request,
     project_id: int,
     operating_year: Optional[int] = Query(None, ge=0, description="Filter by operating year (0 = baseline/pre-COD)"),
     verification_status: Optional[str] = Query(None, description="Filter by verification status"),
     observation_type: Optional[str] = Query("monthly", description="monthly or annual"),
-) -> GRPObservationListResponse:
-    """List monthly or annual GRP observations for a project."""
+) -> MRPObservationListResponse:
+    """List monthly or annual MRP observations for a project."""
     org_id = _get_org_id(request)
     _validate_project_ownership(project_id, org_id)
 
@@ -336,7 +336,7 @@ async def list_grp_observations(
                     SELECT
                         rp.id, rp.project_id, rp.operating_year,
                         rp.period_start, rp.period_end, rp.observation_type,
-                        rp.calculated_grp_per_kwh, rp.total_variable_charges,
+                        rp.calculated_mrp_per_kwh, rp.total_variable_charges,
                         rp.total_kwh_invoiced, rp.verification_status,
                         rp.verified_at, rp.source_metadata,
                         rp.created_at, rp.updated_at
@@ -348,40 +348,40 @@ async def list_grp_observations(
                 )
                 rows = cur.fetchall()
     except Exception as e:
-        logger.error(f"Error listing GRP observations: {e}", exc_info=True)
+        logger.error(f"Error listing MRP observations: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail={"success": False, "message": str(e)})
 
     observations = []
     for row in rows:
         obs = dict(row)
         # Convert Decimal fields to float for JSON serialization
-        for field in ("calculated_grp_per_kwh", "total_variable_charges", "total_kwh_invoiced"):
+        for field in ("calculated_mrp_per_kwh", "total_variable_charges", "total_kwh_invoiced"):
             if obs.get(field) is not None:
                 obs[field] = float(obs[field])
-        observations.append(GRPObservation(**obs))
+        observations.append(MRPObservation(**obs))
 
-    return GRPObservationListResponse(
+    return MRPObservationListResponse(
         observations=observations,
         total=len(observations),
     )
 
 
 # =============================================================================
-# POST /api/projects/{project_id}/grp-aggregate
+# POST /api/projects/{project_id}/mrp-aggregate
 # =============================================================================
 
 @router.post(
-    "/projects/{project_id}/grp-aggregate",
-    response_model=AggregateGRPResponse,
-    summary="Aggregate monthly GRP into annual observation",
+    "/projects/{project_id}/mrp-aggregate",
+    response_model=AggregateMRPResponse,
+    summary="Aggregate monthly MRP into annual observation",
 )
-async def aggregate_grp(
+async def aggregate_mrp(
     request: Request,
     project_id: int,
-    body: AggregateGRPRequest,
-) -> AggregateGRPResponse:
+    body: AggregateMRPRequest,
+) -> AggregateMRPResponse:
     """
-    Aggregate monthly observations into a single annual GRP value.
+    Aggregate monthly observations into a single annual MRP value.
 
     Weighted average: SUM(total_variable_charges) / SUM(total_kwh_invoiced)
     """
@@ -461,7 +461,7 @@ async def aggregate_grp(
                         },
                     )
 
-                annual_grp = total_charges / total_kwh
+                annual_mrp = total_charges / total_kwh
 
                 # Determine period boundaries from included months
                 period_start = monthly_rows[0]["period_start"]
@@ -502,7 +502,7 @@ async def aggregate_grp(
                     INSERT INTO reference_price (
                         project_id, organization_id, operating_year,
                         period_start, period_end,
-                        calculated_grp_per_kwh, currency_id,
+                        calculated_mrp_per_kwh, currency_id,
                         total_variable_charges, total_kwh_invoiced,
                         observation_type, source_metadata, verification_status
                     ) VALUES (
@@ -514,7 +514,7 @@ async def aggregate_grp(
                     DO UPDATE SET
                         period_start = EXCLUDED.period_start,
                         period_end = EXCLUDED.period_end,
-                        calculated_grp_per_kwh = EXCLUDED.calculated_grp_per_kwh,
+                        calculated_mrp_per_kwh = EXCLUDED.calculated_mrp_per_kwh,
                         total_variable_charges = EXCLUDED.total_variable_charges,
                         total_kwh_invoiced = EXCLUDED.total_kwh_invoiced,
                         source_metadata = EXCLUDED.source_metadata,
@@ -529,7 +529,7 @@ async def aggregate_grp(
                         body.operating_year,
                         period_start,
                         period_end,
-                        annual_grp,
+                        annual_mrp,
                         currency_id,
                         total_charges,
                         total_kwh,
@@ -542,35 +542,35 @@ async def aggregate_grp(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error aggregating GRP: {e}", exc_info=True)
+        logger.error(f"Error aggregating MRP: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail={"success": False, "message": str(e)})
 
-    return AggregateGRPResponse(
+    return AggregateMRPResponse(
         observation_id=observation_id,
-        annual_grp_per_kwh=float(annual_grp),
+        annual_mrp_per_kwh=float(annual_mrp),
         operating_year=body.operating_year,
         months_included=months_included,
         months_excluded=months_excluded,
         total_variable_charges=float(total_charges),
         total_kwh_invoiced=float(total_kwh),
-        message=f"Annual GRP aggregated from {months_included} month(s) for operating year {body.operating_year}",
+        message=f"Annual MRP aggregated from {months_included} month(s) for operating year {body.operating_year}",
     )
 
 
 # =============================================================================
-# DELETE /api/projects/{project_id}/grp-observations/{observation_id}
+# DELETE /api/projects/{project_id}/mrp-observations/{observation_id}
 # =============================================================================
 
 @router.delete(
-    "/projects/{project_id}/grp-observations/{observation_id}",
-    summary="Delete a disputed GRP observation",
+    "/projects/{project_id}/mrp-observations/{observation_id}",
+    summary="Delete a disputed MRP observation",
 )
 async def delete_observation(
     request: Request,
     project_id: int,
     observation_id: int,
 ):
-    """Delete a GRP observation. Only disputed observations may be deleted."""
+    """Delete an MRP observation. Only disputed observations may be deleted."""
     org_id = _get_org_id(request)
     _validate_project_ownership(project_id, org_id)
 
@@ -628,13 +628,13 @@ async def delete_observation(
 
 
 # =============================================================================
-# PATCH /api/projects/{project_id}/grp-observations/{observation_id}
+# PATCH /api/projects/{project_id}/mrp-observations/{observation_id}
 # =============================================================================
 
 @router.patch(
-    "/projects/{project_id}/grp-observations/{observation_id}",
+    "/projects/{project_id}/mrp-observations/{observation_id}",
     response_model=VerifyObservationResponse,
-    summary="Verify or dispute a GRP observation",
+    summary="Verify or dispute an MRP observation",
 )
 async def verify_observation(
     request: Request,
@@ -642,7 +642,7 @@ async def verify_observation(
     observation_id: int,
     body: VerifyObservationRequest,
 ) -> VerifyObservationResponse:
-    """Update verification status of a GRP observation."""
+    """Update verification status of an MRP observation."""
     org_id = _get_org_id(request)
     _validate_project_ownership(project_id, org_id)
 
@@ -730,16 +730,16 @@ async def verify_observation(
 
 
 # =============================================================================
-# POST /api/projects/{project_id}/grp-upload
+# POST /api/projects/{project_id}/mrp-upload
 # =============================================================================
 
 @router.post(
-    "/projects/{project_id}/grp-upload",
+    "/projects/{project_id}/mrp-upload",
     response_model=AdminUploadResponse,
     summary="Admin direct upload of utility invoice (no token)",
 )
 @limiter.limit("5/minute")
-async def admin_grp_upload(
+async def admin_mrp_upload(
     request: Request,
     project_id: int,
     file: UploadFile = File(...),
@@ -818,7 +818,7 @@ async def admin_grp_upload(
     year = billing_month_date.year
     month = billing_month_date.month
     safe_filename = f"{file_hash[:16]}{ext}"
-    s3_key = f"grp-uploads/{org_id}/{project_id}/{year}/{month:02d}/{safe_filename}"
+    s3_key = f"mrp-uploads/{org_id}/{project_id}/{year}/{month:02d}/{safe_filename}"
 
     _upload_to_s3(file_bytes, s3_key, file.content_type)
 
@@ -834,11 +834,11 @@ async def admin_grp_upload(
             detail={"success": False, "message": "Billing month cannot precede project COD date"},
         )
 
-    # 8. Extract and store GRP
+    # 8. Extract and store MRP
     try:
-        from services.grp.extraction_service import GRPExtractionService
+        from services.mrp.extraction_service import MRPExtractionService
 
-        extraction_service = GRPExtractionService()
+        extraction_service = MRPExtractionService()
         result = extraction_service.extract_and_store(
             file_bytes=file_bytes,
             filename=file.filename,
@@ -850,7 +850,7 @@ async def admin_grp_upload(
             file_hash=file_hash,
         )
     except Exception as e:
-        logger.error(f"GRP extraction failed (admin upload): {e}", exc_info=True)
+        logger.error(f"MRP extraction failed (admin upload): {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={"success": False, "message": f"Extraction failed: {str(e)}"},
@@ -858,7 +858,7 @@ async def admin_grp_upload(
 
     return AdminUploadResponse(
         observation_id=result["observation_id"],
-        grp_per_kwh=result["grp_per_kwh"],
+        mrp_per_kwh=result["mrp_per_kwh"],
         total_variable_charges=result["total_variable_charges"],
         total_kwh_invoiced=result["total_kwh_invoiced"],
         line_items_count=result["line_items_count"],
@@ -870,21 +870,21 @@ async def admin_grp_upload(
 
 
 # =============================================================================
-# POST /api/projects/{project_id}/grp-manual
+# POST /api/projects/{project_id}/mrp-manual
 # =============================================================================
 
 @router.post(
-    "/projects/{project_id}/grp-manual",
-    response_model=ManualGRPBatchResponse,
-    summary="Manually insert GRP tariff rates (JSON, no file upload)",
+    "/projects/{project_id}/mrp-manual",
+    response_model=ManualMRPBatchResponse,
+    summary="Manually insert MRP tariff rates (JSON, no file upload)",
 )
-async def manual_grp_entry(
+async def manual_mrp_entry(
     request: Request,
     project_id: int,
-    body: ManualGRPBatchRequest,
-) -> ManualGRPBatchResponse:
+    body: ManualMRPBatchRequest,
+) -> ManualMRPBatchResponse:
     """
-    Insert manually-sourced GRP tariff rates for a project.
+    Insert manually-sourced MRP tariff rates for a project.
 
     Accepts per-kWh rates (not invoice totals), so total_variable_charges
     and total_kwh_invoiced are left NULL. Supports pre-COD baseline data
@@ -981,7 +981,7 @@ async def manual_grp_entry(
                         INSERT INTO reference_price (
                             project_id, organization_id, operating_year,
                             period_start, period_end,
-                            calculated_grp_per_kwh, currency_id,
+                            calculated_mrp_per_kwh, currency_id,
                             total_variable_charges, total_kwh_invoiced,
                             observation_type, source_metadata, verification_status
                         ) VALUES (
@@ -991,7 +991,7 @@ async def manual_grp_entry(
                         )
                         ON CONFLICT (project_id, observation_type, period_start)
                         DO UPDATE SET
-                            calculated_grp_per_kwh = EXCLUDED.calculated_grp_per_kwh,
+                            calculated_mrp_per_kwh = EXCLUDED.calculated_mrp_per_kwh,
                             currency_id = EXCLUDED.currency_id,
                             operating_year = EXCLUDED.operating_year,
                             period_end = EXCLUDED.period_end,
@@ -1006,7 +1006,7 @@ async def manual_grp_entry(
                             operating_year,
                             period_start,
                             period_end,
-                            entry.grp_per_kwh,
+                            entry.mrp_per_kwh,
                             currency_id,
                             Json(source_metadata),
                         ),
@@ -1018,11 +1018,11 @@ async def manual_grp_entry(
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error inserting manual GRP entries: {e}", exc_info=True)
+        logger.error(f"Error inserting manual MRP entries: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail={"success": False, "message": str(e)})
 
-    return ManualGRPBatchResponse(
+    return ManualMRPBatchResponse(
         inserted_count=len(observation_ids),
         observation_ids=observation_ids,
-        message=f"Inserted {len(observation_ids)} manual GRP rate(s) successfully",
+        message=f"Inserted {len(observation_ids)} manual MRP rate(s) successfully",
     )

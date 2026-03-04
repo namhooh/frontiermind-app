@@ -503,21 +503,21 @@ class OnboardingService:
                         ppa_logic_extra["shortfall_formula_type"] = ppa.shortfall.formula_type
                     if ppa.shortfall.excused_events:
                         ppa_logic_extra["excused_events"] = ppa.shortfall.excused_events
-                if ppa.grp:
-                    if ppa.grp.exclude_vat is not None:
-                        ppa_logic_extra["grp_exclude_vat"] = ppa.grp.exclude_vat
-                    if ppa.grp.exclude_demand_charges is not None:
-                        ppa_logic_extra["grp_exclude_demand_charges"] = ppa.grp.exclude_demand_charges
-                    if ppa.grp.exclude_savings_charges is not None:
-                        ppa_logic_extra["grp_exclude_savings_charges"] = ppa.grp.exclude_savings_charges
-                    if ppa.grp.time_window_start is not None:
-                        ppa_logic_extra["grp_time_window_start"] = ppa.grp.time_window_start
-                    if ppa.grp.time_window_end is not None:
-                        ppa_logic_extra["grp_time_window_end"] = ppa.grp.time_window_end
-                    if ppa.grp.calculation_due_days is not None:
-                        ppa_logic_extra["grp_calculation_due_days"] = ppa.grp.calculation_due_days
-                    if ppa.grp.verification_deadline_days is not None:
-                        ppa_logic_extra["grp_verification_deadline_days"] = ppa.grp.verification_deadline_days
+                if ppa.mrp:
+                    if ppa.mrp.exclude_vat is not None:
+                        ppa_logic_extra["mrp_exclude_vat"] = ppa.mrp.exclude_vat
+                    if ppa.mrp.exclude_demand_charges is not None:
+                        ppa_logic_extra["mrp_exclude_demand_charges"] = ppa.mrp.exclude_demand_charges
+                    if ppa.mrp.exclude_savings_charges is not None:
+                        ppa_logic_extra["mrp_exclude_savings_charges"] = ppa.mrp.exclude_savings_charges
+                    if ppa.mrp.time_window_start is not None:
+                        ppa_logic_extra["mrp_time_window_start"] = ppa.mrp.time_window_start
+                    if ppa.mrp.time_window_end is not None:
+                        ppa_logic_extra["mrp_time_window_end"] = ppa.mrp.time_window_end
+                    if ppa.mrp.calculation_due_days is not None:
+                        ppa_logic_extra["mrp_calculation_due_days"] = ppa.mrp.calculation_due_days
+                    if ppa.mrp.verification_deadline_days is not None:
+                        ppa_logic_extra["mrp_verification_deadline_days"] = ppa.mrp.verification_deadline_days
 
             # Escalation detail fields from Excel (Rec 4)
             if excel.billing_frequency:
@@ -554,7 +554,7 @@ class OnboardingService:
                 "floor_rate": floor_rate,
                 "ceiling_rate": ceiling_rate,
                 "escalation_value": excel.escalation_value,
-                "grp_method": excel.grp_method,
+                "mrp_method": excel.mrp_method,
                 "logic_parameters_extra": dict(ppa_logic_extra),
             }
             tariff_lines.append(tariff_line)
@@ -590,7 +590,7 @@ class OnboardingService:
                         "floor_rate": None,
                         "ceiling_rate": None,
                         "escalation_value": excel.escalation_value,
-                        "grp_method": None,
+                        "mrp_method": None,
                         "logic_parameters_extra": {},
                     })
 
@@ -901,7 +901,7 @@ class OnboardingService:
                 floor_rate DECIMAL,
                 ceiling_rate DECIMAL,
                 escalation_value DECIMAL,
-                grp_method VARCHAR(100),
+                mrp_method VARCHAR(100),
                 logic_parameters_extra JSONB DEFAULT '{}'
             ) ON COMMIT DROP
         """)
@@ -1040,7 +1040,7 @@ class OnboardingService:
                     billing_currency_code, market_ref_currency_code,
                     base_rate, unit, valid_from, valid_to,
                     discount_pct, floor_rate, ceiling_rate, escalation_value,
-                    grp_method, logic_parameters_extra
+                    mrp_method, logic_parameters_extra
                 ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 (
                     str(batch_id), ext_id,
@@ -1053,7 +1053,7 @@ class OnboardingService:
                     tl["valid_from"], tl.get("valid_to"),
                     tl.get("discount_pct"), tl.get("floor_rate"),
                     tl.get("ceiling_rate"), tl.get("escalation_value"),
-                    tl.get("grp_method"),
+                    tl.get("mrp_method"),
                     json.dumps(tl.get("logic_parameters_extra", {})),
                 ),
             )
@@ -1561,8 +1561,8 @@ class OnboardingService:
                         logic_params["ceiling_rate"] = merged["ceiling_rate"]
                     if tariff_type.get("formula_type"):
                         logic_params["formula_type"] = tariff_type["formula_type"]
-                    if tariff_type.get("grp_method"):
-                        logic_params["grp_method"] = tariff_type["grp_method"]
+                    if tariff_type.get("mrp_method"):
+                        logic_params["mrp_method"] = tariff_type["mrp_method"]
                     if merged.get("escalation_type_id") and merged["escalation_type_id"] != "NONE":
                         esc_val = merged.get("escalation_value")
                         if esc_val is not None:

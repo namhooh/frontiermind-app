@@ -1,18 +1,18 @@
 """
 Claude extraction prompt for utility invoice line items.
 
-Used by GRPExtractionService to extract structured data from OCR'd utility invoices.
-The extracted line items are classified by type and used to calculate the Grid Reference Price.
+Used by MRPExtractionService to extract structured data from OCR'd utility invoices.
+The extracted line items are classified by type and used to calculate the Market Reference Price.
 """
 
-GRP_EXTRACTION_PROMPT = """You are an expert at reading utility electricity invoices and extracting structured billing data.
+MRP_EXTRACTION_PROMPT = """You are an expert at reading utility electricity invoices and extracting structured billing data.
 
 Given the OCR text of a utility invoice, extract ALL charge line items and invoice metadata.
 
 ## Classification Rules
 
 Classify each line item into ONE of these types:
-- **VARIABLE_ENERGY**: Energy consumption charges billed per kWh (e.g., "Energy Charge", "Active Energy", "kWh charge", "Units consumed"). These are the charges used in GRP calculation.
+- **VARIABLE_ENERGY**: Energy consumption charges billed per kWh (e.g., "Energy Charge", "Active Energy", "kWh charge", "Units consumed"). These are the charges used in MRP calculation.
 - **DEMAND**: Demand charges billed per kW/kVA (e.g., "Maximum Demand", "Capacity charge", "kVA charge").
 - **FIXED**: Fixed monthly charges not tied to consumption (e.g., "Service charge", "Meter rental", "Connection fee", "Network access charge").
 - **TAX**: Taxes, levies, and surcharges (e.g., "VAT", "NHIL", "GETFUND", "ESLA", "Fuel surcharge").

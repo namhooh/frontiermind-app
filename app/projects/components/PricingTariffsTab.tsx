@@ -4,7 +4,7 @@ import { useState, useMemo, Fragment } from 'react'
 import { ChevronRight, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { IS_DEMO } from '@/lib/demoMode'
-import type { ProjectDashboardResponse, GRPObservation, SubmissionTokenItem } from '@/lib/api/adminClient'
+import type { ProjectDashboardResponse, MRPObservation, SubmissionTokenItem } from '@/lib/api/adminClient'
 import { adminClient } from '@/lib/api/adminClient'
 import { CollapsibleSection } from './CollapsibleSection'
 import { EditableCell } from './EditableCell'
@@ -12,7 +12,7 @@ import { FieldGrid, type FieldDef } from './shared/FieldGrid'
 import { DetailField } from './shared/DetailField'
 import { EmptyState } from './shared/EmptyState'
 import { str, hasAnyValue, formatEscalationRules, groupProductsWithTariffs } from './shared/helpers'
-import { GRPSection } from './GRPSection'
+import { MRPSection } from './MRPSection'
 import { formatMonth } from '@/app/projects/utils/formatters'
 import { toOpts } from '@/app/projects/utils/constants'
 
@@ -716,12 +716,12 @@ interface PricingTariffsTabProps {
   onSaved?: () => void
   editMode?: boolean
   projectId?: number
-  grpMonthly?: GRPObservation[]
-  grpAnnual?: GRPObservation[]
-  grpTokens?: SubmissionTokenItem[]
+  mrpMonthly?: MRPObservation[]
+  mrpAnnual?: MRPObservation[]
+  mrpTokens?: SubmissionTokenItem[]
 }
 
-export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonthly = [], grpAnnual = [], grpTokens = [] }: PricingTariffsTabProps) {
+export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonthly = [], mrpAnnual = [], mrpTokens = [] }: PricingTariffsTabProps) {
   const { contracts, tariffs: rawTariffs, billing_products, rate_periods, monthly_rates, tariff_rates, exchange_rates, lookups } = data
   const pid = data.project.id as number
 
@@ -794,31 +794,31 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
     return country ? COUNTRY_TO_CURRENCY[country] : undefined
   })()
 
-  // Top-level first tariff/LP for GRP section (independent of contracts loop)
-  const grpFirstTariff = (() => {
+  // Top-level first tariff/LP for MRP section (independent of contracts loop)
+  const mrpFirstTariff = (() => {
     const c = contracts[0]
     if (!c) return undefined
     const ct = tariffs.filter((t) => t.contract_id === c.id)
     return (ct.find((t) => t.is_current === true) ?? ct[0]) as R | undefined
   })()
-  const grpFirstLp = (grpFirstTariff?.logic_parameters ?? {}) as R
+  const mrpFirstLp = (mrpFirstTariff?.logic_parameters ?? {}) as R
 
   return (
     <div className="space-y-4">
       {contracts.length === 0 && (<>
         <EmptyState>No contracts found</EmptyState>
 
-        {/* GRP section renders even without contracts */}
-        <GRPSection
+        {/* MRP section renders even without contracts */}
+        <MRPSection
           projectId={pid}
           orgId={data.project.organization_id as number}
           codDate={data.project.cod_date as string | null | undefined}
-          firstTariff={grpFirstTariff}
-          firstLp={grpFirstLp}
-          baselineGrp={data.baseline_grp ?? []}
-          initialMonthly={grpMonthly}
-          initialAnnual={grpAnnual}
-          initialTokens={grpTokens}
+          firstTariff={mrpFirstTariff}
+          firstLp={mrpFirstLp}
+          baselineMrp={data.baseline_mrp ?? []}
+          initialMonthly={mrpMonthly}
+          initialAnnual={mrpAnnual}
+          initialTokens={mrpTokens}
           onSaved={onSaved}
           editMode={editMode}
         />
@@ -873,7 +873,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
                     const tLp = (t.logic_parameters ?? {}) as R
                     const discPctDisplay = tLp.discount_pct != null ? `${Number((Number(tLp.discount_pct) * 100).toFixed(2)).toString().replace(/\.?0+$/, '')}%` : ''
                     const basisOverride = isRebasedTariff && discPctDisplay
-                      ? `GRP per kWh less ${discPctDisplay} solar discount, bounded by floor/ceiling (USD), converted at monthly FX rate`
+                      ? `MRP per kWh less ${discPctDisplay} solar discount, bounded by floor/ceiling (USD), converted at monthly FX rate`
                       : null
                     return (
                     <div className="overflow-x-auto">
@@ -1264,17 +1264,17 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, grpMonth
               )}
             </>)}
 
-            {/* Section 5: Grid Reference Price — right after Escalation Rules */}
-            <GRPSection
+            {/* Section 5: Market Reference Price — right after Escalation Rules */}
+            <MRPSection
               projectId={pid}
               orgId={data.project.organization_id as number}
               codDate={data.project.cod_date as string | null | undefined}
               firstTariff={firstTariff}
               firstLp={firstLp}
-              baselineGrp={data.baseline_grp ?? []}
-              initialMonthly={grpMonthly}
-              initialAnnual={grpAnnual}
-              initialTokens={grpTokens}
+              baselineMrp={data.baseline_mrp ?? []}
+              initialMonthly={mrpMonthly}
+              initialAnnual={mrpAnnual}
+              initialTokens={mrpTokens}
               onSaved={onSaved}
               editMode={editMode}
             />

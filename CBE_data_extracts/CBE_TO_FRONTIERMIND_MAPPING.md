@@ -2246,3 +2246,65 @@ WHERE p.sage_id IN ('KAS01', 'NBL01', 'LOI01')
 GROUP BY p.sage_id;
 -- Expected: KAS01 (4 lines, 36 aggregates), NBL01 (8 lines, 34 aggregates), LOI01 (3 lines, 24 aggregates)
 ```
+
+---
+
+## 21. GRP → MRP Terminology Rename (Migration 050)
+
+**Date:** 2026-03-04
+**Migration:** `database/migrations/050_rename_grp_to_mrp.sql`
+
+### Summary
+"Grid Reference Price" (GRP) has been renamed to "Market Reference Price" (MRP) across the entire application. This is a terminology-only change — no logic changes.
+
+### Affected Mappings
+
+| Old Term | New Term | Scope |
+|----------|----------|-------|
+| `calculated_grp_per_kwh` | `calculated_mrp_per_kwh` | `reference_price` column |
+| `discounted_grp_local` | `discounted_mrp_local` | `tariff_monthly_rate` column |
+| `grp_method` | `mrp_method` | `clause_tariff.logic_parameters` JSONB key |
+| `grp_included_components` | `mrp_included_components` | `clause_tariff.logic_parameters` JSONB key |
+| `grp_excluded_components` | `mrp_excluded_components` | `clause_tariff.logic_parameters` JSONB key |
+| `grp_time_window_start` | `mrp_time_window_start` | `clause_tariff.logic_parameters` JSONB key |
+| `grp_per_kwh` | `mrp_per_kwh` | `clause_tariff.logic_parameters` JSONB key |
+| `grp_upload` | `mrp_upload` | `submission_token.submission_type` value |
+| `grp-uploads/` | `mrp-uploads/` | S3 key prefix |
+
+### API Route Changes
+
+| Old Route | New Route |
+|-----------|-----------|
+| `POST /api/notifications/grp-collection` | `POST /api/notifications/mrp-collection` |
+| `POST /api/projects/{id}/grp-observations` | `POST /api/projects/{id}/mrp-observations` |
+| `POST /api/projects/{id}/grp-aggregate` | `POST /api/projects/{id}/mrp-aggregate` |
+| `PATCH /api/projects/{id}/grp-observations/{obsId}` | `PATCH /api/projects/{id}/mrp-observations/{obsId}` |
+
+### Backend File Renames
+
+| Old Path | New Path |
+|----------|----------|
+| `models/grp.py` | `models/mrp.py` |
+| `api/grp.py` | `api/mrp.py` |
+| `services/grp/extraction_service.py` | `services/mrp/extraction_service.py` |
+| `services/calculations/grid_reference_price.py` | `services/calculations/market_reference_price.py` |
+| `services/prompts/grp_extraction_prompt.py` | `services/prompts/mrp_extraction_prompt.py` |
+
+### Class/Type Renames
+
+| Old Name | New Name |
+|----------|----------|
+| `GRPObservation` | `MRPObservation` |
+| `GRPExtractionService` | `MRPExtractionService` |
+| `GRPExtractionError` | `MRPExtractionError` |
+| `GRPCollectionRequest` | `MRPCollectionRequest` |
+| `GRPCollectionResponse` | `MRPCollectionResponse` |
+| `AggregateGRPRequest` | `AggregateMRPRequest` |
+| `AggregateGRPResponse` | `AggregateMRPResponse` |
+| `BaseGRPCalculator` | `BaseMRPCalculator` |
+| `GRPSection` (React) | `MRPSection` (React) |
+
+### Notes
+- Prior sections in this document reference GRP terminology — those represent the historical state at time of writing
+- All new code and documentation should use "MRP" / "Market Reference Price"
+- The GRP → MRP formula is unchanged: `effective = MAX(floor_local, MIN(MRP × (1 - discount), ceiling_local))`

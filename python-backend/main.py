@@ -47,7 +47,7 @@ from api.oauth import router as oauth_router
 from api.notifications import router as notifications_router
 from api.submissions import router as submissions_router
 from api.onboarding import router as onboarding_router
-from api.grp import router as grp_router
+from api.mrp import router as mrp_router
 from api.spreadsheet import router as spreadsheet_router
 from api.billing import router as billing_router
 from api.performance import router as performance_router
@@ -130,7 +130,7 @@ app.include_router(oauth_router)
 app.include_router(notifications_router)
 app.include_router(submissions_router)
 app.include_router(onboarding_router)
-app.include_router(grp_router)
+app.include_router(mrp_router)
 app.include_router(spreadsheet_router)
 app.include_router(billing_router)
 app.include_router(performance_router)

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Populate monthly GRP (Grid Reference Price) observations from the Market Ref Pricing workbook.
+Populate monthly MRP (Market Reference Price) observations from the Market Ref Pricing workbook.
 
 Parses per-project sheets from 'Sage Contract Extracts market Ref pricing data.xlsx'
 and upserts into the reference_price table.
@@ -9,11 +9,11 @@ Usage:
     cd python-backend
 
     # Single project
-    python scripts/populate_grp_from_excel.py --project KAS01
-    python scripts/populate_grp_from_excel.py --project KAS01 --dry-run
+    python scripts/populate_mrp_from_excel.py --project KAS01
+    python scripts/populate_mrp_from_excel.py --project KAS01 --dry-run
 
     # All projects in workbook
-    python scripts/populate_grp_from_excel.py --all --dry-run
+    python scripts/populate_mrp_from_excel.py --all --dry-run
 """
 
 import argparse
@@ -39,7 +39,7 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-logger = logging.getLogger("populate_grp")
+logger = logging.getLogger("populate_mrp")
 
 # Default Excel file path (relative to project root)
 DEFAULT_EXCEL_PATH = os.path.join(
@@ -132,7 +132,7 @@ def populate_project(
     dry_run: bool = False,
 ) -> dict:
     """
-    Parse and upsert GRP observations for a single project.
+    Parse and upsert MRP observations for a single project.
 
     Returns summary dict with counts.
     """
@@ -153,16 +153,16 @@ def populate_project(
 
     # 2. Parse Excel
     try:
-        observations = parser.parse_grp_monthly(sage_id)
+        observations = parser.parse_mrp_monthly(sage_id)
     except ValueError as e:
         logger.warning(f"[{sage_id}] {e} — skipping")
         return {"sage_id": sage_id, "status": "skipped", "reason": str(e)}
 
     if not observations:
-        logger.warning(f"[{sage_id}] No GRP observations parsed — skipping")
+        logger.warning(f"[{sage_id}] No MRP observations parsed — skipping")
         return {"sage_id": sage_id, "status": "skipped", "reason": "no_observations"}
 
-    logger.info(f"[{sage_id}] Parsed {len(observations)} monthly GRP observations")
+    logger.info(f"[{sage_id}] Parsed {len(observations)} monthly MRP observations")
 
     # 3. Compute operating years and prepare rows
     rows_by_year: dict[int, list] = {}
@@ -174,11 +174,11 @@ def populate_project(
     # Print summary
     for oy in sorted(rows_by_year.keys()):
         months = [o["billing_month"] for o in rows_by_year[oy]]
-        grps = [o["grp_per_kwh"] for o in rows_by_year[oy]]
+        mrps = [o["mrp_per_kwh"] for o in rows_by_year[oy]]
         logger.info(
             f"  OY {oy}: {len(months)} months "
             f"({months[0]}..{months[-1]}), "
-            f"GRP range {min(grps):.4f}..{max(grps):.4f}"
+            f"MRP range {min(mrps):.4f}..{max(mrps):.4f}"
         )
 
     if dry_run:
@@ -212,7 +212,7 @@ def populate_project(
                     INSERT INTO reference_price (
                         project_id, organization_id, operating_year,
                         period_start, period_end,
-                        calculated_grp_per_kwh, currency_id,
+                        calculated_mrp_per_kwh, currency_id,
                         observation_type, source_metadata, verification_status
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s,
@@ -220,7 +220,7 @@ def populate_project(
                     )
                     ON CONFLICT (project_id, observation_type, period_start)
                     DO UPDATE SET
-                        calculated_grp_per_kwh = EXCLUDED.calculated_grp_per_kwh,
+                        calculated_mrp_per_kwh = EXCLUDED.calculated_mrp_per_kwh,
                         currency_id = EXCLUDED.currency_id,
                         operating_year = EXCLUDED.operating_year,
                         period_end = EXCLUDED.period_end,
@@ -234,7 +234,7 @@ def populate_project(
                     obs["operating_year"],
                     period_start,
                     period_end,
-                    obs["grp_per_kwh"],
+                    obs["mrp_per_kwh"],
                     project["currency_id"],
                     json.dumps(source_metadata),
                 ))
@@ -282,7 +282,7 @@ def populate_project(
 
 
 def main():
-    ap = argparse.ArgumentParser(description="Populate monthly GRP from Market Ref Pricing workbook")
+    ap = argparse.ArgumentParser(description="Populate monthly MRP from Market Ref Pricing workbook")
     group = ap.add_mutually_exclusive_group(required=True)
     group.add_argument("--project", type=str, help="Single sage_id to populate (e.g. KAS01)")
     group.add_argument("--all", action="store_true", help="Populate all projects in workbook")

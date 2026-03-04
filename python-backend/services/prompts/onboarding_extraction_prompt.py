@@ -21,7 +21,7 @@ Extract the following information from the PPA text and return it as a JSON obje
 - "Agreed Exchange Rate" definition (exact text)
 
 ### Annexure C — Tariff / Pricing
-- Core pricing formula (exact clause text describing how the payment/tariff is calculated, e.g. "Payment = (1 - Solar Discount) × Energy Output × GRP, subject to floor/ceiling bounds")
+- Core pricing formula (exact clause text describing how the payment/tariff is calculated, e.g. "Payment = (1 - Solar Discount) × Energy Output × MRP, subject to floor/ceiling bounds")
 - Solar discount percentage (as decimal, e.g. 0.21 for 21%)
 - Floor rate (minimum solar price per kWh)
 - Ceiling rate (maximum solar price per kWh)
@@ -29,14 +29,14 @@ Extract the following information from the PPA text and return it as a JSON obje
   - Which components escalate and which are fixed
   - Escalation rate and frequency
   - Start year for escalation
-- Grid Reference Price (GRP) method/formula
-- GRP sub-parameters:
-  - Whether GRP excludes VAT
-  - Whether GRP excludes demand charges
-  - Whether GRP excludes savings charges
-  - Time window for GRP calculation (start/end hours, e.g. "06:00" to "18:00")
-  - Number of days after month-end for GRP calculation
-  - Number of days for GRP verification deadline
+- Market Reference Price (MRP) method/formula
+- MRP sub-parameters:
+  - Whether MRP excludes VAT
+  - Whether MRP excludes demand charges
+  - Whether MRP excludes savings charges
+  - Time window for MRP calculation (start/end hours, e.g. "06:00" to "18:00")
+  - Number of days after month-end for MRP calculation
+  - Number of days for MRP verification deadline
 - Payment terms (e.g. NET_30)
 - Default interest rate for late payment
 
@@ -79,7 +79,7 @@ Return a JSON object with this exact structure:
         "start_year": <int>
       }
     ],
-    "grp": {
+    "mrp": {
       "exclude_vat": <boolean or null>,
       "exclude_demand_charges": <boolean or null>,
       "exclude_savings_charges": <boolean or null>,
@@ -129,7 +129,7 @@ Return a JSON object with this exact structure:
     "excused_events": <0.0-1.0>,
     "payment_terms": <0.0-1.0>,
     "available_energy_method": <0.0-1.0>,
-    "grp_parameters": <0.0-1.0>
+    "mrp_parameters": <0.0-1.0>
   }
 }
 ```

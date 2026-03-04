@@ -2,17 +2,17 @@
 Pricing Rule — calculates billable amounts for GRID tariff contracts.
 
 GRID tariff billing formula:
-    Rate = MAX(floor, MIN((1 - discount) x GRP, ceiling))
+    Rate = MAX(floor, MIN((1 - discount) x MRP, ceiling))
     Amount = Rate x Energy Output
 
 This rule reads clause_tariff.logic_parameters for pricing parameters
-and reference_price for the current GRP.
+and reference_price for the current MRP.
 
 Pricing parameters stored in clause_tariff.logic_parameters:
 - discount_pct: Solar discount (0-1)
 - floor_rate: Minimum rate per kWh
 - ceiling_rate: Maximum rate per kWh
-- grp_method: How GRP is calculated (for reference)
+- mrp_method: How MRP is calculated (for reference)
 """
 
 from datetime import datetime
@@ -33,7 +33,7 @@ class PricingRule(BaseRule):
     Evaluates GRID tariff pricing and calculates expected billable amount.
 
     This rule compares:
-    - Expected amount (from our calculation using GRP, discount, floor/ceiling)
+    - Expected amount (from our calculation using MRP, discount, floor/ceiling)
     - Against what was invoiced (if available)
 
     For pure calculation (no comparison), returns the expected amount.
@@ -57,7 +57,7 @@ class PricingRule(BaseRule):
         - discount_pct: Solar discount (0-1)
         - floor_rate: Floor rate per kWh
         - ceiling_rate: Ceiling rate per kWh
-        - grp_per_kwh: Current Grid Reference Price per kWh
+        - mrp_per_kwh: Current Market Reference Price per kWh
 
         Returns:
             RuleResult where:
@@ -69,11 +69,11 @@ class PricingRule(BaseRule):
         discount_pct = Decimal(str(self.params.get('discount_pct', 0)))
         floor_rate = Decimal(str(self.params.get('floor_rate', 0)))
         ceiling_rate = Decimal(str(self.params.get('ceiling_rate', Decimal('999999'))))
-        grp_per_kwh = Decimal(str(self.params.get('grp_per_kwh', 0)))
+        mrp_per_kwh = Decimal(str(self.params.get('mrp_per_kwh', 0)))
 
-        if grp_per_kwh <= 0:
+        if mrp_per_kwh <= 0:
             logger.warning(
-                f"Clause {self.clause_id}: grp_per_kwh not set or zero — "
+                f"Clause {self.clause_id}: mrp_per_kwh not set or zero — "
                 "cannot calculate GRID tariff pricing"
             )
             return RuleResult(
@@ -84,11 +84,11 @@ class PricingRule(BaseRule):
                 threshold_value=0,
                 shortfall=0,
                 ld_amount=Decimal('0.00'),
-                details={'note': 'grp_per_kwh not available'}
+                details={'note': 'mrp_per_kwh not available'}
             )
 
         # Calculate effective rate
-        discounted_rate = (Decimal('1') - discount_pct) * grp_per_kwh
+        discounted_rate = (Decimal('1') - discount_pct) * mrp_per_kwh
         effective_rate = max(floor_rate, min(discounted_rate, ceiling_rate))
 
         # Calculate energy output from meter data
@@ -110,7 +110,7 @@ class PricingRule(BaseRule):
             breach = variance_pct > tolerance_pct
 
         details = {
-            'grp_per_kwh': float(grp_per_kwh),
+            'mrp_per_kwh': float(mrp_per_kwh),
             'discount_pct': float(discount_pct),
             'discounted_rate': float(discounted_rate),
             'floor_rate': float(floor_rate),
@@ -129,7 +129,7 @@ class PricingRule(BaseRule):
 
         logger.info(
             f"Pricing clause {self.clause_id}: "
-            f"GRP={grp_per_kwh:.6f}, discount={discount_pct:.2%}, "
+            f"MRP={mrp_per_kwh:.6f}, discount={discount_pct:.2%}, "
             f"rate={effective_rate:.6f} ({details['rate_binding']}), "
             f"energy={energy_kwh:.0f}kWh, amount={expected_amount:.2f}"
         )

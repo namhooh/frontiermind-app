@@ -1,13 +1,13 @@
 """
-GRP Extraction Service.
+MRP Extraction Service.
 
 Handles OCR extraction of utility invoices, Claude-based structured extraction
-of line items, GRP calculation, and storage as monthly reference_price observations.
+of line items, MRP calculation, and storage as monthly reference_price observations.
 
 Pipeline:
 1. OCR via LlamaParse
 2. Structured extraction via Claude
-3. GRP calculation via existing calculator
+3. MRP calculation via existing calculator
 4. Upsert into reference_price as monthly observation
 """
 
@@ -25,14 +25,14 @@ from pydantic import BaseModel, Field
 
 from db.database import get_db_connection
 from psycopg2.extras import Json
-from services.calculations.grid_reference_price import calculate_grp
-from services.prompts.grp_extraction_prompt import GRP_EXTRACTION_PROMPT
+from services.calculations.market_reference_price import calculate_mrp
+from services.prompts.mrp_extraction_prompt import MRP_EXTRACTION_PROMPT
 
 logger = logging.getLogger(__name__)
 
 
-class GRPExtractionError(Exception):
-    """Raised when GRP extraction fails."""
+class MRPExtractionError(Exception):
+    """Raised when MRP extraction fails."""
     pass
 
 
@@ -65,13 +65,13 @@ class ExtractionResult(BaseModel):
     extraction_confidence: str = "medium"
 
 
-class GRPExtractionService:
-    """Extract utility invoice data, calculate GRP, and store as monthly observation."""
+class MRPExtractionService:
+    """Extract utility invoice data, calculate MRP, and store as monthly observation."""
 
     def __init__(self):
         llama_api_key = os.getenv("LLAMA_CLOUD_API_KEY")
         if not llama_api_key:
-            raise GRPExtractionError("LLAMA_CLOUD_API_KEY not found in environment")
+            raise MRPExtractionError("LLAMA_CLOUD_API_KEY not found in environment")
 
         self.llama_parser = LlamaParse(
             api_key=llama_api_key,
@@ -98,7 +98,7 @@ class GRPExtractionService:
         Args:
             file_bytes: Raw file content (PDF/image).
             filename: Original filename for logging.
-            project_id: Project for this GRP observation.
+            project_id: Project for this MRP observation.
             org_id: Organization ID.
             billing_month: First of month, e.g. "2025-10-01".
             operating_year: Contract operating year.
@@ -107,9 +107,9 @@ class GRPExtractionService:
             submission_response_id: Link to submission_response if via token.
 
         Returns:
-            Dict with observation_id, grp_per_kwh, totals, and line_items_count.
+            Dict with observation_id, mrp_per_kwh, totals, and line_items_count.
         """
-        logger.info(f"GRP extraction starting: {filename} for project {project_id}, month {billing_month}")
+        logger.info(f"MRP extraction starting: {filename} for project {project_id}, month {billing_month}")
 
         # Step 1: OCR
         ocr_text = self._ocr_document(file_bytes, filename)
@@ -144,19 +144,19 @@ class GRPExtractionService:
             )
 
         if not line_items:
-            raise GRPExtractionError("No line items extracted from invoice")
+            raise MRPExtractionError("No line items extracted from invoice")
 
-        # Step 3: Calculate GRP using existing calculator
-        # Convert extracted line items to the format expected by calculate_grp
+        # Step 3: Calculate MRP using existing calculator
+        # Convert extracted line items to the format expected by calculate_mrp
         calculator_items = self._to_calculator_format(line_items)
 
-        # Fetch logic_parameters for GRP method
-        logic_parameters = self._fetch_grp_logic_parameters(project_id)
+        # Fetch logic_parameters for MRP method
+        logic_parameters = self._fetch_mrp_logic_parameters(project_id)
 
-        grp_value = calculate_grp(logic_parameters, calculator_items)
-        if grp_value is None:
-            raise GRPExtractionError(
-                "GRP calculation returned None — no VARIABLE_ENERGY items with kWh found"
+        mrp_value = calculate_mrp(logic_parameters, calculator_items)
+        if mrp_value is None:
+            raise MRPExtractionError(
+                "MRP calculation returned None — no VARIABLE_ENERGY items with kWh found"
             )
 
         # Calculate totals for storage
@@ -177,7 +177,7 @@ class GRPExtractionService:
             org_id=org_id,
             operating_year=operating_year,
             billing_month=billing_month,
-            grp_value=grp_value,
+            mrp_value=mrp_value,
             total_variable_charges=total_variable_charges,
             total_kwh=total_kwh,
             s3_path=s3_path,
@@ -190,7 +190,7 @@ class GRPExtractionService:
 
         result = {
             "observation_id": observation_id,
-            "grp_per_kwh": float(grp_value),
+            "mrp_per_kwh": float(mrp_value),
             "total_variable_charges": float(total_variable_charges),
             "total_kwh_invoiced": float(total_kwh),
             "line_items_count": len(line_items),
@@ -202,8 +202,8 @@ class GRPExtractionService:
             result["period_mismatch"] = metadata["period_mismatch"]
 
         logger.info(
-            f"GRP stored: observation_id={observation_id}, "
-            f"grp={grp_value:.6f}/kWh, items={len(line_items)}"
+            f"MRP stored: observation_id={observation_id}, "
+            f"mrp={mrp_value:.6f}/kWh, items={len(line_items)}"
         )
 
         return result
@@ -214,7 +214,7 @@ class GRPExtractionService:
 
     def _ocr_document(self, file_bytes: bytes, filename: str) -> str:
         """Extract text from PDF/image via LlamaParse."""
-        tmp_dir = Path("/tmp/grp_extraction")
+        tmp_dir = Path("/tmp/mrp_extraction")
         tmp_dir.mkdir(exist_ok=True)
         # Use UUID-based name to prevent path traversal from user-supplied filenames
         safe_ext = Path(filename).suffix.lower() if filename else ".pdf"
@@ -225,7 +225,7 @@ class GRPExtractionService:
             documents = self.llama_parser.load_data(str(tmp_path))
             return "\n\n".join(doc.text for doc in documents)
         except Exception as e:
-            raise GRPExtractionError(f"OCR failed: {e}") from e
+            raise MRPExtractionError(f"OCR failed: {e}") from e
         finally:
             if tmp_path.exists():
                 tmp_path.unlink()
@@ -236,7 +236,7 @@ class GRPExtractionService:
 
     def _extract_line_items(self, ocr_text: str) -> Dict[str, Any]:
         """Use Claude to extract structured line items from OCR text."""
-        prompt = GRP_EXTRACTION_PROMPT.replace("{ocr_text}", ocr_text)
+        prompt = MRP_EXTRACTION_PROMPT.replace("{ocr_text}", ocr_text)
 
         try:
             response = self.anthropic_client.messages.create(
@@ -257,16 +257,16 @@ class GRPExtractionService:
             raw_data = json.loads(json_text.strip())
 
         except json.JSONDecodeError as e:
-            raise GRPExtractionError(f"Failed to parse Claude extraction response: {e}") from e
+            raise MRPExtractionError(f"Failed to parse Claude extraction response: {e}") from e
         except Exception as e:
-            raise GRPExtractionError(f"Claude extraction failed: {e}") from e
+            raise MRPExtractionError(f"Claude extraction failed: {e}") from e
 
         # Validate extraction output through Pydantic
         try:
             validated = ExtractionResult.model_validate(raw_data)
             return validated.model_dump()
         except Exception as e:
-            raise GRPExtractionError(
+            raise MRPExtractionError(
                 f"Claude extraction output failed schema validation: {e}"
             ) from e
 
@@ -352,7 +352,7 @@ class GRPExtractionService:
 
     @staticmethod
     def _to_calculator_format(line_items: List[Dict]) -> List[Dict]:
-        """Convert extracted line items to the format expected by calculate_grp."""
+        """Convert extracted line items to the format expected by calculate_mrp."""
         return [
             {
                 "invoice_line_item_type_code": item.get("type_code", ""),
@@ -367,7 +367,7 @@ class GRPExtractionService:
     # =========================================================================
 
     @staticmethod
-    def _fetch_grp_logic_parameters(project_id: int) -> Dict:
+    def _fetch_mrp_logic_parameters(project_id: int) -> Dict:
         """Fetch logic_parameters from the REBASED_MARKET_PRICE clause_tariff."""
         with get_db_connection() as conn:
             with conn.cursor() as cur:
@@ -385,11 +385,11 @@ class GRPExtractionService:
                 row = cur.fetchone()
                 if not row or not row["logic_parameters"]:
                     # Default to utility_variable_charges_tou if no tariff configured
-                    return {"grp_method": "utility_variable_charges_tou"}
+                    return {"mrp_method": "utility_variable_charges_tou"}
                 params = row["logic_parameters"]
-                # Fill in default grp_method when DB value is null
-                if not params.get("grp_method"):
-                    params["grp_method"] = "utility_variable_charges_tou"
+                # Fill in default mrp_method when DB value is null
+                if not params.get("mrp_method"):
+                    params["mrp_method"] = "utility_variable_charges_tou"
                 return params
 
     # =========================================================================
@@ -402,7 +402,7 @@ class GRPExtractionService:
         org_id: int,
         operating_year: int,
         billing_month: str,
-        grp_value: Decimal,
+        mrp_value: Decimal,
         total_variable_charges: Decimal,
         total_kwh: Decimal,
         s3_path: str,
@@ -450,7 +450,7 @@ class GRPExtractionService:
                     INSERT INTO reference_price (
                         project_id, organization_id, operating_year,
                         period_start, period_end,
-                        calculated_grp_per_kwh, currency_id,
+                        calculated_mrp_per_kwh, currency_id,
                         total_variable_charges, total_kwh_invoiced,
                         observation_type, source_document_path, source_document_hash,
                         source_metadata, verification_status, submission_response_id
@@ -459,7 +459,7 @@ class GRPExtractionService:
                         'monthly', %s, %s, %s, 'pending', %s
                     )
                     ON CONFLICT (project_id, observation_type, period_start) DO UPDATE SET
-                        calculated_grp_per_kwh = EXCLUDED.calculated_grp_per_kwh,
+                        calculated_mrp_per_kwh = EXCLUDED.calculated_mrp_per_kwh,
                         total_variable_charges = EXCLUDED.total_variable_charges,
                         total_kwh_invoiced = EXCLUDED.total_kwh_invoiced,
                         source_document_path = EXCLUDED.source_document_path,
@@ -477,7 +477,7 @@ class GRPExtractionService:
                         operating_year,
                         period_start,
                         period_end,
-                        grp_value,
+                        mrp_value,
                         currency_id,
                         total_variable_charges,
                         total_kwh,

@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """
-Backfill grp_method into clause_tariff.logic_parameters for projects
-that went through the structured pipeline (missing grp_method).
+Backfill mrp_method into clause_tariff.logic_parameters for projects
+that went through the structured pipeline (missing mrp_method).
 
 Mapping:
   FLOATING_GRID / GRID_DISCOUNT_BOUNDED → utility_variable_charges_tou
   FLOATING_GENERATOR                    → utility_total_charges
-  FIXED                                 → no GRP needed (skip)
+  FIXED                                 → no MRP needed (skip)
 
 Usage:
     cd python-backend
-    python scripts/backfill_grp_method.py
+    python scripts/backfill_mrp_method.py
 """
 
 import json
@@ -31,10 +31,10 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
-logger = logging.getLogger("backfill_grp_method")
+logger = logging.getLogger("backfill_mrp_method")
 
-# Mapping from energy_sale_type code → grp_method
-GRP_METHOD_MAP = {
+# Mapping from energy_sale_type code → mrp_method
+MRP_METHOD_MAP = {
     "FLOATING_GRID": "utility_variable_charges_tou",
     "FLOATING_GENERATOR": "utility_total_charges",
 }
@@ -52,7 +52,7 @@ def main():
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                # Find clause_tariff rows missing grp_method
+                # Find clause_tariff rows missing mrp_method
                 cur.execute("""
                     SELECT ct.id, p.sage_id,
                            ct.logic_parameters,
@@ -62,13 +62,13 @@ def main():
                     JOIN project p ON c.project_id = p.id
                     LEFT JOIN energy_sale_type est ON ct.energy_sale_type_id = est.id
                     WHERE (ct.logic_parameters IS NULL
-                           OR ct.logic_parameters->>'grp_method' IS NULL)
+                           OR ct.logic_parameters->>'mrp_method' IS NULL)
                     ORDER BY p.sage_id
                 """)
                 rows = cur.fetchall()
 
                 if not rows:
-                    logger.info("All clause_tariff rows already have grp_method. Nothing to do.")
+                    logger.info("All clause_tariff rows already have mrp_method. Nothing to do.")
                     return
 
                 updated = 0
@@ -80,25 +80,25 @@ def main():
                     est_code = row["energy_sale_type_code"]
                     lp = row["logic_parameters"] or {}
 
-                    grp_method = GRP_METHOD_MAP.get(est_code)
-                    if not grp_method:
+                    mrp_method = MRP_METHOD_MAP.get(est_code)
+                    if not mrp_method:
                         # Also check formula_type already in logic_parameters
                         ft = lp.get("formula_type", "")
                         if ft in ("GRID_DISCOUNT_BOUNDED", "FLOATING_GRID"):
-                            grp_method = "utility_variable_charges_tou"
+                            mrp_method = "utility_variable_charges_tou"
                         elif ft == "FLOATING_GENERATOR":
-                            grp_method = "utility_total_charges"
+                            mrp_method = "utility_total_charges"
 
-                    if not grp_method:
+                    if not mrp_method:
                         logger.info(
                             f"  SKIP ct_id={ct_id} sage_id={sage_id}: "
-                            f"energy_sale_type={est_code}, no GRP method applicable"
+                            f"energy_sale_type={est_code}, no MRP method applicable"
                         )
                         skipped += 1
                         continue
 
-                    # Merge grp_method (and formula_type if missing)
-                    patch = {"grp_method": grp_method}
+                    # Merge mrp_method (and formula_type if missing)
+                    patch = {"mrp_method": mrp_method}
                     if not lp.get("formula_type") and est_code in FORMULA_TYPE_MAP:
                         patch["formula_type"] = FORMULA_TYPE_MAP[est_code]
 
@@ -109,7 +109,7 @@ def main():
                             UPDATE clause_tariff
                             SET logic_parameters = logic_parameters || %s::jsonb
                             WHERE id = %s
-                            RETURNING id, logic_parameters->>'grp_method' AS grp_method
+                            RETURNING id, logic_parameters->>'mrp_method' AS mrp_method
                             """,
                             (json.dumps(patch), ct_id),
                         )
@@ -120,7 +120,7 @@ def main():
                             UPDATE clause_tariff
                             SET logic_parameters = %s::jsonb
                             WHERE id = %s
-                            RETURNING id, logic_parameters->>'grp_method' AS grp_method
+                            RETURNING id, logic_parameters->>'mrp_method' AS mrp_method
                             """,
                             (json.dumps(patch), ct_id),
                         )
@@ -128,7 +128,7 @@ def main():
                     result = cur.fetchone()
                     logger.info(
                         f"  UPDATED ct_id={result['id']} sage_id={sage_id}: "
-                        f"grp_method={result['grp_method']} (patch={patch})"
+                        f"mrp_method={result['mrp_method']} (patch={patch})"
                     )
                     updated += 1
 

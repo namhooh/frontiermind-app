@@ -7,7 +7,7 @@ import { ArrowLeft, Loader2, Pencil, PencilOff } from 'lucide-react'
 import { IS_DEMO } from '@/lib/demoMode'
 import { toast } from 'sonner'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/app/components/ui/tabs'
-import { adminClient, type ProjectDashboardResponse, type GRPObservation, type SubmissionTokenItem } from '@/lib/api/adminClient'
+import { adminClient, type ProjectDashboardResponse, type MRPObservation, type SubmissionTokenItem } from '@/lib/api/adminClient'
 import { fmtNum } from './utils/formatters'
 import { toOpts } from './utils/constants'
 import { ProjectSidebar } from './components/ProjectSidebar'
@@ -36,27 +36,27 @@ function ProjectsPageContent() {
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [editMode, setEditMode] = useState(false)
-  const [grpMonthly, setGrpMonthly] = useState<GRPObservation[]>([])
-  const [grpAnnual, setGrpAnnual] = useState<GRPObservation[]>([])
-  const [grpTokens, setGrpTokens] = useState<SubmissionTokenItem[]>([])
+  const [mrpMonthly, setMrpMonthly] = useState<MRPObservation[]>([])
+  const [mrpAnnual, setMrpAnnual] = useState<MRPObservation[]>([])
+  const [mrpTokens, setMrpTokens] = useState<SubmissionTokenItem[]>([])
 
-  /** Fetch GRP post-COD data for a given project + org */
-  const fetchGrpData = useCallback(async (pid: number, orgId: number) => {
+  /** Fetch MRP post-COD data for a given project + org */
+  const fetchMrpData = useCallback(async (pid: number, orgId: number) => {
     const [, monthlyRes, annualRes, tokensRes] = await Promise.all([
-      adminClient.refreshGRP(pid, orgId).catch(() => {}),
-      adminClient.listGRPObservations(pid, orgId, { observation_type: 'monthly' })
-        .catch(() => ({ observations: [] as GRPObservation[], total: 0 })),
-      adminClient.listGRPObservations(pid, orgId, { observation_type: 'annual' })
-        .catch(() => ({ observations: [] as GRPObservation[], total: 0 })),
-      adminClient.listTokens(orgId, { project_id: pid, submission_type: 'grp_upload', include_expired: true })
+      adminClient.refreshMRP(pid, orgId).catch(() => {}),
+      adminClient.listMRPObservations(pid, orgId, { observation_type: 'monthly' })
+        .catch(() => ({ observations: [] as MRPObservation[], total: 0 })),
+      adminClient.listMRPObservations(pid, orgId, { observation_type: 'annual' })
+        .catch(() => ({ observations: [] as MRPObservation[], total: 0 })),
+      adminClient.listTokens(orgId, { project_id: pid, submission_type: 'mrp_upload', include_expired: true })
         .catch((err) => {
-          console.error('Failed to fetch GRP tokens:', err)
+          console.error('Failed to fetch MRP tokens:', err)
           return { tokens: [] as SubmissionTokenItem[] }
         }),
     ])
-    setGrpMonthly(monthlyRes.observations.filter(o => o.operating_year !== 0))
-    setGrpAnnual(annualRes.observations)
-    setGrpTokens(tokensRes.tokens)
+    setMrpMonthly(monthlyRes.observations.filter(o => o.operating_year !== 0))
+    setMrpAnnual(annualRes.observations)
+    setMrpTokens(tokensRes.tokens)
   }, [])
 
   const refreshDashboard = useCallback(async () => {
@@ -65,11 +65,11 @@ function ProjectsPageContent() {
       const data = await adminClient.getProjectDashboard(selectedProjectId)
       setDashboard(data)
       const orgId = data.project.organization_id as number
-      await fetchGrpData(selectedProjectId, orgId)
+      await fetchMrpData(selectedProjectId, orgId)
     } catch {
       // Silently fail on refresh — data shown is just stale
     }
-  }, [selectedProjectId, fetchGrpData])
+  }, [selectedProjectId, fetchMrpData])
 
   // Load project from URL ?id= on mount
   useEffect(() => {
@@ -98,7 +98,7 @@ function ProjectsPageContent() {
       const data = await adminClient.getProjectDashboard(projectId)
       setDashboard(data)
       const orgId = data.project.organization_id as number
-      await fetchGrpData(projectId, orgId)
+      await fetchMrpData(projectId, orgId)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load project data')
       setDashboard(null)
@@ -309,9 +309,9 @@ function ProjectsPageContent() {
                       onSaved={refreshDashboard}
                       editMode={editMode}
                       projectId={projectId}
-                      grpMonthly={grpMonthly}
-                      grpAnnual={grpAnnual}
-                      grpTokens={grpTokens}
+                      mrpMonthly={mrpMonthly}
+                      mrpAnnual={mrpAnnual}
+                      mrpTokens={mrpTokens}
                     />
                   </TabsContent>
 

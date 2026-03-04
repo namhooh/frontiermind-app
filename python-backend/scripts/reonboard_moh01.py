@@ -74,7 +74,7 @@ def parse_only():
     for f in ["contract_service_type", "energy_sale_type", "escalation_type",
               "billing_currency", "market_ref_currency", "base_rate", "unit",
               "discount_pct", "floor_rate", "ceiling_rate", "escalation_value",
-              "grp_method", "payment_terms"]:
+              "mrp_method", "payment_terms"]:
         print(f"  {f}: {getattr(data, f, None)}")
 
     # NEW: Multi-value service types

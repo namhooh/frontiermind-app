@@ -144,7 +144,7 @@ class ProjectDashboardResponse(BaseModel):
     clauses: List[dict] = Field(default_factory=list)
     amendments: List[dict] = Field(default_factory=list)
     exchange_rates: List[dict] = Field(default_factory=list)
-    baseline_grp: List[dict] = Field(default_factory=list, description="Pre-COD baseline GRP observations (operating_year=0)")
+    baseline_mrp: List[dict] = Field(default_factory=list, description="Pre-COD baseline MRP observations (operating_year=0)")
     contract_lines: List[dict] = Field(default_factory=list, description="Contract lines linking meters to billing products")
     lookups: dict = Field(default_factory=dict)
 
@@ -217,15 +217,15 @@ class TariffPatch(BaseModel):
     lp_floor_rate: Optional[float] = None
     lp_ceiling_rate: Optional[float] = None
     lp_discount_pct: Optional[float] = None
-    lp_grp_method: Optional[str] = None
-    lp_grp_exclude_vat: Optional[bool] = None
-    lp_grp_exclude_demand_charges: Optional[bool] = None
-    lp_grp_exclude_savings_charges: Optional[bool] = None
-    lp_grp_time_window_start: Optional[str] = None
-    lp_grp_time_window_end: Optional[str] = None
-    lp_grp_calculation_due_days: Optional[int] = None
-    lp_grp_verification_deadline_days: Optional[int] = None
-    lp_grp_clause_text: Optional[str] = None
+    lp_mrp_method: Optional[str] = None
+    lp_mrp_exclude_vat: Optional[bool] = None
+    lp_mrp_exclude_demand_charges: Optional[bool] = None
+    lp_mrp_exclude_savings_charges: Optional[bool] = None
+    lp_mrp_time_window_start: Optional[str] = None
+    lp_mrp_time_window_end: Optional[str] = None
+    lp_mrp_calculation_due_days: Optional[int] = None
+    lp_mrp_verification_deadline_days: Optional[int] = None
+    lp_mrp_clause_text: Optional[str] = None
     lp_available_energy_method: Optional[str] = None
     lp_irradiance_threshold_wm2: Optional[float] = None
     lp_interval_minutes: Optional[int] = None
@@ -935,9 +935,9 @@ async def get_project_dashboard(
                               AND operating_year = 0
                         ) AS val
                     ),
-                    baseline_grp_data AS (
+                    baseline_mrp_data AS (
                         SELECT rp.id, rp.period_start, rp.period_end,
-                               rp.calculated_grp_per_kwh, rp.total_variable_charges,
+                               rp.calculated_mrp_per_kwh, rp.total_variable_charges,
                                rp.total_kwh_invoiced, rp.verification_status,
                                rp.source_metadata,
                                rp.operating_year
@@ -1003,7 +1003,7 @@ async def get_project_dashboard(
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM clauses_data d) AS clauses,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM amendments_data d) AS amendments,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM exchange_rates_data d) AS exchange_rates,
-                        (SELECT COALESCE(json_agg(d), '[]'::json) FROM baseline_grp_data d) AS baseline_grp,
+                        (SELECT COALESCE(json_agg(d), '[]'::json) FROM baseline_mrp_data d) AS baseline_mrp,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM contract_lines_data d) AS contract_lines,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM contract_types_lookup d) AS contract_types_lookup,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM contract_statuses_lookup d) AS contract_statuses_lookup,
@@ -1050,7 +1050,7 @@ async def get_project_dashboard(
                 clauses = _parse(row['clauses'])
                 amendments = _parse(row['amendments'])
                 exchange_rates = _parse(row['exchange_rates'])
-                baseline_grp = _parse(row['baseline_grp'])
+                baseline_mrp = _parse(row['baseline_mrp'])
                 contract_lines = _parse(row['contract_lines'])
 
                 lookups = {
@@ -1084,7 +1084,7 @@ async def get_project_dashboard(
                     clauses=clauses,
                     amendments=amendments,
                     exchange_rates=exchange_rates,
-                    baseline_grp=baseline_grp,
+                    baseline_mrp=baseline_mrp,
                     contract_lines=contract_lines,
                     lookups=lookups,
                 )
@@ -1435,7 +1435,7 @@ class MonthlyFXInput(BaseModel):
 
 
 class InvoiceLineItemInput(BaseModel):
-    """Invoice line item for GRP calculation."""
+    """Invoice line item for MRP calculation."""
     line_total_amount: float = Field(..., description="Line total amount in local currency")
     quantity: float = Field(..., description="kWh quantity")
     invoice_line_item_type_code: str = Field(..., description="e.g. VARIABLE_ENERGY, DEMAND, FIXED, TAX")
@@ -1444,8 +1444,8 @@ class InvoiceLineItemInput(BaseModel):
 class RebasedRateRequest(BaseModel):
     """Request body for rebased market price tariff calculation."""
     operating_year: int = Field(..., ge=2, description="Contract operating year (>= 2)")
-    grp_per_kwh: Optional[float] = Field(None, description="Pre-calculated GRP in local currency/kWh")
-    invoice_line_items: Optional[List[InvoiceLineItemInput]] = Field(None, description="Utility invoice line items for GRP calculation")
+    mrp_per_kwh: Optional[float] = Field(None, description="Pre-calculated MRP in local currency/kWh")
+    invoice_line_items: Optional[List[InvoiceLineItemInput]] = Field(None, description="Utility invoice line items for MRP calculation")
     monthly_fx_rates: List[MonthlyFXInput] = Field(..., min_length=1, max_length=12, description="Monthly FX rates (1-12 entries)")
     verification_status: Optional[str] = Field("pending", description="Verification status for reference_price row")
 
@@ -1454,7 +1454,7 @@ class RebasedRateRequest(BaseModel):
     "/projects/{project_id}/calculate-rebased-rate",
     summary="Calculate rebased market price tariff rate",
     description=(
-        "Calculates REBASED_MARKET_PRICE tariff rates using GRP and monthly FX rates. "
+        "Calculates REBASED_MARKET_PRICE tariff rates using MRP and monthly FX rates. "
         "Writes to reference_price, exchange_rate, and tariff_rate. "
         "Idempotent — safe to re-run."
     ),
@@ -1484,7 +1484,7 @@ async def calculate_rebased_rate(
         result = RebasedMarketPriceEngine().calculate_and_store(
             project_id=project_id,
             operating_year=body.operating_year,
-            grp_per_kwh=body.grp_per_kwh,
+            mrp_per_kwh=body.mrp_per_kwh,
             invoice_line_items=line_items,
             monthly_fx_rates=fx_rates,
             verification_status=body.verification_status or "pending",

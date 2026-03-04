@@ -16,7 +16,7 @@ import {
   DialogDescription,
 } from '@/app/components/ui/dialog'
 import { IS_DEMO } from '@/lib/demoMode'
-import type { GRPObservation, SubmissionTokenItem } from '@/lib/api/adminClient'
+import type { MRPObservation, SubmissionTokenItem } from '@/lib/api/adminClient'
 import { adminClient } from '@/lib/api/adminClient'
 import { CollapsibleSection } from './CollapsibleSection'
 import { EditableCell } from './EditableCell'
@@ -31,31 +31,31 @@ function formatBillingMonth(v: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
-// GRPSection — parameters + observations
+// MRPSection — parameters + observations
 // ---------------------------------------------------------------------------
 
-function grpFormatPeriod(dateStr: string): string {
+function mrpFormatPeriod(dateStr: string): string {
   const d = new Date(dateStr + 'T00:00:00')
   return d.toLocaleDateString('en-US', { month: 'short', year: 'numeric' })
 }
 
-function grpFormatNumber(n: number | null | undefined): string {
+function mrpFormatNumber(n: number | null | undefined): string {
   if (n == null) return '-'
   return n.toLocaleString('en-US', { maximumFractionDigits: 2 })
 }
 
-function grpFormatGRP(n: number | null | undefined): string {
+function mrpFormatMRP(n: number | null | undefined): string {
   if (n == null) return '-'
   return n.toLocaleString('en-US', { minimumFractionDigits: 4, maximumFractionDigits: 4 })
 }
 
-function grpStatusBadge(s: string): 'success' | 'warning' | 'destructive' {
+function mrpStatusBadge(s: string): 'success' | 'warning' | 'destructive' {
   if (s === 'jointly_verified') return 'success'
   if (s === 'pending' || s === 'estimated') return 'warning'
   return 'destructive'
 }
 
-function grpStatusLabel(s: string): string {
+function mrpStatusLabel(s: string): string {
   if (s === 'jointly_verified') return 'Verified'
   if (s === 'pending') return 'Pending'
   if (s === 'disputed') return 'Disputed'
@@ -72,13 +72,13 @@ interface TokenDialogState {
   loading: boolean
 }
 
-export function GRPSection({
+export function MRPSection({
   projectId,
   orgId,
   codDate,
   firstTariff,
   firstLp,
-  baselineGrp,
+  baselineMrp,
   initialMonthly,
   initialAnnual,
   initialTokens,
@@ -90,9 +90,9 @@ export function GRPSection({
   codDate?: string | null
   firstTariff: R | undefined
   firstLp: R
-  baselineGrp: R[]
-  initialMonthly: GRPObservation[]
-  initialAnnual: GRPObservation[]
+  baselineMrp: R[]
+  initialMonthly: MRPObservation[]
+  initialAnnual: MRPObservation[]
   initialTokens: SubmissionTokenItem[]
   onSaved?: () => void
   editMode?: boolean
@@ -121,15 +121,15 @@ export function GRPSection({
   // Manual entry dialog state (for disputed observation correction)
   const [showManualEntryDialog, setShowManualEntryDialog] = useState(false)
   const [manualEntryPeriod, setManualEntryPeriod] = useState('')
-  const [manualEntryGrp, setManualEntryGrp] = useState('')
+  const [manualEntryMrp, setManualEntryMrp] = useState('')
   const [manualEntryLoading, setManualEntryLoading] = useState(false)
   const [manualEntryIsBaseline, setManualEntryIsBaseline] = useState(false)
 
-  // Baseline GRP: derive sorted observations, component keys, and weighted average
+  // Baseline MRP: derive sorted observations, component keys, and weighted average
   const baselineData = useMemo(() => {
-    if (baselineGrp.length === 0) return null
+    if (baselineMrp.length === 0) return null
 
-    const sorted = [...baselineGrp].sort(
+    const sorted = [...baselineMrp].sort(
       (a, b) => new Date(String(b.period_start)).getTime() - new Date(String(a.period_start)).getTime()
     )
 
@@ -143,7 +143,7 @@ export function GRPSection({
     }
     const componentKeys = [...componentKeysSet].sort()
 
-    // Compute weighted-average GRP across baseline months
+    // Compute weighted-average MRP across baseline months
     let totalCharges = 0
     let totalKwh = 0
     let simpleSum = 0
@@ -151,22 +151,22 @@ export function GRPSection({
     for (const obs of sorted) {
       const charges = obs.total_variable_charges as number | null
       const kwh = obs.total_kwh_invoiced as number | null
-      const grp = obs.calculated_grp_per_kwh as number | null
+      const mrp = obs.calculated_mrp_per_kwh as number | null
       if (charges != null && kwh != null && kwh > 0) {
         totalCharges += charges
         totalKwh += kwh
       }
-      if (grp != null) {
-        simpleSum += grp
+      if (mrp != null) {
+        simpleSum += mrp
         simpleCount++
       }
     }
     // Prefer weighted average; fall back to simple average
-    const averageGrp = totalKwh > 0 ? totalCharges / totalKwh : simpleCount > 0 ? simpleSum / simpleCount : null
+    const averageMrp = totalKwh > 0 ? totalCharges / totalKwh : simpleCount > 0 ? simpleSum / simpleCount : null
     const monthCount = sorted.length
 
-    return { observations: sorted, componentKeys, averageGrp, monthCount, isPreCod }
-  }, [baselineGrp])
+    return { observations: sorted, componentKeys, averageMrp, monthCount, isPreCod }
+  }, [baselineMrp])
 
   // Sort monthly observations (memoized, not inline in JSX)
   const sortedMonthlyObs = useMemo(
@@ -177,7 +177,7 @@ export function GRPSection({
   async function handleGenerateToken() {
     setTokenState(s => ({ ...s, loading: true, result: null }))
     try {
-      const res = await adminClient.generateGRPToken(orgId, {
+      const res = await adminClient.generateMRPToken(orgId, {
         project_id: pid,
         operating_year: tokenState.year,
         max_uses: tokenState.maxUses,
@@ -198,9 +198,9 @@ export function GRPSection({
       const formData = new FormData()
       formData.append('file', uploadFile)
       formData.append('billing_month', uploadMonth)
-      const res = await adminClient.uploadGRPInvoice(pid, orgId, formData)
+      const res = await adminClient.uploadMRPInvoice(pid, orgId, formData)
       const storedLabel = res.billing_month_stored ? formatBillingMonth(res.billing_month_stored) : ''
-      toast.success(`GRP extracted: ${grpFormatGRP(res.grp_per_kwh)} /kWh (${res.extraction_confidence} confidence)${storedLabel ? ` — ${storedLabel}` : ''}`)
+      toast.success(`MRP extracted: ${mrpFormatMRP(res.mrp_per_kwh)} /kWh (${res.extraction_confidence} confidence)${storedLabel ? ` — ${storedLabel}` : ''}`)
       if (res.period_mismatch) {
         const extracted = formatBillingMonth(res.period_mismatch.extracted)
         const userProvided = formatBillingMonth(res.period_mismatch.user_provided)
@@ -265,7 +265,7 @@ export function GRPSection({
 
   async function handleDeleteObservation(observationId: number) {
     try {
-      const res = await adminClient.deleteGRPObservation(pid, orgId, observationId)
+      const res = await adminClient.deleteMRPObservation(pid, orgId, observationId)
       toast.success(res.message)
       onSaved?.()
     } catch (e) {
@@ -277,17 +277,17 @@ export function GRPSection({
     // Pre-fill the manual entry dialog with the observation's period
     const d = new Date(obs.period_start)
     setManualEntryPeriod(`${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`)
-    setManualEntryGrp('')
+    setManualEntryMrp('')
     setManualEntryIsBaseline(isBaseline)
     setShowManualEntryDialog(true)
   }
 
   async function handleManualEntrySubmit() {
-    if (!manualEntryPeriod || !manualEntryGrp) return
+    if (!manualEntryPeriod || !manualEntryMrp) return
     setManualEntryLoading(true)
     try {
-      const res = await adminClient.submitManualGRPRates(pid, orgId, {
-        entries: [{ billing_month: manualEntryPeriod, grp_per_kwh: parseFloat(manualEntryGrp) }],
+      const res = await adminClient.submitManualMRPRates(pid, orgId, {
+        entries: [{ billing_month: manualEntryPeriod, mrp_per_kwh: parseFloat(manualEntryMrp) }],
         is_baseline: manualEntryIsBaseline,
       })
       toast.success(res.message)
@@ -300,7 +300,7 @@ export function GRPSection({
     }
   }
 
-  const grpActions = (
+  const mrpActions = (
     <div className="flex items-center gap-2">
       <Button variant="outline" size="sm" onClick={() => setTokenState(s => ({ ...s, show: true, result: null }))}>
         <Link2 className="h-4 w-4" /> Generate Token
@@ -312,9 +312,9 @@ export function GRPSection({
   )
 
   return (<>
-    <CollapsibleSection title="Grid Reference Price" actions={grpActions}>
+    <CollapsibleSection title="Market Reference Price" actions={mrpActions}>
     <div className="space-y-4">
-      {/* GRP Definition */}
+      {/* MRP Definition */}
       {firstTariff && (
         <div className="space-y-3">
           {/* Clause Text */}
@@ -323,8 +323,8 @@ export function GRPSection({
             <dd className="text-sm text-slate-900">
               {editMode ? (
                 <EditableCell
-                  value={firstLp.grp_clause_text as string | null ?? null}
-                  fieldKey="lp_grp_clause_text"
+                  value={firstLp.mrp_clause_text as string | null ?? null}
+                  fieldKey="lp_mrp_clause_text"
                   entity="tariffs"
                   entityId={firstTariff.id as number}
                   projectId={pid}
@@ -333,20 +333,20 @@ export function GRPSection({
                   onSaved={onSaved}
                 />
               ) : (
-                <span className="whitespace-pre-line">{firstLp.grp_clause_text != null ? String(firstLp.grp_clause_text) : '—'}</span>
+                <span className="whitespace-pre-line">{firstLp.mrp_clause_text != null ? String(firstLp.mrp_clause_text) : '—'}</span>
               )}
             </dd>
           </div>
 
-          {/* GRP Parameters */}
+          {/* MRP Parameters */}
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-2 text-sm">
             <div>
               <dt className="text-xs text-slate-400">Calculation Method</dt>
               <dd className="text-slate-800 font-medium mt-0.5">
                 {editMode ? (
                   <EditableCell
-                    value={firstLp.grp_method as string | null ?? null}
-                    fieldKey="lp_grp_method"
+                    value={firstLp.mrp_method as string | null ?? null}
+                    fieldKey="lp_mrp_method"
                     entity="tariffs"
                     entityId={firstTariff.id as number}
                     projectId={pid}
@@ -359,9 +359,9 @@ export function GRPSection({
                     onSaved={onSaved}
                   />
                 ) : (
-                  firstLp.grp_method === 'utility_variable_charges_tou' ? 'Variable Charges (ToU)'
-                  : firstLp.grp_method === 'utility_total_charges' ? 'Total Charges (excl. tax)'
-                  : firstLp.grp_method != null ? String(firstLp.grp_method) : '—'
+                  firstLp.mrp_method === 'utility_variable_charges_tou' ? 'Variable Charges (ToU)'
+                  : firstLp.mrp_method === 'utility_total_charges' ? 'Total Charges (excl. tax)'
+                  : firstLp.mrp_method != null ? String(firstLp.mrp_method) : '—'
                 )}
               </dd>
             </div>
@@ -371,8 +371,8 @@ export function GRPSection({
                 {editMode ? (
                   <span className="flex items-center gap-1">
                     <EditableCell
-                      value={firstLp.grp_time_window_start as string | null ?? null}
-                      fieldKey="lp_grp_time_window_start"
+                      value={firstLp.mrp_time_window_start as string | null ?? null}
+                      fieldKey="lp_mrp_time_window_start"
                       entity="tariffs"
                       entityId={firstTariff.id as number}
                       projectId={pid}
@@ -382,8 +382,8 @@ export function GRPSection({
                     />
                     <span className="text-slate-400">–</span>
                     <EditableCell
-                      value={firstLp.grp_time_window_end as string | null ?? null}
-                      fieldKey="lp_grp_time_window_end"
+                      value={firstLp.mrp_time_window_end as string | null ?? null}
+                      fieldKey="lp_mrp_time_window_end"
                       entity="tariffs"
                       entityId={firstTariff.id as number}
                       projectId={pid}
@@ -393,8 +393,8 @@ export function GRPSection({
                     />
                   </span>
                 ) : (
-                  firstLp.grp_time_window_start != null && firstLp.grp_time_window_end != null
-                    ? `${String(firstLp.grp_time_window_start)} – ${String(firstLp.grp_time_window_end)}`
+                  firstLp.mrp_time_window_start != null && firstLp.mrp_time_window_end != null
+                    ? `${String(firstLp.mrp_time_window_start)} – ${String(firstLp.mrp_time_window_end)}`
                     : '—'
                 )}
               </dd>
@@ -405,8 +405,8 @@ export function GRPSection({
                 {editMode ? (
                   <span className="flex items-center gap-1">
                     <EditableCell
-                      value={firstLp.grp_calculation_due_days as number | null ?? null}
-                      fieldKey="lp_grp_calculation_due_days"
+                      value={firstLp.mrp_calculation_due_days as number | null ?? null}
+                      fieldKey="lp_mrp_calculation_due_days"
                       entity="tariffs"
                       entityId={firstTariff.id as number}
                       projectId={pid}
@@ -417,8 +417,8 @@ export function GRPSection({
                     <span className="text-xs text-slate-400">days after month-end</span>
                   </span>
                 ) : (
-                  firstLp.grp_calculation_due_days != null
-                    ? `${String(firstLp.grp_calculation_due_days)} days after month-end`
+                  firstLp.mrp_calculation_due_days != null
+                    ? `${String(firstLp.mrp_calculation_due_days)} days after month-end`
                     : '—'
                 )}
               </dd>
@@ -429,8 +429,8 @@ export function GRPSection({
                 {editMode ? (
                   <span className="flex items-center gap-1">
                     <EditableCell
-                      value={firstLp.grp_verification_deadline_days as number | null ?? null}
-                      fieldKey="lp_grp_verification_deadline_days"
+                      value={firstLp.mrp_verification_deadline_days as number | null ?? null}
+                      fieldKey="lp_mrp_verification_deadline_days"
                       entity="tariffs"
                       entityId={firstTariff.id as number}
                       projectId={pid}
@@ -441,8 +441,8 @@ export function GRPSection({
                     <span className="text-xs text-slate-400">days</span>
                   </span>
                 ) : (
-                  firstLp.grp_verification_deadline_days != null
-                    ? `${String(firstLp.grp_verification_deadline_days)} days`
+                  firstLp.mrp_verification_deadline_days != null
+                    ? `${String(firstLp.mrp_verification_deadline_days)} days`
                     : '—'
                 )}
               </dd>
@@ -453,8 +453,8 @@ export function GRPSection({
                 {editMode ? (
                   <>
                     <EditableCell
-                      value={firstLp.grp_exclude_vat as boolean | null ?? false}
-                      fieldKey="lp_grp_exclude_vat"
+                      value={firstLp.mrp_exclude_vat as boolean | null ?? false}
+                      fieldKey="lp_mrp_exclude_vat"
                       entity="tariffs"
                       entityId={firstTariff.id as number}
                       projectId={pid}
@@ -464,8 +464,8 @@ export function GRPSection({
                       formatDisplay={(v) => v ? 'VAT ✓' : 'VAT'}
                     />
                     <EditableCell
-                      value={firstLp.grp_exclude_demand_charges as boolean | null ?? false}
-                      fieldKey="lp_grp_exclude_demand_charges"
+                      value={firstLp.mrp_exclude_demand_charges as boolean | null ?? false}
+                      fieldKey="lp_mrp_exclude_demand_charges"
                       entity="tariffs"
                       entityId={firstTariff.id as number}
                       projectId={pid}
@@ -475,8 +475,8 @@ export function GRPSection({
                       formatDisplay={(v) => v ? 'Demand ✓' : 'Demand'}
                     />
                     <EditableCell
-                      value={firstLp.grp_exclude_savings_charges as boolean | null ?? false}
-                      fieldKey="lp_grp_exclude_savings_charges"
+                      value={firstLp.mrp_exclude_savings_charges as boolean | null ?? false}
+                      fieldKey="lp_mrp_exclude_savings_charges"
                       entity="tariffs"
                       entityId={firstTariff.id as number}
                       projectId={pid}
@@ -488,10 +488,10 @@ export function GRPSection({
                   </>
                 ) : (
                   <>
-                    {Boolean(firstLp.grp_exclude_vat) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-slate-100 text-slate-600">VAT</span>}
-                    {Boolean(firstLp.grp_exclude_demand_charges) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-slate-100 text-slate-600">Demand</span>}
-                    {Boolean(firstLp.grp_exclude_savings_charges) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-slate-100 text-slate-600">Savings</span>}
-                    {!firstLp.grp_exclude_vat && !firstLp.grp_exclude_demand_charges && !firstLp.grp_exclude_savings_charges && (
+                    {Boolean(firstLp.mrp_exclude_vat) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-slate-100 text-slate-600">VAT</span>}
+                    {Boolean(firstLp.mrp_exclude_demand_charges) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-slate-100 text-slate-600">Demand</span>}
+                    {Boolean(firstLp.mrp_exclude_savings_charges) && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-xs bg-slate-100 text-slate-600">Savings</span>}
+                    {!firstLp.mrp_exclude_vat && !firstLp.mrp_exclude_demand_charges && !firstLp.mrp_exclude_savings_charges && (
                       <span className="text-slate-500">None</span>
                     )}
                   </>
@@ -502,12 +502,12 @@ export function GRPSection({
         </div>
       )}
 
-      {/* Current GRP — weighted average of baseline or most recent months */}
-      {baselineData && baselineData.averageGrp != null && (
+      {/* Current MRP — weighted average of baseline or most recent months */}
+      {baselineData && baselineData.averageMrp != null && (
         <div className="rounded border border-slate-200 px-3 py-2">
           <div className="flex items-baseline gap-2">
-            <span className="text-sm text-slate-600">Current Grid Reference Price</span>
-            <span className="text-sm font-bold font-mono text-slate-900 tabular-nums">{grpFormatGRP(baselineData.averageGrp)} /kWh</span>
+            <span className="text-sm text-slate-600">Current Market Reference Price</span>
+            <span className="text-sm font-bold font-mono text-slate-900 tabular-nums">{mrpFormatMRP(baselineData.averageMrp)} /kWh</span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
             Weighted average of {baselineData.monthCount} {baselineData.isPreCod ? 'pre-COD' : 'most recent'} month{baselineData.monthCount !== 1 ? 's' : ''} (total variable charges &divide; total kWh invoiced).
@@ -515,8 +515,8 @@ export function GRPSection({
         </div>
       )}
 
-      {/* Post-COD GRP Observations */}
-      <CollapsibleSection title="Monthly GRP Observations (Post-COD)" defaultOpen={false}>
+      {/* Post-COD MRP Observations */}
+      <CollapsibleSection title="Monthly MRP Observations (Post-COD)" defaultOpen={false}>
           {(() => {
             // Determine which columns have data across all observations
             const allObs = [...monthlyObs, ...annualObs]
@@ -528,28 +528,28 @@ export function GRPSection({
 
             return (
           <div className="space-y-4">
-            {/* Annual GRP Cards */}
+            {/* Annual MRP Cards */}
             {annualObs.map(obs => {
               const meta = obs.source_metadata?.aggregation as Record<string, unknown> | undefined
               const cardFields: { label: string; value: string }[] = [
-                { label: 'GRP/kWh', value: grpFormatGRP(obs.calculated_grp_per_kwh) },
+                { label: 'MRP/kWh', value: mrpFormatMRP(obs.calculated_mrp_per_kwh) },
               ]
-              if (hasCharges) cardFields.push({ label: 'Total Charges', value: grpFormatNumber(obs.total_variable_charges) })
-              if (hasKwh) cardFields.push({ label: 'Total kWh', value: grpFormatNumber(obs.total_kwh_invoiced) })
+              if (hasCharges) cardFields.push({ label: 'Total Charges', value: mrpFormatNumber(obs.total_variable_charges) })
+              if (hasKwh) cardFields.push({ label: 'Total kWh', value: mrpFormatNumber(obs.total_kwh_invoiced) })
               cardFields.push({ label: 'Months Included', value: meta?.months_included != null ? String(meta.months_included) : '-' })
               return (
                 <Card key={obs.id}>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-sm font-semibold">Annual GRP &mdash; Operating Year {obs.operating_year}</CardTitle>
+                    <CardTitle className="text-sm font-semibold">Annual MRP &mdash; Operating Year {obs.operating_year}</CardTitle>
                   </CardHeader>
                   <CardContent>
                     <div className={`grid gap-4 text-sm`} style={{ gridTemplateColumns: `repeat(${cardFields.length}, minmax(0, 1fr))` }}>
                       {cardFields.map(f => (
-                        <div key={f.label}><span className="text-slate-500">{f.label}</span><p className={`font-mono${f.label === 'GRP/kWh' ? ' font-semibold' : ''}`}>{f.value}</p></div>
+                        <div key={f.label}><span className="text-slate-500">{f.label}</span><p className={`font-mono${f.label === 'MRP/kWh' ? ' font-semibold' : ''}`}>{f.value}</p></div>
                       ))}
                     </div>
                     <div className="flex items-center gap-2 mt-2">
-                      <Badge variant={grpStatusBadge(obs.verification_status)}>{grpStatusLabel(obs.verification_status)}</Badge>
+                      <Badge variant={mrpStatusBadge(obs.verification_status)}>{mrpStatusLabel(obs.verification_status)}</Badge>
                       {obs.created_at && <span className="text-xs text-slate-400">Aggregated {new Date(obs.created_at).toLocaleDateString()}</span>}
                     </div>
                   </CardContent>
@@ -560,7 +560,7 @@ export function GRPSection({
             {/* Monthly Observations Table */}
             {sortedMonthlyObs.length === 0 ? (
               <div className="text-center py-8 text-sm text-slate-400">
-                No monthly GRP observations yet. Upload an invoice or generate a collection token to get started.
+                No monthly MRP observations yet. Upload an invoice or generate a collection token to get started.
               </div>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-slate-200">
@@ -568,7 +568,7 @@ export function GRPSection({
                   <thead className="bg-slate-50 text-slate-600">
                     <tr>
                       <th className="text-left px-4 py-2.5 font-medium">Period</th>
-                      <th className="text-right px-4 py-2.5 font-medium">GRP/kWh</th>
+                      <th className="text-right px-4 py-2.5 font-medium">MRP/kWh</th>
                       {hasCharges && <th className="text-right px-4 py-2.5 font-medium">Variable Charges</th>}
                       {hasKwh && <th className="text-right px-4 py-2.5 font-medium">kWh Invoiced</th>}
                       {hasSource && <th className="text-right px-4 py-2.5 font-medium">Source</th>}
@@ -584,14 +584,14 @@ export function GRPSection({
                       return (
                         <Fragment key={obs.id}>
                           <tr className={`hover:bg-slate-50${isDisputed ? ' bg-red-50/50' : ''}`}>
-                            <td className="px-4 py-2.5">{grpFormatPeriod(obs.period_start)}</td>
+                            <td className="px-4 py-2.5">{mrpFormatPeriod(obs.period_start)}</td>
                             <td
                               className={`px-4 py-2.5 text-right font-mono${isDisputed ? ' line-through text-slate-400' : ''}${editMode && !isDisputed ? ' cursor-pointer rounded bg-amber-50 hover:bg-amber-100 transition-colors' : ''}`}
                               onClick={editMode && !isDisputed ? () => openManualEntryFor(obs) : undefined}
                               title={editMode && !isDisputed ? 'Click to edit' : undefined}
-                            >{grpFormatGRP(obs.calculated_grp_per_kwh)}</td>
-                            {hasCharges && <td className={`px-4 py-2.5 text-right font-mono${isDisputed ? ' line-through text-slate-400' : ''}`}>{grpFormatNumber(obs.total_variable_charges)}</td>}
-                            {hasKwh && <td className={`px-4 py-2.5 text-right font-mono${isDisputed ? ' line-through text-slate-400' : ''}`}>{grpFormatNumber(obs.total_kwh_invoiced)}</td>}
+                            >{mrpFormatMRP(obs.calculated_mrp_per_kwh)}</td>
+                            {hasCharges && <td className={`px-4 py-2.5 text-right font-mono${isDisputed ? ' line-through text-slate-400' : ''}`}>{mrpFormatNumber(obs.total_variable_charges)}</td>}
+                            {hasKwh && <td className={`px-4 py-2.5 text-right font-mono${isDisputed ? ' line-through text-slate-400' : ''}`}>{mrpFormatNumber(obs.total_kwh_invoiced)}</td>}
                             {hasSource && (
                               <td className="px-4 py-2.5 text-right">
                                 <span className="text-xs text-slate-400">{entryMethod === 'excel_import' ? 'Excel' : entryMethod === 'manual' ? 'Manual' : entryMethod === 'invoice_extraction' ? 'Invoice' : entryMethod ?? '-'}</span>
@@ -660,15 +660,15 @@ export function GRPSection({
           })()}
       </CollapsibleSection>
 
-      {/* Baseline GRP (Pre-COD) — only show when actual pre-COD observations exist */}
+      {/* Baseline MRP (Pre-COD) — only show when actual pre-COD observations exist */}
       {baselineData && baselineData.isPreCod && (
-        <CollapsibleSection title="Baseline Grid Reference Price (Pre-COD)" defaultOpen={false}>
+        <CollapsibleSection title="Baseline Market Reference Price (Pre-COD)" defaultOpen={false}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead className="bg-slate-50 text-slate-600">
                 <tr>
                   <th className="text-left px-4 py-2.5 font-medium">Period</th>
-                  <th className="text-right px-4 py-2.5 font-medium">GRP/kWh</th>
+                  <th className="text-right px-4 py-2.5 font-medium">MRP/kWh</th>
                   {baselineData.componentKeys.map(key => (
                     <th key={key} className="text-right px-4 py-2.5 font-medium capitalize">
                       {key.replace(/_/g, ' ')}
@@ -679,17 +679,17 @@ export function GRPSection({
               <tbody className="divide-y divide-slate-100">
                 {baselineData.observations.map(obs => (
                   <tr key={obs.id as number} className="hover:bg-slate-50">
-                    <td className="px-4 py-2.5">{grpFormatPeriod(String(obs.period_start))}</td>
+                    <td className="px-4 py-2.5">{mrpFormatPeriod(String(obs.period_start))}</td>
                     <td
                       className={`px-4 py-2.5 text-right font-mono font-medium${editMode ? ' cursor-pointer rounded bg-amber-50 hover:bg-amber-100 transition-colors' : ''}`}
                       onClick={editMode ? () => openManualEntryFor({ period_start: String(obs.period_start) }, true) : undefined}
                       title={editMode ? 'Click to edit' : undefined}
-                    >{grpFormatGRP(obs.calculated_grp_per_kwh as number | null)}</td>
+                    >{mrpFormatMRP(obs.calculated_mrp_per_kwh as number | null)}</td>
                     {baselineData.componentKeys.map(key => {
                       const tc = (obs.source_metadata as R | undefined)?.tariff_components as Record<string, number> | undefined
                       return (
                         <td key={key} className="px-4 py-2.5 text-right font-mono tabular-nums">
-                          {tc?.[key] != null ? grpFormatGRP(tc[key]) : '-'}
+                          {tc?.[key] != null ? mrpFormatMRP(tc[key]) : '-'}
                         </td>
                       )
                     })}
@@ -708,17 +708,17 @@ export function GRPSection({
       <Dialog open={tokenState.show} onOpenChange={(v) => setTokenState(s => ({ ...s, show: v }))}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>GRP Collection Tokens</DialogTitle>
+            <DialogTitle>MRP Collection Tokens</DialogTitle>
             <DialogDescription>Create a reusable link for the counterparty to upload utility invoices.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="grpTokenYear">Operating Year</Label>
-              <Input id="grpTokenYear" type="number" min={1} value={tokenState.year} onChange={e => setTokenState(s => ({ ...s, year: Number(e.target.value) }))} />
+              <Label htmlFor="mrpTokenYear">Operating Year</Label>
+              <Input id="mrpTokenYear" type="number" min={1} value={tokenState.year} onChange={e => setTokenState(s => ({ ...s, year: Number(e.target.value) }))} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="grpTokenMaxUses">Max Uploads</Label>
-              <Input id="grpTokenMaxUses" type="number" min={1} max={24} value={tokenState.maxUses} onChange={e => setTokenState(s => ({ ...s, maxUses: Number(e.target.value) }))} />
+              <Label htmlFor="mrpTokenMaxUses">Max Uploads</Label>
+              <Input id="mrpTokenMaxUses" type="number" min={1} max={24} value={tokenState.maxUses} onChange={e => setTokenState(s => ({ ...s, maxUses: Number(e.target.value) }))} />
             </div>
             {tokenState.result && (
               <div className="rounded-md border border-green-200 bg-green-50 p-3 space-y-2">
@@ -814,16 +814,16 @@ export function GRPSection({
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Upload Utility Invoice</DialogTitle>
-            <DialogDescription>Upload a PDF or image of a utility invoice for GRP extraction via OCR.</DialogDescription>
+            <DialogDescription>Upload a PDF or image of a utility invoice for MRP extraction via OCR.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
-              <Label htmlFor="grpBillingMonth">Billing Month</Label>
-              <Input id="grpBillingMonth" type="month" value={uploadMonth} onChange={e => setUploadMonth(e.target.value)} />
+              <Label htmlFor="mrpBillingMonth">Billing Month</Label>
+              <Input id="mrpBillingMonth" type="month" value={uploadMonth} onChange={e => setUploadMonth(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="grpInvoiceFile">Invoice File</Label>
-              <Input id="grpInvoiceFile" type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={e => setUploadFile(e.target.files?.[0] ?? null)} />
+              <Label htmlFor="mrpInvoiceFile">Invoice File</Label>
+              <Input id="mrpInvoiceFile" type="file" accept=".pdf,.png,.jpg,.jpeg" onChange={e => setUploadFile(e.target.files?.[0] ?? null)} />
             </div>
             <Button className="w-full" disabled={uploadLoading || !uploadFile || !uploadMonth} onClick={handleUpload}>
               {uploadLoading && <Loader2 className="h-4 w-4 animate-spin" />}
@@ -838,8 +838,8 @@ export function GRPSection({
       <Dialog open={showDisputeDialog} onOpenChange={setShowDisputeDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Dispute GRP Observation</DialogTitle>
-            <DialogDescription>Provide a reason for disputing this observation. The disputed value will be excluded from annual GRP aggregation.</DialogDescription>
+            <DialogTitle>Dispute MRP Observation</DialogTitle>
+            <DialogDescription>Provide a reason for disputing this observation. The disputed value will be excluded from annual MRP aggregation.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
@@ -847,7 +847,7 @@ export function GRPSection({
               <textarea
                 id="disputeNotes"
                 className="flex min-h-[80px] w-full rounded-md border border-slate-200 bg-white px-3 py-2 text-sm placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-slate-400 focus:ring-offset-2"
-                placeholder="e.g., GRP value extracted incorrectly — 209.5 vs expected ~2.0"
+                placeholder="e.g., MRP value extracted incorrectly — 209.5 vs expected ~2.0"
                 value={disputeNotes}
                 onChange={e => setDisputeNotes(e.target.value)}
               />
@@ -869,8 +869,8 @@ export function GRPSection({
       <Dialog open={showManualEntryDialog} onOpenChange={setShowManualEntryDialog}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Enter Corrected GRP</DialogTitle>
-            <DialogDescription>Manually enter the corrected GRP rate for this period. This will replace the disputed observation with an estimated value.</DialogDescription>
+            <DialogTitle>Enter Corrected MRP</DialogTitle>
+            <DialogDescription>Manually enter the corrected MRP rate for this period. This will replace the disputed observation with an estimated value.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-1.5">
@@ -878,12 +878,12 @@ export function GRPSection({
               <Input id="manualEntryPeriod" type="month" value={manualEntryPeriod} onChange={e => setManualEntryPeriod(e.target.value)} />
             </div>
             <div className="space-y-1.5">
-              <Label htmlFor="manualEntryGrp">GRP per kWh</Label>
-              <Input id="manualEntryGrp" type="number" step="0.0001" min="0" placeholder="e.g., 2.0350" value={manualEntryGrp} onChange={e => setManualEntryGrp(e.target.value)} />
+              <Label htmlFor="manualEntryMrp">MRP per kWh</Label>
+              <Input id="manualEntryMrp" type="number" step="0.0001" min="0" placeholder="e.g., 2.0350" value={manualEntryMrp} onChange={e => setManualEntryMrp(e.target.value)} />
             </div>
             <Button
               className="w-full"
-              disabled={manualEntryLoading || !manualEntryPeriod || !manualEntryGrp}
+              disabled={manualEntryLoading || !manualEntryPeriod || !manualEntryMrp}
               onClick={handleManualEntrySubmit}
             >
               {manualEntryLoading && <Loader2 className="h-4 w-4 animate-spin" />}

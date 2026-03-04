@@ -115,7 +115,7 @@
 │                                                              │
 │  Step 10: Logic Parameter Enrichment [v5.5]                 │
 │     • Read normalized_payload from all clause categories    │
-│     • Aggregate tariff-relevant fields (GRP params,         │
+│     • Aggregate tariff-relevant fields (MRP params,         │
 │       billing freq, escalation freq, shortfall formula)     │
 │     • Defensive merge into MAIN clause_tariff               │
 │       logic_parameters (never overwrite existing values)    │
@@ -2409,19 +2409,19 @@ When a COD date error is discovered:
 
 ---
 
-## Section 12.1: GRP Population from Market Ref Pricing Workbook
+## Section 12.1: MRP Population from Market Ref Pricing Workbook
 
 ### Overview
 
-Monthly GRP (Grid Reference Price) observations can be bulk-populated from the Market Ref Pricing Excel workbook. This provides the per-month GRP history that `RebasedMarketPriceEngine` needs for accurate effective rate calculations.
+Monthly MRP (Market Reference Price) observations can be bulk-populated from the Market Ref Pricing Excel workbook. This provides the per-month MRP history that `RebasedMarketPriceEngine` needs for accurate effective rate calculations.
 
 ### Data Source
 
 **File:** `CBE_data_extracts/Sage Contract Extracts market Ref pricing data.xlsx`
 
-**Sheets:** UTK01, UGL01, TBM01, KAS01, JAB01, GBL01, NBL01, NBL02, MOH001 — each containing monthly GRP observations with varying column layouts.
+**Sheets:** UTK01, UGL01, TBM01, KAS01, JAB01, GBL01, NBL01, NBL02, MOH001 — each containing monthly MRP observations with varying column layouts.
 
-### Parser: `parse_grp_monthly(sage_id)`
+### Parser: `parse_mrp_monthly(sage_id)`
 
 **Location:** `python-backend/services/onboarding/parsers/market_ref_pricing_parser.py`
 
@@ -2432,28 +2432,28 @@ Handles all sheet layout variants:
 - **Label-only** (UTK01): No ZDAT code row, just `Period, ..., Price total`
 - **Different currencies:** GHS (Ghana), NGN (Nigeria), KES (Kenya)
 
-Returns list of `{"billing_month": "YYYY-MM", "grp_per_kwh": float, "tariff_components": dict}`.
+Returns list of `{"billing_month": "YYYY-MM", "mrp_per_kwh": float, "tariff_components": dict}`.
 
-### Script: `populate_grp_from_excel.py`
+### Script: `populate_mrp_from_excel.py`
 
-**Location:** `python-backend/scripts/populate_grp_from_excel.py`
+**Location:** `python-backend/scripts/populate_mrp_from_excel.py`
 
 ```bash
 cd python-backend
 
 # Preview a single project
-python scripts/populate_grp_from_excel.py --project KAS01 --dry-run
+python scripts/populate_mrp_from_excel.py --project KAS01 --dry-run
 
 # Execute for a single project
-python scripts/populate_grp_from_excel.py --project KAS01
+python scripts/populate_mrp_from_excel.py --project KAS01
 
 # Preview all projects in workbook
-python scripts/populate_grp_from_excel.py --all --dry-run
+python scripts/populate_mrp_from_excel.py --all --dry-run
 ```
 
 **Flow per project:**
 1. Resolve `project.id`, `clause_tariff.id`, and `currency_id` by sage_id
-2. Parse monthly GRP from Excel via `MarketRefPricingParser.parse_grp_monthly()`
+2. Parse monthly MRP from Excel via `MarketRefPricingParser.parse_mrp_monthly()`
 3. Compute `operating_year` from `project.cod_date` + billing_month
 4. Upsert into `reference_price` (ON CONFLICT update on `(project_id, observation_type, period_start)`)
 5. Detach any `tariff_rate` FK references to stale annual rows, then delete them
@@ -2475,16 +2475,16 @@ Operating years are 1-based, counted from the project's COD anniversary:
 ### Relationship to Tariff Engine
 
 ```
-Monthly GRP (reference_price, observation_type='monthly')
+Monthly MRP (reference_price, observation_type='monthly')
     ↓ aggregate (via dashboard "Aggregate" or API)
-Annual GRP (reference_price, observation_type='annual')
+Annual MRP (reference_price, observation_type='annual')
     ↓ feed into
 RebasedMarketPriceEngine.calculate_and_store()
     ↓ produces
 tariff_rate (monthly effective rates with floor/ceiling bounds)
 ```
 
-After populating monthly GRP, trigger recalculation via `recalc_kas01_tariff.py` or the dashboard Aggregate button.
+After populating monthly MRP, trigger recalculation via `recalc_kas01_tariff.py` or the dashboard Aggregate button.
 
 ### Extending to New Projects
 
@@ -2492,7 +2492,7 @@ After populating monthly GRP, trigger recalculation via `recalc_kas01_tariff.py`
 2. Ensure the project exists in the DB with a valid `cod_date`
 3. If the sage_id differs from the sheet name (e.g., MOH01 → MOH001), add an entry to `SHEET_TO_SAGE_ID` in the parser
 4. If the project uses a non-standard currency, add it to `SAGE_ID_CURRENCY_FALLBACK` in the script
-5. Run: `python scripts/populate_grp_from_excel.py --project <SAGE_ID>`
+5. Run: `python scripts/populate_mrp_from_excel.py --project <SAGE_ID>`
 
 ---
 
@@ -2645,13 +2645,13 @@ The clause table stores per-provision data (140 rows per contract from LLM extra
 
 | Category | Clause Pattern | Source Field | Target Key | Derivation |
 |----------|---------------|-------------|------------|------------|
-| PRICING | `%Grid Tariff Calculation%` | `included_components` | `grp_exclude_vat` | True if VAT not in list |
-| PRICING | `%Grid Tariff Calculation%` | `raw_text` | `grp_clause_text` | Copy clause raw text |
-| PRICING | `%Demand Charge%Exclusion%` | `excluded_components` | `grp_exclude_demand_charges` | True if demand_charge in list |
+| PRICING | `%Grid Tariff Calculation%` | `included_components` | `mrp_exclude_vat` | True if VAT not in list |
+| PRICING | `%Grid Tariff Calculation%` | `raw_text` | `mrp_clause_text` | Copy clause raw text |
+| PRICING | `%Demand Charge%Exclusion%` | `excluded_components` | `mrp_exclude_demand_charges` | True if demand_charge in list |
 | PRICING | `%Floor%Escalation%` | `escalation_frequency` | `escalation_frequency` | Direct |
 | PRICING | `%Floor%Escalation%` | `applies_to` | `tariff_components_to_adjust` | Direct |
 | PRICING | `%Solar Tariff Calculation%` | `recalculation_frequency` | `recalculation_frequency` | Direct |
-| PRICING | `%Solar Tariff Calculation%` | `recalculation_deadline_days` | `grp_calculation_due_days` | Direct |
+| PRICING | `%Solar Tariff Calculation%` | `recalculation_deadline_days` | `mrp_calculation_due_days` | Direct |
 | PAYMENT_TERMS | `%Currency Conversion%` | `billing_frequency` | `billing_frequency` | Direct |
 | PAYMENT_TERMS | `%Currency Conversion%` | `exchange_rate_source` | `agreed_fx_rate_source` | Direct |
 | AVAILABILITY | (any) | `available_energy_method` | `available_energy_method` | Direct |
@@ -2721,14 +2721,14 @@ These are logged as `unenriched_fields` so operators know what still needs manua
 | File | Change |
 |------|--------|
 | `services/contract_parser.py` | Added Step 10: invoke LogicParameterEnricher after TariffBridge |
-| `services/prompts/clause_extraction_prompt.py` | Added Annexure G fields to AVAILABILITY extraction; Added 12 GRP fields to PRICING extraction |
-| `services/prompts/clause_examples.py` | Added monthly_production_formula, available_energy_formula to AVAILABILITY; Added 12 GRP field definitions to PRICING |
+| `services/prompts/clause_extraction_prompt.py` | Added Annexure G fields to AVAILABILITY extraction; Added 12 MRP fields to PRICING extraction |
+| `services/prompts/clause_examples.py` | Added monthly_production_formula, available_energy_formula to AVAILABILITY; Added 12 MRP field definitions to PRICING |
 | `api/entities.py` | Added `PATCH /api/clauses/{id}` endpoint with `np_` prefix for normalized_payload JSONB merge |
-| `services/tariff/logic_parameter_enricher.py` | Added enrichment rules for GRP fields (grp_method, grp_time_window_*, pricing_formula_text, etc.) and availability formulas |
+| `services/tariff/logic_parameter_enricher.py` | Added enrichment rules for MRP fields (mrp_method, mrp_time_window_*, pricing_formula_text, etc.) and availability formulas |
 
 ---
 
-## Section 14: GRP Template — Canonical Logic Parameters
+## Section 14: MRP Template — Canonical Logic Parameters
 
 > Added: 2026-03-03
 
@@ -2747,9 +2747,9 @@ Contract PDF
 
 If the extraction prompt doesn't list a field, the LLM won't extract it. If the enricher doesn't have a rule for that field, it won't reach the tariff. Both layers must be in sync.
 
-### Current Grid Reference Price Card
+### Current Market Reference Price Card
 
-The GRP section displays a summary card showing the **Current Grid Reference Price** as a weighted average (total variable charges / total kWh invoiced). This requires monthly GRP observations in the `reference_price` table.
+The MRP section displays a summary card showing the **Current Market Reference Price** as a weighted average (total variable charges / total kWh invoiced). This requires monthly MRP observations in the `reference_price` table.
 
 | Scenario | Data Source | Card Label |
 |----------|------------|------------|
@@ -2757,8 +2757,8 @@ The GRP section displays a summary card showing the **Current Grid Reference Pri
 | Operating project | Most recent 12 monthly observations (any operating_year) | "Weighted average of N most recent months" |
 
 **Populating for a new project:**
-1. Upload 12 months of pre-COD utility bills via GRP submission tokens
-2. Or use `POST /api/grp/observations/bulk` with `is_baseline: true` to insert `operating_year=0` records
+1. Upload 12 months of pre-COD utility bills via MRP submission tokens
+2. Or use `POST /api/mrp/observations/bulk` with `is_baseline: true` to insert `operating_year=0` records
 
 **For existing projects without pre-COD data:**
 The backend automatically falls back to the most recent 12 monthly observations. The card will appear as soon as the project has any `reference_price` records.
@@ -2771,20 +2771,20 @@ Example values:
 
 Fields are grouped by the dashboard section that renders them.
 
-#### Grid Reference Price Section (`GRPSection` component)
+#### Market Reference Price Section (`MRPSection` component)
 
 | Key | Type | Source | Example (MOH01) | Required |
 |-----|------|--------|-----------------|----------|
-| `grp_method` | string | Extraction | `"utility_variable_charges_tou"` | Yes |
-| `grp_clause_text` | string | Enricher | Full clause text | Yes |
-| `grp_exclude_vat` | bool | Enricher | `true` | Yes |
-| `grp_exclude_demand_charges` | bool | Enricher | `true` | Yes |
-| `grp_calculation_due_days` | int | Extraction | `60` | Yes |
-| `grp_verification_deadline_days` | int | Extraction | `30` | Optional |
-| `grp_time_window_start` | string | Extraction | `"06:00"` | Optional (TOU only) |
-| `grp_time_window_end` | string | Extraction | `"18:00"` | Optional (TOU only) |
-| `grp_included_components` | list | Extraction | `[...]` | Optional |
-| `grp_excluded_components` | list | Extraction | `[...]` | Optional |
+| `mrp_method` | string | Extraction | `"utility_variable_charges_tou"` | Yes |
+| `mrp_clause_text` | string | Enricher | Full clause text | Yes |
+| `mrp_exclude_vat` | bool | Enricher | `true` | Yes |
+| `mrp_exclude_demand_charges` | bool | Enricher | `true` | Yes |
+| `mrp_calculation_due_days` | int | Extraction | `60` | Yes |
+| `mrp_verification_deadline_days` | int | Extraction | `30` | Optional |
+| `mrp_time_window_start` | string | Extraction | `"06:00"` | Optional (TOU only) |
+| `mrp_time_window_end` | string | Extraction | `"18:00"` | Optional (TOU only) |
+| `mrp_included_components` | list | Extraction | `[...]` | Optional |
+| `mrp_excluded_components` | list | Extraction | `[...]` | Optional |
 
 #### Pricing Formula Section
 
@@ -2853,10 +2853,10 @@ Fields are grouped by the dashboard section that renders them.
 | `annual_specific_yield` | `Year1_MWh × 1000 / System_kWp` |
 | `available_energy_variables` | From Annexure G variable definitions |
 
-4. **Update via patch script** (see `scripts/patch_kas01_grp_template.py` for reference pattern)
-5. **Populate GRP observations** in `reference_price` table for the "Current Grid Reference Price" card:
+4. **Update via patch script** (see `scripts/patch_kas01_mrp_template.py` for reference pattern)
+5. **Populate MRP observations** in `reference_price` table for the "Current Market Reference Price" card:
    - Pre-COD: upload 12 months of utility bills before COD (`operating_year=0`)
-   - Operating projects: ensure monthly GRP observations are populated (card auto-selects most recent 12 months)
+   - Operating projects: ensure monthly MRP observations are populated (card auto-selects most recent 12 months)
 
 ### Ghana Tax Template
 
@@ -2885,7 +2885,7 @@ Rates are as of January 2025. Update `effective_from` when rates change.
 |-----------|-------|-------|--------|
 | `degradation_pct` | 0.007 (0.7%) | 0.004 (0.4%) | Different system design/Annexure D |
 | `annual_specific_yield` | 1451 | 1443 | Different location/system size |
-| `grp_time_window_*` | 06:00–18:00 | Not specified | KAS01 GRP covers all kWh charges |
+| `mrp_time_window_*` | 06:00–18:00 | Not specified | KAS01 MRP covers all kWh charges |
 | `shortfall_formula_cap` | 119,000 USD/year | No explicit cap | Contract-specific |
 | `escalation_start_date` | 2026-09-01 | 2018-09-30 | Different COD dates |
 | `agreed_fx_rate_source` | (not set) | Central Bank | KAS01 has FX conversion |
@@ -2925,7 +2925,7 @@ Each project needs a billing fixture SQL file that prepares the project for invo
 Step 1: Set project.country (required for billing_tax_rule lookup)
 Step 2: Link contract_lines → clause_tariff (if not already linked)
 Step 3: Seed billing_taxes into clause_tariff.logic_parameters
-Step 4: Seed reference_price (GRP) for the billing month
+Step 4: Seed reference_price (MRP) for the billing month
 Step 5: Seed tariff_rate monthly row (effective rate from invoice)
 Step 6: Ensure billing_tax_rule exists (org/country fallback)
 Step 7: Verify meter_aggregate data exists
@@ -3060,7 +3060,7 @@ Response: {
    - Contract identifier (external_contract_id)
    - Tax rates (especially WHT — verify from actual invoice)
    - Available energy line mode (check invoice format)
-   - GRP value and effective rate (from invoice tariff section)
+   - MRP value and effective rate (from invoice tariff section)
 3. Run the fixture against the database
 4. Generate expected invoice via API
 5. Verify against actual CBE invoice

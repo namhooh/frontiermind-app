@@ -27,7 +27,7 @@ from models.notifications import (
     SubmissionResponseListResponse,
     SubmissionResponseModel,
     SendEmailResponse,
-    GRPCollectionRequest,
+    MRPCollectionRequest,
 )
 from db.notification_repository import NotificationRepository
 from db.database import init_connection_pool
@@ -84,6 +84,61 @@ def require_repo():
             detail={"success": False, "error": "DatabaseNotAvailable",
                     "message": "Database connection not available"},
         )
+
+
+# ============================================================================
+# Test Email (easy CLI access)
+# ============================================================================
+
+class TestEmailRequest(BaseModel):
+    to: str
+    subject: str = "Test email from FrontierMind"
+    body: str = "This is a test email. If you received this, SES is working correctly."
+
+
+class TestEmailResponse(BaseModel):
+    success: bool
+    message: str
+    sender: str
+
+
+@router.post(
+    "/test-email",
+    response_model=TestEmailResponse,
+    summary="Send a quick test email using org sender config",
+)
+async def test_email(request: Request, body: TestEmailRequest) -> TestEmailResponse:
+    """Quick test endpoint — sends a plain email using the org's configured sender."""
+    require_repo()
+    org_id = get_org_id(request)
+
+    try:
+        from services.email.ses_client import SESClient
+        from services.email.notification_service import NotificationService
+
+        service = NotificationService(notification_repo)
+        org_sender = service._get_org_sender(org_id)
+
+        ses = SESClient()
+        html_body = f"<p>{body.body}</p>"
+        ses_message_id = ses.send_email(
+            to=[body.to],
+            subject=body.subject,
+            html_body=html_body,
+            text_body=body.body,
+            sender_name=org_sender["sender_name"],
+            sender_email=org_sender["sender_email"],
+        )
+
+        sender_display = ses.format_sender(org_sender["sender_name"], org_sender["sender_email"])
+        return TestEmailResponse(
+            success=True,
+            message=f"Test email sent (SES ID: {ses_message_id})",
+            sender=sender_display,
+        )
+    except Exception as e:
+        logger.error(f"Test email failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"success": False, "message": str(e)})
 
 
 # ============================================================================
@@ -386,10 +441,10 @@ async def list_submissions(
 
 
 # ============================================================================
-# GRP Collection
+# MRP Collection
 # ============================================================================
 
-class GRPCollectionResponse(BaseModel):
+class MRPCollectionResponse(BaseModel):
     success: bool = True
     token_id: int
     submission_url: str
@@ -397,15 +452,15 @@ class GRPCollectionResponse(BaseModel):
 
 
 @router.post(
-    "/grp-collection",
-    response_model=GRPCollectionResponse,
-    summary="Generate GRP collection token",
+    "/mrp-collection",
+    response_model=MRPCollectionResponse,
+    summary="Generate MRP collection token",
 )
-async def create_grp_collection(
-    request: Request, body: GRPCollectionRequest
-) -> GRPCollectionResponse:
+async def create_mrp_collection(
+    request: Request, body: MRPCollectionRequest
+) -> MRPCollectionResponse:
     """
-    Generate a reusable GRP upload token for a project.
+    Generate a reusable MRP upload token for a project.
     The token allows the counterparty to upload utility invoices monthly.
     """
     require_repo()
@@ -431,7 +486,7 @@ async def create_grp_collection(
             expiry_hours=body.expiry_hours,
             max_uses=body.max_uses,
             project_id=body.project_id,
-            submission_type="grp_upload",
+            submission_type="mrp_upload",
         )
 
         # Build the submission URL
@@ -444,17 +499,17 @@ async def create_grp_collection(
         # Persist URL alongside token (raw token is never stored, only hash)
         token_svc.store_submission_url(result["token_id"], submission_url)
 
-        return GRPCollectionResponse(
+        return MRPCollectionResponse(
             success=True,
             token_id=result["token_id"],
             submission_url=submission_url,
-            message=f"GRP collection token created (max {body.max_uses} uploads)",
+            message=f"MRP collection token created (max {body.max_uses} uploads)",
         )
 
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Error creating GRP collection token: {e}", exc_info=True)
+        logger.error(f"Error creating MRP collection token: {e}", exc_info=True)
         raise HTTPException(
             status_code=500,
             detail={"success": False, "message": str(e)},

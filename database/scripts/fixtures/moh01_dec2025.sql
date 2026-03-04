@@ -1,6 +1,6 @@
 -- MOH01 December 2025 Fixture Data
 -- Seeds meter_aggregate, contract_line tariff links, billing_taxes config,
--- plant_performance, reference_price (GRP), and billing_tax_rule for MOH01.
+-- plant_performance, reference_price (MRP), and billing_tax_rule for MOH01.
 --
 -- All lookups use stable keys (project code, meter name) — no hardcoded IDs.
 -- Verified against invoice SINMOH012512037.
@@ -357,13 +357,13 @@ ON CONFLICT DO NOTHING;
 -- rows to prevent the duplicate that previously existed here.
 
 -- ============================================================================
--- 8. Seed post-COD GRP (reference_price) for Sep-Dec 2025
+-- 8. Seed post-COD MRP (reference_price) for Sep-Dec 2025
 -- ============================================================================
--- Carry forward Aug 2025 estimated GRP (2.0349 GHS/kWh) as operating_year=1
+-- Carry forward Aug 2025 estimated MRP (2.0349 GHS/kWh) as operating_year=1
 
 INSERT INTO reference_price (
   project_id, organization_id, operating_year,
-  period_start, period_end, calculated_grp_per_kwh,
+  period_start, period_end, calculated_mrp_per_kwh,
   currency_id, observation_type, verification_status
 )
 SELECT

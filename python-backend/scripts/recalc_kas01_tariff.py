@@ -37,7 +37,7 @@ logger = logging.getLogger("recalc_kas01")
 
 # ─── PO Summary values (KAS01 = GH 22010 Kasapreko Phase 1) ─────────────
 PO_SUMMARY = {
-    "mrp_ghs_kwh": 1.554,          # MRP (Grid/Fixed) = GRP
+    "mrp_ghs_kwh": 1.554,          # MRP (Market Reference Price)
     "discount_pct": 0.192,          # 19.2%
     "solar_tariff_ghs": 1.255632,   # = MRP * (1 - discount)
     "floor_usd": 0.0874,            # Min Tariff (USD)
@@ -59,7 +59,7 @@ def update_clause_tariff():
     new_lp = {
         # Engine-required keys
         "formula_type": "GRID_DISCOUNT_BOUNDED",
-        "grp_method": "utility_variable_charges_tou",
+        "mrp_method": "utility_variable_charges_tou",
         "discount_pct": PO_SUMMARY["discount_pct"],
         "floor_rate": PO_SUMMARY["floor_usd"],
         "ceiling_rate": PO_SUMMARY["ceiling_usd"],
@@ -184,7 +184,7 @@ def main():
         result = engine.calculate_and_store(
             project_id=PROJECT_ID,
             operating_year=OPERATING_YEAR,
-            grp_per_kwh=PO_SUMMARY["mrp_ghs_kwh"],
+            mrp_per_kwh=PO_SUMMARY["mrp_ghs_kwh"],
             monthly_fx_rates=monthly_fx,
             verification_status="pending",
         )
@@ -193,7 +193,7 @@ def main():
         logger.info("=" * 60)
         logger.info("CALCULATION COMPLETE")
         logger.info("=" * 60)
-        logger.info(f"  GRP (MRP):              {result['grp_per_kwh']:.6f} GHS/kWh")
+        logger.info(f"  MRP:                    {result['mrp_per_kwh']:.6f} GHS/kWh")
         logger.info(f"  Discount:               {result['discount_pct']*100:.1f}%")
         logger.info(f"  Solar Tariff (annual):   {result['representative_annual_rate']:.6f} GHS/kWh")
         logger.info(f"  Floor (USD, escalated):  {result['escalated_floor_usd']:.6f}")

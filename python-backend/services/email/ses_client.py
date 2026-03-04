@@ -46,6 +46,14 @@ class SESClient:
             return f"{self.sender_name} <{self.sender_email}>"
         return self.sender_email
 
+    def format_sender(self, name: Optional[str] = None, email: Optional[str] = None) -> str:
+        """Format a sender address string. Uses defaults if not provided."""
+        sender_name = name or self.sender_name
+        sender_email = email or self.sender_email
+        if sender_name:
+            return f"{sender_name} <{sender_email}>"
+        return sender_email
+
     def send_email(
         self,
         to: list[str],
@@ -53,6 +61,8 @@ class SESClient:
         html_body: str,
         text_body: Optional[str] = None,
         reply_to: Optional[list[str]] = None,
+        sender_name: Optional[str] = None,
+        sender_email: Optional[str] = None,
     ) -> str:
         """
         Send an email via SES.
@@ -63,6 +73,8 @@ class SESClient:
             html_body: HTML email body
             text_body: Plain text email body (fallback)
             reply_to: Optional reply-to addresses
+            sender_name: Override display name (e.g. "CrossBoundary Energy")
+            sender_email: Override sender email (e.g. "cbe@mail.frontiermind.co")
 
         Returns:
             SES message ID
@@ -70,7 +82,8 @@ class SESClient:
         Raises:
             SESError: If sending fails
         """
-        if not self.sender_email:
+        effective_email = sender_email or self.sender_email
+        if not effective_email:
             raise SESError("SES_SENDER_EMAIL not configured")
 
         body: Dict[str, Any] = {
@@ -80,7 +93,7 @@ class SESClient:
             body["Text"] = {"Charset": "UTF-8", "Data": text_body}
 
         kwargs: Dict[str, Any] = {
-            "Source": self.sender,
+            "Source": self.format_sender(sender_name, sender_email),
             "Destination": {"ToAddresses": to},
             "Message": {
                 "Subject": {"Charset": "UTF-8", "Data": subject},

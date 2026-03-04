@@ -58,7 +58,7 @@ class FileUploadSuccessResponse(BaseModel):
     success: bool = True
     message: str
     observation_id: int
-    grp_per_kwh: float
+    mrp_per_kwh: float
     total_variable_charges: float
     total_kwh_invoiced: float
     line_items_count: int
@@ -98,7 +98,7 @@ async def get_submission_form(request: Request, token: str) -> SubmissionFormCon
     submission_type = record.get("submission_type", "form_response")
 
     # Build fields based on submission type
-    if submission_type == "grp_upload":
+    if submission_type == "mrp_upload":
         fields = [
             {"name": "utility_invoice", "label": "Utility Invoice", "type": "file", "required": True},
         ]
@@ -186,7 +186,7 @@ async def submit_response(
 @router.post(
     "/{token}/upload",
     response_model=FileUploadSuccessResponse,
-    summary="Submit file via token (GRP upload)",
+    summary="Submit file via token (MRP upload)",
 )
 @limiter.limit("5/minute")
 async def submit_file(
@@ -197,7 +197,7 @@ async def submit_file(
     submitted_by_email: Optional[str] = Form(None),
 ) -> FileUploadSuccessResponse:
     """
-    Public endpoint: upload a utility invoice file for GRP extraction.
+    Public endpoint: upload a utility invoice file for MRP extraction.
     No authentication required. Rate limited to 5/minute.
     """
     require_services()
@@ -211,7 +211,7 @@ async def submit_file(
         )
 
     # 2. Validate submission type
-    if record.get("submission_type") != "grp_upload":
+    if record.get("submission_type") != "mrp_upload":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail={"success": False, "message": "This token does not accept file uploads"},
@@ -295,7 +295,7 @@ async def submit_file(
     year = billing_month_date.year
     month = billing_month_date.month
     safe_filename = f"{file_hash[:16]}{ext}"
-    s3_key = f"grp-uploads/{org_id}/{project_id}/{year}/{month:02d}/{safe_filename}"
+    s3_key = f"mrp-uploads/{org_id}/{project_id}/{year}/{month:02d}/{safe_filename}"
 
     _upload_to_s3(file_bytes, s3_key, file.content_type)
 
@@ -327,11 +327,11 @@ async def submit_file(
             },
         )
 
-    # 10. Extract and store GRP (synchronous — client waits ~10-30s)
+    # 10. Extract and store MRP (synchronous — client waits ~10-30s)
     try:
-        from services.grp.extraction_service import GRPExtractionService
+        from services.mrp.extraction_service import MRPExtractionService
 
-        extraction_service = GRPExtractionService()
+        extraction_service = MRPExtractionService()
 
         result = extraction_service.extract_and_store(
             file_bytes=file_bytes,
@@ -346,7 +346,7 @@ async def submit_file(
         )
 
     except Exception as e:
-        logger.error(f"GRP extraction failed: {e}", exc_info=True)
+        logger.error(f"MRP extraction failed: {e}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail={
@@ -367,7 +367,7 @@ async def submit_file(
                 "file_hash": file_hash,
                 "s3_path": s3_key,
                 "observation_id": result["observation_id"],
-                "grp_per_kwh": result["grp_per_kwh"],
+                "mrp_per_kwh": result["mrp_per_kwh"],
             },
             submitted_by_email=submitted_by_email,
             ip_address=ip_address,
@@ -386,7 +386,7 @@ async def submit_file(
         success=True,
         message="Invoice processed successfully",
         observation_id=result["observation_id"],
-        grp_per_kwh=result["grp_per_kwh"],
+        mrp_per_kwh=result["mrp_per_kwh"],
         total_variable_charges=result["total_variable_charges"],
         total_kwh_invoiced=result["total_kwh_invoiced"],
         line_items_count=result["line_items_count"],
@@ -406,7 +406,7 @@ def _upload_to_s3(file_bytes: bytes, s3_key: str, content_type: Optional[str] = 
             detail={"success": False, "message": "S3 storage is not available"},
         )
 
-    bucket = os.getenv("GRP_S3_BUCKET", "frontiermind-grp-uploads")
+    bucket = os.getenv("MRP_S3_BUCKET", "frontiermind-mrp-uploads")
     region = os.getenv("AWS_REGION", "us-east-1")
 
     s3_client = boto3.client("s3", region_name=region)

@@ -1,15 +1,15 @@
 """
-Grid Reference Price (GRP) calculators.
+Market Reference Price (MRP) calculators.
 
-The GRP is the utility grid tariff reference price used in GRID-discount
+The MRP is the utility grid tariff reference price used in GRID-discount
 pricing models. Calculated annually from Utility Reference Invoices.
 
-Formula: GRP = total_variable_charges / total_kwh_invoiced
+Formula: MRP = total_variable_charges / total_kwh_invoiced
 
 Filters:
 - Only variable energy charges (invoice_line_item_type_code == 'VARIABLE_ENERGY')
 - Exclude TAX line items
-- The method code is stored in clause_tariff.logic_parameters.grp_method.
+- The method code is stored in clause_tariff.logic_parameters.mrp_method.
 """
 
 from abc import ABC, abstractmethod
@@ -20,8 +20,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 
-class BaseGRPCalculator(ABC):
-    """Abstract base for GRP calculation methods."""
+class BaseMRPCalculator(ABC):
+    """Abstract base for MRP calculation methods."""
 
     def __init__(self, params: dict):
         self.params = params
@@ -29,7 +29,7 @@ class BaseGRPCalculator(ABC):
     @abstractmethod
     def calculate(self, invoice_line_items: List[dict]) -> Optional[Decimal]:
         """
-        Calculate Grid Reference Price from invoice line items.
+        Calculate Market Reference Price from invoice line items.
 
         Args:
             invoice_line_items: List of dicts with keys:
@@ -38,14 +38,14 @@ class BaseGRPCalculator(ABC):
                 - invoice_line_item_type_code: str (e.g. 'VARIABLE_ENERGY', 'DEMAND', 'FIXED', 'TAX')
 
         Returns:
-            GRP per kWh in local currency, or None if insufficient data.
+            MRP per kWh in local currency, or None if insufficient data.
         """
         pass
 
 
-class UtilityVariableChargesToUCalculator(BaseGRPCalculator):
+class UtilityVariableChargesToUCalculator(BaseMRPCalculator):
     """
-    GRP = sum(variable energy charges, non-tax) / sum(kWh invoiced)
+    MRP = sum(variable energy charges, non-tax) / sum(kWh invoiced)
 
     Used by: Ghana GRID contracts (Exhibit A).
 
@@ -55,7 +55,7 @@ class UtilityVariableChargesToUCalculator(BaseGRPCalculator):
 
     def calculate(self, invoice_line_items: List[dict]) -> Optional[Decimal]:
         if not invoice_line_items:
-            logger.warning("GRP calculation: no invoice line items provided")
+            logger.warning("MRP calculation: no invoice line items provided")
             return None
 
         total_variable_charges = Decimal('0')
@@ -76,26 +76,26 @@ class UtilityVariableChargesToUCalculator(BaseGRPCalculator):
 
         if total_kwh <= 0:
             logger.warning(
-                "GRP calculation: zero kWh invoiced after filtering. "
+                "MRP calculation: zero kWh invoiced after filtering. "
                 f"Total items: {len(invoice_line_items)}"
             )
             return None
 
-        grp = total_variable_charges / total_kwh
+        mrp = total_variable_charges / total_kwh
 
         logger.info(
-            f"GRP (UtilityVariableChargesToU): "
+            f"MRP (UtilityVariableChargesToU): "
             f"charges={total_variable_charges:.2f}, "
             f"kWh={total_kwh:.2f}, "
-            f"GRP={grp:.6f}/kWh"
+            f"MRP={mrp:.6f}/kWh"
         )
 
-        return grp
+        return mrp
 
 
-class UtilityTotalChargesCalculator(BaseGRPCalculator):
+class UtilityTotalChargesCalculator(BaseMRPCalculator):
     """
-    GRP = sum(all non-tax charges) / sum(kWh invoiced)
+    MRP = sum(all non-tax charges) / sum(kWh invoiced)
 
     Simpler method that includes all charges except taxes.
     """
@@ -123,48 +123,48 @@ class UtilityTotalChargesCalculator(BaseGRPCalculator):
         if total_kwh <= 0:
             return None
 
-        grp = total_charges / total_kwh
+        mrp = total_charges / total_kwh
 
         logger.info(
-            f"GRP (UtilityTotalCharges): "
+            f"MRP (UtilityTotalCharges): "
             f"charges={total_charges:.2f}, kWh={total_kwh:.2f}, "
-            f"GRP={grp:.6f}/kWh"
+            f"MRP={mrp:.6f}/kWh"
         )
 
-        return grp
+        return mrp
 
 
 # =============================================================================
 # Calculator Registry
 # =============================================================================
 
-GRP_CALCULATORS: Dict[str, type] = {
+MRP_CALCULATORS: Dict[str, type] = {
     'utility_variable_charges_tou': UtilityVariableChargesToUCalculator,
     'utility_total_charges': UtilityTotalChargesCalculator,
 }
 
 
-def calculate_grp(
+def calculate_mrp(
     logic_parameters: dict,
     invoice_line_items: List[dict]
 ) -> Optional[Decimal]:
     """
-    Dispatch to the correct GRP calculator based on logic_parameters.
+    Dispatch to the correct MRP calculator based on logic_parameters.
 
     Args:
         logic_parameters: clause_tariff.logic_parameters dict.
-                          Must contain 'grp_method' key.
+                          Must contain 'mrp_method' key.
         invoice_line_items: Utility Reference Invoice line items.
 
     Returns:
-        GRP per kWh, or None if insufficient data.
+        MRP per kWh, or None if insufficient data.
     """
-    method = logic_parameters.get('grp_method') or 'utility_variable_charges_tou'
-    if method == 'utility_variable_charges_tou' and not logic_parameters.get('grp_method'):
-        logger.info("No grp_method specified — defaulting to utility_variable_charges_tou")
+    method = logic_parameters.get('mrp_method') or 'utility_variable_charges_tou'
+    if method == 'utility_variable_charges_tou' and not logic_parameters.get('mrp_method'):
+        logger.info("No mrp_method specified — defaulting to utility_variable_charges_tou")
 
-    calculator_class = GRP_CALCULATORS.get(method)
+    calculator_class = MRP_CALCULATORS.get(method)
     if not calculator_class:
-        raise ValueError(f"Unknown GRP method: {method}")
+        raise ValueError(f"Unknown MRP method: {method}")
 
     return calculator_class(logic_parameters).calculate(invoice_line_items)

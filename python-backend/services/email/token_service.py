@@ -39,8 +39,8 @@ class TokenService:
         Generate a new submission token.
 
         Args:
-            project_id: Project context for GRP and other project-scoped submissions.
-            submission_type: 'form_response' (default) or 'grp_upload'.
+            project_id: Project context for MRP and other project-scoped submissions.
+            submission_type: 'form_response' (default) or 'mrp_upload'.
             submission_url: Full URL to embed in submission_fields for later retrieval.
 
         Returns:

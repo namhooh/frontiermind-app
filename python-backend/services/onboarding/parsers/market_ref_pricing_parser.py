@@ -4,7 +4,7 @@ Market Reference Pricing parser (.xlsx) for cross-examination pipeline.
 Parses: 'Sage Contract Extracts market Ref pricing data.xlsx'
 Tabs:
   - PO Summary: per-project tariff summary
-  - Per-project sheets (KAS01, MOH001, etc.): monthly GRP observations
+  - Per-project sheets (KAS01, MOH001, etc.): monthly MRP observations
   - Market reference pricing sheets: historical reference prices
 """
 
@@ -160,13 +160,13 @@ class MarketRefPricingParser:
         wb.close()
         return sheets
 
-    def parse_grp_monthly(self, sage_id: str) -> List[Dict]:
+    def parse_mrp_monthly(self, sage_id: str) -> List[Dict]:
         """
-        Parse monthly GRP observations from a project-specific sheet.
+        Parse monthly MRP observations from a project-specific sheet.
 
         Handles varied sheet layouts:
         - Standard: ZDAT, ZPRICODE1..N, ZPRITOT (KAS01, UGL01, GBL01)
-        - Multi-section: multiple GRP sections side-by-side (MOH001) — uses first section
+        - Multi-section: multiple MRP sections side-by-side (MOH001) — uses first section
         - No components: just ZDAT + ZPRITOT (NBL01, NBL02)
         - Different components: Kenyan tariff codes (UTK01, TBM01)
         - Offset headers: ZDAT not in first column (JAB01)
@@ -174,7 +174,7 @@ class MarketRefPricingParser:
         Returns list of:
         {
             "billing_month": "2021-01",       # YYYY-MM
-            "grp_per_kwh": 0.835,             # ZPRITOT / Price total
+            "mrp_per_kwh": 0.835,             # ZPRITOT / Price total
             "tariff_components": {            # raw component charges (if available)
                 "energy_charge": 0.7952,
                 "govt_levy": 0.0159,
@@ -351,9 +351,9 @@ class MarketRefPricingParser:
             else:
                 break
 
-            # Get GRP (ZPRITOT)
-            grp_val = _safe_float(row[zpritot_col] if zpritot_col < len(row) else None)
-            if grp_val is None:
+            # Get MRP (ZPRITOT)
+            mrp_val = _safe_float(row[zpritot_col] if zpritot_col < len(row) else None)
+            if mrp_val is None:
                 continue
 
             # Get component breakdown
@@ -367,11 +367,11 @@ class MarketRefPricingParser:
             billing_month = period_date.strftime("%Y-%m")
             observations.append({
                 "billing_month": billing_month,
-                "grp_per_kwh": grp_val,
+                "mrp_per_kwh": mrp_val,
                 "tariff_components": components,
             })
 
-        logger.info(f"Parsed {len(observations)} monthly GRP observations from sheet {sheet_name}")
+        logger.info(f"Parsed {len(observations)} monthly MRP observations from sheet {sheet_name}")
         return observations
 
     def _parse_po_summary(

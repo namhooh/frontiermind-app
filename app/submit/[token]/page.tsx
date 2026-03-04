@@ -37,7 +37,7 @@ interface PeriodMismatch {
 }
 
 interface ExtractionResult {
-  grp_per_kwh: number
+  mrp_per_kwh: number
   total_variable_charges: number
   total_kwh_invoiced: number
   line_items_count: number
@@ -69,7 +69,7 @@ export default function SubmissionPage() {
   const [errorMessage, setErrorMessage] = useState('')
   const [extractionResult, setExtractionResult] = useState<ExtractionResult | null>(null)
 
-  const isGRPUpload = config?.submission_type === 'grp_upload'
+  const isMRPUpload = config?.submission_type === 'mrp_upload'
 
   useEffect(() => {
     async function loadForm() {
@@ -114,7 +114,7 @@ export default function SubmissionPage() {
     setErrorMessage('')
 
     try {
-      if (isGRPUpload) {
+      if (isMRPUpload) {
         // File upload: POST to /api/submit/{token}/upload as multipart
         if (!selectedFile) {
           setErrorMessage('Please select a file to upload.')
@@ -147,7 +147,7 @@ export default function SubmissionPage() {
 
         const result = await res.json()
         setExtractionResult({
-          grp_per_kwh: result.grp_per_kwh,
+          mrp_per_kwh: result.mrp_per_kwh,
           total_variable_charges: result.total_variable_charges,
           total_kwh_invoiced: result.total_kwh_invoiced,
           line_items_count: result.line_items_count,
@@ -247,9 +247,9 @@ export default function SubmissionPage() {
               <h1 className="text-lg font-semibold text-slate-900 mb-2">Invoice Processed</h1>
               <div className="mt-4 text-left bg-slate-50 rounded-lg p-4 space-y-2">
                 <div className="flex justify-between text-sm">
-                  <span className="text-slate-500">GRP</span>
+                  <span className="text-slate-500">MRP</span>
                   <span className="font-medium text-slate-900">
-                    {extractionResult.grp_per_kwh.toFixed(4)} /kWh
+                    {extractionResult.mrp_per_kwh.toFixed(4)} /kWh
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
@@ -326,7 +326,7 @@ export default function SubmissionPage() {
             {config?.organization_name || 'FrontierMind'}
           </h1>
           <p className="text-slate-400 text-sm mt-1">
-            {isGRPUpload
+            {isMRPUpload
               ? `Utility Invoice Upload${config?.project_name ? ` — ${config.project_name}` : ''}`
               : 'Submission Form'
             }
@@ -475,12 +475,12 @@ export default function SubmissionPage() {
               className="w-full bg-blue-600 text-white rounded-lg py-2.5 text-sm font-medium hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
             >
               {submitting
-                ? (isGRPUpload ? 'Processing Invoice...' : 'Submitting...')
-                : (isGRPUpload ? 'Upload & Process' : 'Submit')
+                ? (isMRPUpload ? 'Processing Invoice...' : 'Submitting...')
+                : (isMRPUpload ? 'Upload & Process' : 'Submit')
               }
             </button>
 
-            {isGRPUpload && submitting && (
+            {isMRPUpload && submitting && (
               <p className="text-xs text-slate-400 text-center">
                 This may take 10-30 seconds while the invoice is being processed.
               </p>

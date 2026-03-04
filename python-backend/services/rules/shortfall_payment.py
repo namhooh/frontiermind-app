@@ -4,7 +4,7 @@ Shortfall Payment Calculator.
 Formula: SP = MAX(0, (E_Guaranteed - E_Period) x (P_Alternate - P_Solar))
 Annual cap: configurable per production_guarantee row (shortfall_cap_usd)
 
-P_Alternate: Grid Reference Price for the guarantee period (from reference_price table)
+P_Alternate: Market Reference Price for the guarantee period (from reference_price table)
 P_Solar: Average payment made by customer for solar power (from invoice data)
 
 This is a standalone calculator used by ProductionGuaranteeRule and can
@@ -40,7 +40,7 @@ class ShortfallPaymentCalculator:
         Args:
             guaranteed_kwh: Guaranteed annual energy output (from production_guarantee).
             actual_kwh: Actual metered annual energy output.
-            p_alternate: Grid Reference Price per kWh (from reference_price).
+            p_alternate: Market Reference Price per kWh (from reference_price).
             p_solar: Average solar payment per kWh (from invoice totals).
             annual_cap_usd: Optional annual cap in USD.
             fx_rate: Optional FX rate (local currency per USD) for cap conversion.

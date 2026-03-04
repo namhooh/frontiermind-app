@@ -254,6 +254,40 @@ class NotificationService:
     # HELPERS
     # =========================================================================
 
+    def _get_org_sender(self, org_id: int) -> Dict[str, Optional[str]]:
+        """Look up the org's default email sender from org_email_address table.
+
+        Returns dict with 'sender_name' and 'sender_email', or empty values
+        to fall back to global SES defaults.
+        """
+        try:
+            from db.database import get_db_connection
+
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT display_name, email_prefix, domain
+                        FROM org_email_address
+                        WHERE organization_id = %s
+                          AND label = 'default'
+                          AND is_active = true
+                        LIMIT 1
+                        """,
+                        (org_id,),
+                    )
+                    row = cursor.fetchone()
+                    if row:
+                        row = dict(row)
+                        return {
+                            "sender_name": row.get("display_name"),
+                            "sender_email": f"{row['email_prefix']}@{row['domain']}",
+                        }
+        except Exception as e:
+            logger.warning(f"Failed to look up org sender for org_id={org_id}: {e}")
+
+        return {"sender_name": None, "sender_email": None}
+
     def _send_single_email(
         self,
         org_id: int,
@@ -269,6 +303,9 @@ class NotificationService:
         reminder_count: int = 0,
     ) -> tuple:
         """Send a single email and log the result. Returns (log_id, success)."""
+        # Look up org-specific sender
+        org_sender = self._get_org_sender(org_id)
+
         # Create log entry (pending)
         log_id = self.repo.create_email_log({
             "organization_id": org_id,
@@ -290,6 +327,8 @@ class NotificationService:
                 subject=subject,
                 html_body=html_body,
                 text_body=text_body,
+                sender_name=org_sender["sender_name"],
+                sender_email=org_sender["sender_email"],
             )
             self.repo.update_email_log_status(
                 log_id, "delivered", ses_message_id=ses_message_id

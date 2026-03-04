@@ -1233,7 +1233,7 @@ and token-based external submission collection.
 - `operating_year` - INTEGER NOT NULL
 - `period_start` - DATE NOT NULL
 - `period_end` - DATE NOT NULL
-- `calculated_grp_per_kwh` - DECIMAL — GRP in local currency per kWh
+- `calculated_mrp_per_kwh` - DECIMAL — MRP in local currency per kWh *(renamed from `calculated_grp_per_kwh` in v4.3)*
 - `currency_id` - BIGINT REFERENCES currency(id)
 - `total_variable_charges` - DECIMAL
 - `total_kwh_invoiced` - DECIMAL
@@ -1285,7 +1285,7 @@ and token-based external submission collection.
 - Amendment versioning uses supersedes chains + is_current flags (not separate history tables)
 - Triggers enforce cross-contract validation and auto-maintain contract.has_amendments
 - metering_type (net/export_only) kept separate from meter_type (REVENUE/PRODUCTION/IRRADIANCE)
-- GRP charge classification moved from received_invoice_line_item columns to invoice_line_item_type FK
+- MRP charge classification moved from received_invoice_line_item columns to invoice_line_item_type FK *(originally "GRP"; renamed in v4.3)*
 - project_document and project_onboarding_snapshot dropped — not needed for current workflow
 
 ---
@@ -1444,7 +1444,7 @@ and token-based external submission collection.
 - `billing_month` - DATE NOT NULL — First of month
 - `floor_local` - DECIMAL — Floor in local currency (GHS)
 - `ceiling_local` - DECIMAL — Ceiling in local currency (GHS)
-- `discounted_grp_local` - DECIMAL — GRP × (1 - discount) in local currency
+- `discounted_mrp_local` - DECIMAL — MRP × (1 - discount) in local currency *(renamed from `discounted_grp_local` in v4.3)*
 - `effective_tariff_local` - DECIMAL NOT NULL — Final tariff in local currency
 - `rate_binding` - VARCHAR(20) NOT NULL — 'floor', 'ceiling', or 'discounted'
 - `calculation_basis` - TEXT — Audit trail
@@ -1474,9 +1474,9 @@ and token-based external submission collection.
 
 ---
 
-### v9.4 - 2026-02-20 (GRP Ingestion — Monthly Observations & File Upload)
+### v9.4 - 2026-02-20 (MRP Ingestion — Monthly Observations & File Upload)
 
-**Description:** Extends `reference_price` for monthly granularity (individual utility invoice observations alongside annual aggregates). Extends `submission_token` with `project_id` and `submission_type` to support file-upload-based GRP collection workflow.
+**Description:** Extends `reference_price` for monthly granularity (individual utility invoice observations alongside annual aggregates). Extends `submission_token` with `project_id` and `submission_type` to support file-upload-based MRP collection workflow. *(Note: originally documented as "GRP"; renamed to MRP in v4.3.)*
 
 **Migrations:**
 - `database/migrations/037_grp_ingestion.sql`
@@ -1484,10 +1484,10 @@ and token-based external submission collection.
 **Key Changes:**
 
 **Extended submission_token table:**
-- `project_id` - BIGINT REFERENCES project(id) ON DELETE SET NULL — Project context for GRP and other project-scoped submissions
-- `submission_type` - VARCHAR(30) NOT NULL DEFAULT 'form_response' — Type: 'form_response' (default) or 'grp_upload'
-- CHECK constraint: `submission_type IN ('form_response', 'grp_upload')`
-- CHECK constraint: `submission_type != 'grp_upload' OR project_id IS NOT NULL` — GRP uploads require project context
+- `project_id` - BIGINT REFERENCES project(id) ON DELETE SET NULL — Project context for MRP and other project-scoped submissions
+- `submission_type` - VARCHAR(30) NOT NULL DEFAULT 'form_response' — Type: 'form_response' (default) or 'mrp_upload'
+- CHECK constraint: `submission_type IN ('form_response', 'mrp_upload')`
+- CHECK constraint: `submission_type != 'mrp_upload' OR project_id IS NOT NULL` — MRP uploads require project context
 
 **Extended reference_price table:**
 - Changed unique constraint from `(project_id, operating_year)` to `(project_id, observation_type, period_start)` — allows both monthly and annual rows per operating year without collision
@@ -1511,22 +1511,22 @@ and token-based external submission collection.
 - `services/tariff/rebased_market_price_engine.py`: Updated ON CONFLICT clause from `(project_id, operating_year)` to `(project_id, period_start)`, added `observation_type='annual'` to INSERT
 - `services/email/token_service.py`: Added `project_id` and `submission_type` parameters to `generate_token()`
 - `db/notification_repository.py`: Updated `create_submission_token()` to include `project_id` and `submission_type`; updated `get_submission_token_by_hash()` to JOIN project for `project_name`
-- `models/notifications.py`: Added `project_name` and `submission_type` to `SubmissionFormConfig`; added `GRPCollectionRequest` model
-- `api/submissions.py`: Added `POST /{token}/upload` endpoint for file-based GRP submissions with validation, S3 upload, and synchronous extraction
-- `api/notifications.py`: Added `POST /api/notifications/grp-collection` endpoint for GRP collection token generation
-- **New:** `services/grp/__init__.py` — Package init
-- **New:** `services/grp/extraction_service.py` — OCR (LlamaParse) + Claude structured extraction + GRP calculation + reference_price upsert
-- **New:** `services/prompts/grp_extraction_prompt.py` — Claude extraction prompt for utility invoice line items
+- `models/notifications.py`: Added `project_name` and `submission_type` to `SubmissionFormConfig`; added `MRPCollectionRequest` model *(renamed from `GRPCollectionRequest` in v4.3)*
+- `api/submissions.py`: Added `POST /{token}/upload` endpoint for file-based MRP submissions with validation, S3 upload, and synchronous extraction
+- `api/notifications.py`: Added `POST /api/notifications/mrp-collection` endpoint for MRP collection token generation
+- **New:** `services/mrp/__init__.py` — Package init *(renamed from `services/grp/` in v4.3)*
+- **New:** `services/mrp/extraction_service.py` — OCR (LlamaParse) + Claude structured extraction + MRP calculation + reference_price upsert
+- **New:** `services/prompts/mrp_extraction_prompt.py` — Claude extraction prompt for utility invoice line items *(renamed from `grp_extraction_prompt.py` in v4.3)*
 
 **Frontend Changes:**
-- `app/submit/[token]/page.tsx`: Added file upload field type (`type: 'file'`), month picker (`type: 'month'`), FormData submission for GRP uploads, extraction results display on success, "Upload Another" flow for reusable tokens
+- `app/submit/[token]/page.tsx`: Added file upload field type (`type: 'file'`), month picker (`type: 'month'`), FormData submission for MRP uploads, extraction results display on success, "Upload Another" flow for reusable tokens
 
 **Design Notes:**
-- GRP upload tokens use `max_uses=12` (one per month) — client bookmarks the link and returns monthly
-- File upload is synchronous (~10-30s): OCR → Claude extraction → GRP calculation → storage
+- MRP upload tokens use `max_uses=12` (one per month) — client bookmarks the link and returns monthly
+- File upload is synchronous (~10-30s): OCR → Claude extraction → MRP calculation → storage
 - Extracted line items stored in `source_metadata` JSONB (no separate line_items table)
-- `grp_aggregation_method` convention in `clause_tariff.logic_parameters` JSONB: `"annual_average"` or `"monthly"` (no schema change needed)
-- Files uploaded to S3 at `grp-uploads/{org_id}/{project_id}/{year}/{month}/{filename}`
+- `mrp_aggregation_method` convention in `clause_tariff.logic_parameters` JSONB: `"annual_average"` or `"monthly"` (no schema change needed) *(renamed from `grp_aggregation_method` in v4.3)*
+- Files uploaded to S3 at `mrp-uploads/{org_id}/{project_id}/{year}/{month}/{filename}` *(renamed from `grp-uploads/` in v4.3)*
 - Backward compatible: existing `RebasedMarketPriceEngine` annual observations continue to work with the new `(project_id, period_start)` constraint
 
 ---
@@ -1569,7 +1569,7 @@ and token-based external submission collection.
 
 ### v10.1 - 2026-02-22 (Pipeline Integrity Fixes)
 
-**Description:** Addresses 16 verified pipeline gaps across onboarding, GRP ingestion, and admin APIs. Fixes SQL section execution order, enables pre-flight validation, adds API key auth to admin endpoints, and resolves data type mismatches between parser output and DB constraints.
+**Description:** Addresses 16 verified pipeline gaps across onboarding, MRP ingestion, and admin APIs. Fixes SQL section execution order, enables pre-flight validation, adds API key auth to admin endpoints, and resolves data type mismatches between parser output and DB constraints.
 
 **Migration:** `database/migrations/039_pipeline_integrity_fixes.sql`
 
@@ -1577,15 +1577,15 @@ and token-based external submission collection.
 - **`reference_price`**: Added partial unique index `uq_reference_price_annual_project_year` on `(project_id, operating_year) WHERE observation_type = 'annual'` — prevents duplicate annual aggregation rows
 - **`asset_type`**: Seeded 4 missing codes: `tracker`, `meter`, `mounting_structure`, `combiner_box`
 - **`meter`**: Expanded `chk_meter_metering_type` CHECK constraint to include `'gross'` and `'bidirectional'`
-- **`clause_tariff`**: Idempotent GRP seed for GH-MOH01 using stable `tariff_group_key` lookup (replaces fragile `WHERE id = 2` from migration 037)
+- **`clause_tariff`**: Idempotent MRP seed for GH-MOH01 using stable `tariff_group_key` lookup (replaces fragile `WHERE id = 2` from migration 037)
 
 **Backend Changes:**
 - `python-backend/services/onboarding/onboarding_service.py`: Numeric section sort key (fixes `4.10` executing before `4.2`), pre-flight validation runs before upserts, `formula_type` auto-set for REBASED_MARKET_PRICE tariffs, staging DDL authority comment
 - `python-backend/api/entities.py`: Added `require_api_key` dependency to router (was unauthenticated)
-- `python-backend/api/grp.py`: Added `require_api_key` dependency, annual aggregation upsert uses new partial unique index
+- `python-backend/api/mrp.py`: Added `require_api_key` dependency, annual aggregation upsert uses new partial unique index *(renamed from `api/grp.py` in v4.3)*
 - `python-backend/services/onboarding/excel_parser.py`: `_map_asset_type()` produces canonical lowercase DB codes (was uppercase)
 - `python-backend/services/onboarding/ppa_parser.py`: Path traversal fix (UUID-based temp filenames), populates structured `default_rate` and `available_energy` fields
-- `python-backend/services/grp/extraction_service.py`: Recomputes `operating_year` after billing period reconciliation
+- `python-backend/services/mrp/extraction_service.py`: Recomputes `operating_year` after billing period reconciliation *(renamed from `services/grp/` in v4.3)*
 
 **Documentation Changes:**
 - `CBE_data_extracts/CBE_TO_FRONTIERMIND_MAPPING.md`: Fixed stale `tariff_structure` reference, updated meter gap status, added 8 new pipeline gap entries (10–17)
@@ -2172,5 +2172,105 @@ per-meter performance detail, and restructured frontend tabs.
 
 **New Documentation:**
 - `CBE_data_extracts/PROJECT_SOURCE_INVENTORY.md` — Project × document matrix for all 32 projects
+
+---
+
+### v4.3 - 2026-03-04 (Rename GRP → MRP — Terminology Change)
+
+**Description:** Renames "Grid Reference Price" (GRP) to "Market Reference Price" (MRP) across the entire application. This is a terminology-only change — no logic changes.
+
+**Migration:** `database/migrations/050_rename_grp_to_mrp.sql`
+
+**Column Renames:**
+| Table | Old Column | New Column |
+|-------|-----------|------------|
+| `reference_price` | `calculated_grp_per_kwh` | `calculated_mrp_per_kwh` |
+| `tariff_monthly_rate` | `discounted_grp_local` | `discounted_mrp_local` |
+
+**JSONB Key Updates (`clause_tariff.logic_parameters`):**
+- `grp_method` → `mrp_method`
+- `grp_included_components` → `mrp_included_components`
+- `grp_excluded_components` → `mrp_excluded_components`
+- `grp_time_window_start` → `mrp_time_window_start`
+- `grp_per_kwh` → `mrp_per_kwh`
+
+**Check Constraint Updates:**
+- `submission_token.submission_type`: `'grp_upload'` → `'mrp_upload'`
+- Existing rows in `reference_price` and `submission_token` updated
+
+**Comment Updates:**
+- `reference_price` table and `calculated_mrp_per_kwh` column
+- `tariff_monthly_rate.discounted_mrp_local` column
+- `submission_token.project_id` and `submission_token.submission_type` columns
+- `tariff_rate.reference_price_id` column
+
+**Backend File Renames:**
+- `models/grp.py` → `models/mrp.py`
+- `api/grp.py` → `api/mrp.py`
+- `services/grp/` → `services/mrp/`
+- `services/calculations/grid_reference_price.py` → `market_reference_price.py`
+- `services/prompts/grp_extraction_prompt.py` → `mrp_extraction_prompt.py`
+- `scripts/populate_grp_from_excel.py` → `populate_mrp_from_excel.py`
+- `scripts/patch_kas01_grp_template.py` → `patch_kas01_mrp_template.py`
+- `scripts/backfill_grp_method.py` → `backfill_mrp_method.py`
+
+**Backend Content Updates:**
+- All class names: `GRP*` → `MRP*` (e.g., `GRPObservation` → `MRPObservation`, `GRPExtractionService` → `MRPExtractionService`)
+- All API routes: `/grp-*` → `/mrp-*`
+- All function names: `*grp*` → `*mrp*` (e.g., `calculate_grp` → `calculate_mrp`)
+- S3 upload path: `grp-uploads/` → `mrp-uploads/`
+- Submission type: `'grp_upload'` → `'mrp_upload'`
+- Logic parameter keys in prompts, parsers, and onboarding services
+
+**Frontend File Renames:**
+- `app/projects/components/GRPSection.tsx` → `MRPSection.tsx`
+
+**Frontend Content Updates:**
+- Component: `GRPSection` → `MRPSection`
+- All TypeScript interfaces: `GRP*` → `MRP*`
+- All admin client methods: `*GRP*` → `*MRP*`
+- API route paths in admin client
+- UI labels: "Grid Reference Price" → "Market Reference Price"
+
+**Fixture/Script Updates:**
+- `database/scripts/project-onboarding/onboard_project.sql`: `grp_method` → `mrp_method`
+- `database/scripts/fixtures/kas01_dec2025.sql`: Column names, JSON keys, comments
+- `database/scripts/fixtures/moh01_dec2025.sql`: Column names, JSON keys, comments
+
+---
+
+### v8.1 - 2026-03-04 (Organization Email Addresses)
+
+**Description:** Maps organizations to dedicated email addresses on `mail.frontiermind.co` for bidirectional email — outbound notifications and inbound invoice ingestion from a single address per org.
+
+**Migration:** `database/migrations/051_org_email_address.sql`
+
+**New Table: `org_email_address`**
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | BIGSERIAL | Primary key |
+| `organization_id` | BIGINT | FK → `organization(id)` |
+| `email_prefix` | VARCHAR(63) | Local part (e.g., `cbe` → `cbe@mail.frontiermind.co`) |
+| `domain` | VARCHAR(255) | Email domain, default `mail.frontiermind.co` |
+| `display_name` | VARCHAR(200) | Sender display name in From header (e.g., `CrossBoundary Energy`) |
+| `label` | VARCHAR(100) | Purpose label (`default`, `billing`, etc.) |
+| `is_active` | BOOLEAN | Default `true` |
+| `created_at` | TIMESTAMPTZ | Auto-set |
+| `updated_at` | TIMESTAMPTZ | Auto-set via trigger |
+
+**Indexes:**
+- `ux_org_email_prefix_domain` — unique on `(email_prefix, domain)`
+- `ux_org_email_org_label` — unique on `(organization_id, label)`
+- `idx_org_email_prefix_active` — partial index for inbound routing lookup
+
+**RLS Policies:** Follows migration 032 pattern — org members read, org admins manage, service_role full access.
+
+**Seed Data:** CBE organization (id=1) → `cbe@mail.frontiermind.co`, display_name `CrossBoundary Energy`, label `default`.
+
+**Infrastructure Context:**
+- AWS SES domain: `mail.frontiermind.co` (verified via DKIM)
+- Inbound email: MX → SES → S3 (`frontiermind-email-ingest`) + SNS notification
+- Outbound sender: `SES_SENDER_EMAIL` secret updated to `cbe@mail.frontiermind.co`
+- Task definition env vars: `SES_INGEST_BUCKET`, `SES_SENDER_DOMAIN`
 
 ---

@@ -56,7 +56,7 @@
 | `extension_provisions` | Up to two (2) Additional Terms of five (5) years each, by mutual agreement. |
 | `payment_terms` | NET_30 |
 | `early_termination_schedule` | 1.155 USD/Wp (Y1) declining to 0.06 USD/Wp (Y20), 0.04 USD/Wp (Y21-25) |
-| `confidence_scores` | contract_term: 1.0, discount: 1.0, floor/ceiling: 1.0, shortfall: 1.0, excused_events: 1.0, payment_terms: 1.0, available_energy: 0.95, grp: 0.9 |
+| `confidence_scores` | contract_term: 1.0, discount: 1.0, floor/ceiling: 1.0, shortfall: 1.0, excused_events: 1.0, payment_terms: 1.0, available_energy: 0.95, mrp: 0.9 |
 
 ### 1.4 Tariff (clause_tariff)
 
@@ -80,13 +80,13 @@
 | `ceiling_rate` | 0.210 USD/kWh |
 | `escalation_rules` | `[{component: "min_solar_price", type: FIXED, value: 0.025, start_year: 2}, {component: "max_solar_price", type: NONE}]` |
 | `escalation_value` | null |
-| `grp_method` | null |
-| `grp_exclude_vat` | true |
-| `grp_exclude_demand_charges` | true |
-| `grp_time_window_start` | 06:00 |
-| `grp_time_window_end` | 18:00 |
-| `grp_calculation_due_days` | 15 |
-| `grp_verification_deadline_days` | 30 |
+| `mrp_method` | null |
+| `mrp_exclude_vat` | true |
+| `mrp_exclude_demand_charges` | true |
+| `mrp_time_window_start` | 06:00 |
+| `mrp_time_window_end` | 18:00 |
+| `mrp_calculation_due_days` | 15 |
+| `mrp_verification_deadline_days` | 30 |
 | `available_energy_method` | Full formula: EAvailable(x) = Ehist * Irr(x) / Irrhist * Intervals ... |
 | `irradiance_threshold_wm2` | 100 |
 | `interval_minutes` | 15 |
@@ -207,7 +207,7 @@ No contacts populated. Source Excel template contained no contact data.
 |---|-------|-------------|-----------|----------|-----------|
 | 1 | `customer_name` | *(blank)* | Polytanks Ghana Limited | PDF | Legal contract is authoritative; Excel field was empty |
 | 2 | `contract_term_years` | 25 | 20 initial + 2x5yr extensions | PDF (20) | Initial legal term; extensions stored separately in metadata |
-| 3 | Pricing model | Fixed Solar Tariff (0.1087 USD/kWh) | GRP-linked: 21% discount, floor 0.079, ceiling 0.210 | PDF (GRID) | Tariff structure corrected from FIXED to GRID |
+| 3 | Pricing model | Fixed Solar Tariff (0.1087 USD/kWh) | MRP-linked: 21% discount, floor 0.079, ceiling 0.210 | PDF (GRID) | Tariff structure corrected from FIXED to GRID |
 | 4 | `discount_pct` | *(blank)* | 21% | PDF (0.21) | Excel blank because Fixed tariff was selected |
 | 5 | `floor_rate` | *(blank)* | 0.079 USD/kWh | PDF | Available from Annexure C |
 | 6 | `ceiling_rate` | *(blank)* | 0.210 USD/kWh | PDF | Available from Annexure C |
@@ -243,7 +243,7 @@ No contacts populated. Source Excel template contained no contact data.
 | 26 | `clause_tariff.market_ref_currency` | `null` | GHS (id=5) | Fixed (preserved from prior upsert) |
 | 27 | `clause_tariff.logic_parameters.floor_rate` | `null` | 0.079 | Fixed |
 | 28 | `clause_tariff.logic_parameters.ceiling_rate` | `null` | 0.210 | Fixed |
-| 29 | `clause_tariff.logic_parameters.grp_method` | `null` | `null` | Open — should be `utility_variable_charges_tou` (see open item #9) |
+| 29 | `clause_tariff.logic_parameters.mrp_method` | `null` | `null` | Open — should be `utility_variable_charges_tou` (see open item #9) |
 | 30 | `production_guarantee.guaranteed_kwh` (Y1) | 3,249,363 | 3,249,363 | Base PPA value (not pro-rata) |
 | 31 | `production_guarantee.shortfall_cap_usd` | `null` | 119,000 | Fixed |
 | 32 | `production_guarantee.shortfall_cap_fx_rule` | `null` | Agreed Exchange Rate on invoicing date | Fixed |
@@ -306,8 +306,8 @@ Fields that were correctly set by the manual script but are not handled by the a
 | R1 | `tariff_structure_id` | GRID (id=2) | FIXED (id=1) | Pipeline uses Excel value; Excel has "FIXED" because template was filled for fixed tariff |
 | R2 | `energy_sale_type_id` | TAKE_OR_PAY (id=1) | FIXED_SOLAR | Reference tables aligned with Excel template dropdowns; normalizer updated (2026-02-19) |
 | R3 | `escalation_type_id` | GRID_PASSTHROUGH (id=5) | REBASED_MARKET_PRICE | Reference tables aligned with Excel template dropdowns; normalizer maps "Rebased Market Price" (2026-02-19) |
-| R4 | `grp_method` | `utility_variable_charges_tou` | null | Neither Excel nor LLM extracts `grp_method` as a logic_parameters key |
-| R5 | `grp_exclude_savings_charges` | true | *(not set)* | LLM returned null for this field |
+| R4 | `mrp_method` | `utility_variable_charges_tou` | null | Neither Excel nor LLM extracts `mrp_method` as a logic_parameters key |
+| R5 | `mrp_exclude_savings_charges` | true | *(not set)* | LLM returned null for this field |
 | R6 | `meter.location_description` | BBM1, BBM2, Bottles, PPL 1, PPL 2 | null | Excel parser does not extract meter location |
 | R7 | `meter.metering_type` | export_only | null | Excel parser does not extract metering type |
 | R8 | `meter.meter_type_id` | REVENUE (id=1) | null | Excel parser does not extract meter type |
@@ -399,12 +399,12 @@ Migration 034 backfill items (all fixed):
 
 1. **`contract.effective_date`** and **`end_date`** — Neither Excel nor LLM extraction provided the contract execution date. Requires manual lookup of the signed PPA.
 2. **`customer_contact`** — No contacts found in Excel template. Requires manual entry from CBE operational records.
-3. **`reference_price`** — GRP tariff calculation needs ECG market reference pricing data. Requires separate market data ingestion.
+3. **`reference_price`** — MRP tariff calculation needs ECG market reference pricing data. Requires separate market data ingestion.
 4. **`production_forecast.source_metadata`** — Supplementary; core forecast data intact.
 5. **`tariff_structure_id`** — Pipeline should infer GRID from PPA data (floor/ceiling/discount presence) instead of using Excel's FIXED value.
 6. ~~**`energy_sale_type_id`**~~ — **Fixed (2026-02-19).** Reference tables aligned with Excel template dropdowns; normalizer maps Excel values to DB codes. GH-MOH01 set to FIXED_SOLAR.
 7. ~~**`escalation_type_id`**~~ — **Fixed (2026-02-19).** Reference tables aligned with Excel template dropdowns; normalizer maps "Rebased Market Price" → REBASED_MARKET_PRICE. GH-MOH01 set to REBASED_MARKET_PRICE.
 8. **Meter attributes** — Excel parser should extract `location_description`, `metering_type`, and `meter_type_id` from the onboarding template.
-9. **`grp_method`** — Pipeline should set `grp_method` in logic_parameters (e.g., `utility_variable_charges_tou`) when GRP parameters are present.
-10. **`grp_exclude_savings_charges`** — LLM returned null; may need prompt refinement or default-to-true when other GRP exclusions are set.
+9. **`mrp_method`** — Pipeline should set `mrp_method` in logic_parameters (e.g., `utility_variable_charges_tou`) when MRP parameters are present.
+10. **`mrp_exclude_savings_charges`** — LLM returned null; may need prompt refinement or default-to-true when other MRP exclusions are set.
 11. **Guarantee pro-rata adjustment** — Pipeline uses base PPA guarantee values. Consider applying (actual DC / expected DC) capacity ratio adjustment for systems where installed capacity differs from PPA design capacity.

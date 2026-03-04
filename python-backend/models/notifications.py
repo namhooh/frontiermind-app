@@ -161,9 +161,9 @@ class SubmitResponseRequest(BaseModel):
     submitted_by_email: Optional[str] = Field(None, max_length=255)
 
 
-class GRPCollectionRequest(BaseModel):
-    """Request to generate a GRP collection token."""
-    project_id: int = Field(..., description="Project for GRP collection")
+class MRPCollectionRequest(BaseModel):
+    """Request to generate a MRP collection token."""
+    project_id: int = Field(..., description="Project for MRP collection")
     counterparty_id: Optional[int] = Field(None, description="Utility counterparty")
     operating_year: int = Field(..., ge=1, description="Contract operating year")
     max_uses: int = Field(12, ge=1, le=24, description="Max uploads (default 12 = one per month)")
