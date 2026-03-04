@@ -2,8 +2,8 @@
 Notification repository for database operations.
 
 Provides CRUD operations for email_template, email_notification_schedule,
-email_log, submission_token, and submission_response tables
-as defined in migration 032_email_notification_engine.sql.
+outbound_message, submission_token, and inbound_message tables
+as defined in migrations 032 and 052.
 """
 
 import logging
@@ -175,6 +175,7 @@ class NotificationRepository:
         self,
         org_id: int,
         include_inactive: bool = False,
+        project_id: Optional[int] = None,
     ) -> List[Dict[str, Any]]:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
@@ -193,6 +194,10 @@ class NotificationRepository:
 
                 if not include_inactive:
                     query += " AND is_active = true"
+
+                if project_id is not None:
+                    query += " AND project_id = %s"
+                    params.append(project_id)
 
                 query += " ORDER BY name"
                 cursor.execute(query, params)
@@ -313,15 +318,15 @@ class NotificationRepository:
                 conn.commit()
 
     # =========================================================================
-    # EMAIL LOG METHODS
+    # OUTBOUND MESSAGE METHODS
     # =========================================================================
 
-    def create_email_log(self, data: Dict[str, Any]) -> int:
+    def create_outbound_message(self, data: Dict[str, Any]) -> int:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 cursor.execute(
                     """
-                    INSERT INTO email_log (
+                    INSERT INTO outbound_message (
                         organization_id, email_notification_schedule_id, email_template_id,
                         recipient_email, recipient_name, subject, email_status,
                         ses_message_id, reminder_count, invoice_header_id,
@@ -347,7 +352,7 @@ class NotificationRepository:
                 conn.commit()
                 return cursor.fetchone()["id"]
 
-    def update_email_log_status(
+    def update_outbound_message_status(
         self,
         log_id: int,
         status: str,
@@ -374,50 +379,73 @@ class NotificationRepository:
 
                 params.append(log_id)
                 cursor.execute(
-                    f"UPDATE email_log SET {', '.join(sets)} WHERE id = %s",
+                    f"UPDATE outbound_message SET {', '.join(sets)} WHERE id = %s",
                     params,
                 )
                 conn.commit()
 
-    def list_email_logs(
+    def list_outbound_messages(
         self,
         org_id: int,
         invoice_header_id: Optional[int] = None,
         schedule_id: Optional[int] = None,
         status: Optional[str] = None,
+        project_id: Optional[int] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[Dict[str, Any]], int]:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                where = "WHERE organization_id = %s"
+                where = "WHERE om.organization_id = %s"
                 params: List[Any] = [org_id]
 
                 if invoice_header_id:
-                    where += " AND invoice_header_id = %s"
+                    where += " AND om.invoice_header_id = %s"
                     params.append(invoice_header_id)
                 if schedule_id:
-                    where += " AND email_notification_schedule_id = %s"
+                    where += " AND om.email_notification_schedule_id = %s"
                     params.append(schedule_id)
                 if status:
-                    where += " AND email_status = %s"
+                    where += " AND om.email_status = %s"
                     params.append(status)
 
+                # Multi-path JOIN for project_id filtering
+                if project_id is not None:
+                    where += """
+                        AND (
+                            (om.invoice_header_id IS NOT NULL AND EXISTS (
+                                SELECT 1 FROM invoice_header ih
+                                WHERE ih.id = om.invoice_header_id AND ih.project_id = %s
+                            ))
+                            OR
+                            (om.submission_token_id IS NOT NULL AND EXISTS (
+                                SELECT 1 FROM submission_token st
+                                WHERE st.id = om.submission_token_id AND st.project_id = %s
+                            ))
+                            OR
+                            (om.email_notification_schedule_id IS NOT NULL AND EXISTS (
+                                SELECT 1 FROM email_notification_schedule ens
+                                WHERE ens.id = om.email_notification_schedule_id AND ens.project_id = %s
+                            ))
+                        )
+                    """
+                    params.extend([project_id, project_id, project_id])
+
                 # Count
-                cursor.execute(f"SELECT COUNT(*) as cnt FROM email_log {where}", params)
+                cursor.execute(f"SELECT COUNT(*) as cnt FROM outbound_message om {where}", params)
                 total = cursor.fetchone()["cnt"]
 
                 # Data
                 cursor.execute(
                     f"""
-                    SELECT id, organization_id, email_notification_schedule_id, email_template_id,
-                           recipient_email, recipient_name, subject, email_status,
-                           ses_message_id, reminder_count, invoice_header_id,
-                           submission_token_id, error_message, sent_at,
-                           delivered_at, created_at
-                    FROM email_log
+                    SELECT om.id, om.organization_id, om.email_notification_schedule_id, om.email_template_id,
+                           om.recipient_email, om.recipient_name, om.subject, om.email_status,
+                           om.ses_message_id, om.reminder_count, om.invoice_header_id,
+                           om.submission_token_id, om.error_message, om.sent_at,
+                           om.delivered_at, om.created_at
+                    FROM outbound_message om
                     {where}
-                    ORDER BY created_at DESC
+                    ORDER BY om.created_at DESC
                     LIMIT %s OFFSET %s
                     """,
                     params + [limit, offset],
@@ -434,7 +462,7 @@ class NotificationRepository:
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
                 query = """
-                    SELECT COUNT(*) as cnt FROM email_log
+                    SELECT COUNT(*) as cnt FROM outbound_message
                     WHERE organization_id = %s
                       AND invoice_header_id = %s
                       AND email_status NOT IN ('failed', 'suppressed')
@@ -554,6 +582,60 @@ class NotificationRepository:
                 cursor.execute(query, params)
                 return [dict(row) for row in cursor.fetchall()]
 
+    def list_contacts(
+        self,
+        org_id: int,
+        counterparty_id: Optional[int] = None,
+        project_id: Optional[int] = None,
+        include_all: bool = False,
+    ) -> List[Dict[str, Any]]:
+        """
+        List email-eligible contacts for the recipient picker.
+
+        Filters by org_id via counterparty.organization_id. Optionally filters
+        by counterparty_id or project_id (via contract → counterparty).
+        If include_all is False, only returns contacts with include_in_invoice_email = true.
+        """
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                query = """
+                    SELECT DISTINCT cc.id, cc.full_name, cc.email, cc.role,
+                           cc.counterparty_id, cp.name as counterparty_name
+                    FROM customer_contact cc
+                    JOIN counterparty cp ON cp.id = cc.counterparty_id
+                    WHERE cp.organization_id = %s
+                      AND cc.is_active = true
+                      AND cc.email IS NOT NULL
+                """
+                params: List[Any] = [org_id]
+
+                if not include_all:
+                    query += " AND cc.include_in_invoice_email = true"
+
+                if counterparty_id is not None:
+                    query += " AND cc.counterparty_id = %s"
+                    params.append(counterparty_id)
+
+                if project_id is not None:
+                    query += """
+                        AND cc.counterparty_id IN (
+                            SELECT DISTINCT c.counterparty_id
+                            FROM contract c
+                            WHERE c.organization_id = %s AND EXISTS (
+                                SELECT 1 FROM project p
+                                WHERE p.id = %s AND p.id = ANY(
+                                    SELECT ih.project_id FROM invoice_header ih WHERE ih.contract_id = c.id
+                                    UNION SELECT %s
+                                )
+                            )
+                        )
+                    """
+                    params.extend([org_id, project_id, project_id])
+
+                query += " ORDER BY cp.name, cc.full_name"
+                cursor.execute(query, params)
+                return [dict(row) for row in cursor.fetchall()]
+
     # =========================================================================
     # SUBMISSION TOKEN METHODS
     # =========================================================================
@@ -566,7 +648,7 @@ class NotificationRepository:
                     INSERT INTO submission_token (
                         organization_id, token_hash, submission_fields,
                         max_uses, expires_at, invoice_header_id,
-                        counterparty_id, email_log_id,
+                        counterparty_id, outbound_message_id,
                         project_id, submission_type
                     ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     RETURNING id
@@ -579,7 +661,7 @@ class NotificationRepository:
                         data["expires_at"],
                         data.get("invoice_header_id"),
                         data.get("counterparty_id"),
-                        data.get("email_log_id"),
+                        data.get("outbound_message_id"),
                         data.get("project_id"),
                         data.get("submission_type", "form_response"),
                     ),
@@ -748,63 +830,72 @@ class NotificationRepository:
                 return count
 
     # =========================================================================
-    # SUBMISSION RESPONSE METHODS
+    # INBOUND MESSAGE METHODS
     # =========================================================================
 
-    def create_submission_response(self, data: Dict[str, Any]) -> int:
+    def create_inbound_message(self, data: Dict[str, Any]) -> int:
+        """Create an inbound_message row for a token submission."""
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
+                channel = data.get("channel", "token_form")
                 cursor.execute(
                     """
-                    INSERT INTO submission_response (
-                        organization_id, submission_token_id,
-                        response_data, submitted_by_email, ip_address,
-                        invoice_header_id
-                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                    INSERT INTO inbound_message (
+                        organization_id, channel, submission_token_id,
+                        response_data, sender_email, ip_address,
+                        invoice_header_id, project_id, counterparty_id,
+                        status
+                    ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, 'approved')
                     RETURNING id
                     """,
                     (
                         data["organization_id"],
+                        channel,
                         data["submission_token_id"],
                         Json(data["response_data"]),
                         data.get("submitted_by_email"),
                         data.get("ip_address"),
                         data.get("invoice_header_id"),
+                        data.get("project_id"),
+                        data.get("counterparty_id"),
                     ),
                 )
+                inbound_id = cursor.fetchone()["id"]
                 conn.commit()
-                return cursor.fetchone()["id"]
+                logger.debug(f"Created inbound_message={inbound_id}, channel={channel}")
+                return inbound_id
 
-    def list_submission_responses(
+    def list_inbound_messages(
         self,
         org_id: int,
         invoice_header_id: Optional[int] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[Dict[str, Any]], int]:
+        """List inbound messages for token channels."""
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                where = "WHERE sr.organization_id = %s"
+                where = "WHERE im.organization_id = %s AND im.channel IN ('token_form', 'token_upload')"
                 params: List[Any] = [org_id]
 
                 if invoice_header_id:
-                    where += " AND sr.invoice_header_id = %s"
+                    where += " AND im.invoice_header_id = %s"
                     params.append(invoice_header_id)
 
                 cursor.execute(
-                    f"SELECT COUNT(*) as cnt FROM submission_response sr {where}",
+                    f"SELECT COUNT(*) as cnt FROM inbound_message im {where}",
                     params,
                 )
                 total = cursor.fetchone()["cnt"]
 
                 cursor.execute(
                     f"""
-                    SELECT sr.id, sr.organization_id, sr.submission_token_id,
-                           sr.response_data, sr.submitted_by_email,
-                           sr.invoice_header_id, sr.created_at
-                    FROM submission_response sr
+                    SELECT im.id, im.organization_id, im.submission_token_id,
+                           im.response_data, im.sender_email as submitted_by_email,
+                           im.invoice_header_id, im.created_at
+                    FROM inbound_message im
                     {where}
-                    ORDER BY sr.created_at DESC
+                    ORDER BY im.created_at DESC
                     LIMIT %s OFFSET %s
                     """,
                     params + [limit, offset],

@@ -66,12 +66,12 @@ Both methods converge into the same review queue and processing pipeline.
 ┌─────────────────────────────────────────────────────────────────┐
 │  Supabase PostgreSQL                                            │
 │  ┌──────────────┐ ┌──────────────────┐ ┌──────────────────────┐ │
-│  │email_template│ │email_notification │ │email_log             │ │
+│  │email_template│ │email_notification │ │outbound_message      │ │
 │  │              │ │_schedule          │ │                      │ │
 │  └──────────────┘ └──────────────────┘ └──────────────────────┘ │
 │  ┌──────────────┐ ┌──────────────────┐ ┌──────────────────────┐ │
-│  │ingest_email  │ │submission        │ │customer_contact      │ │
-│  │(new)         │ │_token / _response│ │(migration 028)       │ │
+│  │inbound       │ │submission        │ │customer_contact      │ │
+│  │_message      │ │_token            │ │(migration 028)       │ │
 │  └──────────────┘ └──────────────────┘ └──────────────────────┘ │
 └─────────────────────────────────────────────────────────────────┘
           │
@@ -336,7 +336,7 @@ Defines when, what, and who to email. Conditions filter which invoices trigger n
 }
 ```
 
-#### `email_log`
+#### `outbound_message` (formerly `email_log`)
 Every email sent, with SES tracking.
 
 | Column | Type | Description |
@@ -464,10 +464,10 @@ python-backend/
    c. Add submission_url to template context
 4. Render Jinja2 template (subject + HTML + text)
 5. For each recipient:
-   a. Create email_log record (status=sending)
+   a. Create outbound_message record (status=sending)
    b. Call SES send_email()
-   c. Update email_log with SES message ID + status
-6. Return email_log_ids + submission_token_id
+   c. Update outbound_message with SES message ID + status
+6. Return outbound_message_ids + submission_token_id
 ```
 
 #### Scheduled Processing (APScheduler, every 5 minutes)
@@ -477,7 +477,7 @@ python-backend/
 2. For each due schedule:
    a. Query invoice_header matching schedule conditions
    b. For each matching invoice:
-      i.  Count existing reminders (email_log) — skip if >= max_reminders
+      i.  Count existing reminders (outbound_message) — skip if >= max_reminders
       ii. Resolve recipients from customer_contact WHERE include_in_invoice_email=true
       iii.If reminder_count >= escalation_after: include escalation_only contacts
       iv. Build template context from invoice data
@@ -694,10 +694,10 @@ quota = client.check_sending_quota()
 
 1. **Schema:** Run migration 032 → verify 5 tables, 3 enums, indexes, RLS policies
 2. **Seed data:** Verify 4 system templates created per organization
-3. **Immediate send:** `POST /api/notifications/send` → email arrives, `email_log` record created
+3. **Immediate send:** `POST /api/notifications/send` → email arrives, `outbound_message` record created
 4. **Scheduling:** Create schedule with `frequency=monthly` → verify `next_run_at` set by trigger → manual trigger sends emails
 5. **Conditions:** Create schedule with `conditions: {"days_overdue_min": 7}` → only overdue invoices get emails
-6. **Submission tokens:** Send with `include_submission_link=true` → visit URL → submit PO number → verify `submission_response` record
+6. **Submission tokens:** Send with `include_submission_link=true` → visit URL → submit PO number → verify `inbound_message` record
 7. **Escalation:** Set `max_reminders=2, escalation_after=1` → verify escalation contacts included after first reminder
 8. **Token expiry:** Verify hourly job sets expired tokens to `status=expired`
 9. **Frontend:** Navigate to `/notifications` → view all 4 tabs
@@ -732,7 +732,7 @@ quota = client.check_sending_quota()
 | **Inbound email ingestion not yet implemented** | `ingest_email`, `org_email_address` tables, `IngestService`, SNS webhook, and review queue are planned but not yet built. | Implement as next phase — DNS + SES setup, then backend, then frontend review UI. |
 | **No test coverage** | No unit or integration tests for the notification system. | Add tests as a separate PR. |
 | **`invoice_direction` now in report GET responses** | Fixed — `invoice_direction` is now returned in `GET /api/reports/generated` and `GET /api/reports/generated/{id}` responses. | Fixed (Round 2 remediation) |
-| **Report-ready emails logged to `email_log`** | Report delivery emails sent via `ReportDeliveryService` are now recorded in `email_log` for audit trail, providing visibility in the notification email history tab. | Fixed (Round 2 remediation) |
+| **Report-ready emails logged to `outbound_message`** | Report delivery emails sent via `ReportDeliveryService` are now recorded in `outbound_message` for audit trail, providing visibility in the notification email history tab. | Fixed (Round 2 remediation) |
 | **Event loop blocking resolved** | All three scheduler jobs (`_process_due_schedules`, `_expire_stale_tokens`, `_process_due_report_schedules`) now offload sync calls via `asyncio.to_thread()`, preventing event loop blocking during DB queries, PDF rendering, S3 uploads, and SES sends. | Fixed (Round 2 remediation) |
 | **Single-instance deployment assumption** | The scheduler uses `FOR UPDATE SKIP LOCKED` to guard against double-processing, but the overall design assumes `desired-count=0` or `1`. Multi-instance deployments may produce unexpected behavior in edge cases (e.g., token expiry job running on multiple instances simultaneously). | Keep `desired-count <= 1` or add distributed locking (Redis/DynamoDB) for multi-instance. |
 
@@ -746,18 +746,59 @@ quota = client.check_sending_quota()
 - GRP upload via token URL
 - Frontend: `/notifications`, `/submit/[token]`
 
-### Phase 2: SES Inbound Email Ingestion (Next)
-1. **DNS setup** — MX, SPF, DKIM, DMARC for `mail.frontiermind.co`
-2. **SES configuration** — Domain verification, receipt rule set, S3 bucket, SNS topic
-3. **Database migration** — `ingest_email`, `org_email_address` tables
-4. **Backend** — SNS webhook (`/api/ingest/email`), `EmailIngestService` (MIME parsing, attachment extraction, sender allowlist, noise filter), review queue endpoints
-5. **Frontend** — `/ingest/review` admin page for reviewing/approving ingested emails
-6. **Outbound sender migration** — Update `SES_SENDER_EMAIL` to per-org addresses from `org_email_address`
+### Phase 2: Unified Inbound Message Model (Implemented)
+
+**Architecture:** Unified `inbound_message` table captures all counterparty communications regardless of channel (email, token form, token upload). Replaces `submission_response` using an **expand/contract migration strategy**.
+
+**Database:**
+- Migration `052_inbound_message.sql` — creates `inbound_message` + `inbound_attachment` tables
+- Adds `reference_price.inbound_message_id` and `reference_price.inbound_attachment_id` FKs
+- Backfills existing `submission_response` rows → `inbound_message` via `legacy_submission_response_id`
+- Phase B (combined in same migration): drops `submission_response` table, legacy columns, and old FKs
+
+**Conversation Threading:**
+- `inbound_message.in_reply_to` → matched against `outbound_message.ses_message_id`
+- `inbound_message.references_chain` TEXT[] for full References header
+- If match found → auto-populates `invoice_header_id`, `counterparty_id`, `outbound_message_id`
+
+**Backend files:**
+- `services/ingest/email_ingest_service.py` — MIME parsing, sender classification, attachment extraction, SNS handling
+- `services/ingest/sender_allowlist.py` — Sender verification against `customer_contact`
+- `services/ingest/noise_filter.py` — Auto-reply/bounce detection
+- `services/ingest/sns_verifier.py` — Full SNS message signature verification (cert-based RSA-SHA1 + TopicArn allowlist)
+- `db/ingest_repository.py` — `inbound_message` + `inbound_attachment` CRUD
+- `api/email_ingest.py` — SNS webhook + admin review endpoints (prefix: `/api/inbound-email`)
+- `models/email_ingest.py` — Pydantic models
+
+**API endpoints:**
+```
+POST /api/inbound-email/webhook                         — SNS (unauthenticated, signature-verified)
+GET  /api/inbound-email/messages                        — List (paginated, filter by channel + status)
+GET  /api/inbound-email/messages/{id}                   — Details + attachments
+POST /api/inbound-email/messages/{id}/approve           — Mark approved
+POST /api/inbound-email/messages/{id}/reject            — Mark rejected
+POST /api/inbound-email/messages/{id}/reprocess         — Re-trigger processing
+GET  /api/inbound-email/attachments/{attachment_id}     — Presigned download URL
+POST /api/inbound-email/attachments/{attachment_id}/process — Trigger extraction
+```
+
+**Dual-write (active during Phase A):**
+- `notification_repository.create_submission_response()` writes both `submission_response` + `inbound_message`
+- `token_service.use_token()` passes channel through to dual-write
+- `submissions.py` upload flow creates `inbound_attachment` and writes both `reference_price.submission_response_id` and `reference_price.inbound_attachment_id`
+- `notification_repository.list_submission_responses()` reads from `inbound_message` (switched read)
+
+**SNS subscription (one-time after deploy):**
+```bash
+aws sns subscribe \
+  --topic-arn arn:aws:sns:us-east-1:724772070642:frontiermind-email-ingest \
+  --protocol http \
+  --endpoint http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/api/inbound-email/webhook
+```
 
 ### Phase 3: Future Enhancements
-- **SES bounce/complaint handling:** SNS webhook → update `email_log.email_status` on bounces
+- **SES bounce/complaint handling:** SNS webhook → update `outbound_message.email_status` on bounces
 - **Organization-level daily email quota:** Prevent runaway sends
-- **Email attachment support:** Attach invoice PDFs via SES raw email
-- **Template preview endpoint:** Render template with sample data without sending
 - **Auto-classification:** Use email subject/body to auto-categorize ingested documents (invoice, meter data, amendment) before review
+- **Frontend:** `/ingest/review` admin page for reviewing/approving ingested emails
 - **Comprehensive test suite:** Unit tests for notification_service, condition_evaluator, token_service, email_ingest_service

@@ -91,6 +91,7 @@ database/
 │   ├── 049_pilot_project_data_population.sql          # Phase 10.11: Pilot data — contract_lines, clause_tariffs, meter_aggregates for KAS01, NBL01, LOI01
 │   ├── 050_rename_grp_to_mrp.sql                      # Phase 10.13: Rename GRP (Grid Reference Price) → MRP (Market Reference Price) — terminology only
 │   ├── 051_org_email_address.sql                      # Phase 8.1: Org → email address mapping for bidirectional email on mail.frontiermind.co
+│   ├── 052_inbound_message.sql                       # Phase 8.3: Unified inbound_message + inbound_attachment (combined expand/contract, drops submission_response)
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -1045,10 +1046,11 @@ database/
 - Migration: `032_email_notification_engine.sql`
 - New: `email_template` — Jinja2 email templates per org (system + custom); uses `email_schedule_type` column
 - New: `email_notification_schedule` — Scheduling rules with conditions, escalation, submission links; uses `email_schedule_type` column
-- New: `email_log` — Full email delivery audit trail (SES integration)
+- New: `email_log` (renamed to `outbound_message` in v8.3) — Full email delivery audit trail (SES integration)
 - New: `submission_token` — Secure SHA-256 hashed tokens for external data collection
-- New: `submission_response` — Counterparty-submitted data (PO numbers, payment confirmations)
 - New enums: `email_schedule_type`, `email_status`, `submission_token_status`
+- Note: `submission_response` was created in v8.0 but fully replaced by `inbound_message` in v8.3 (migration 052)
+- Note: `email_log` was renamed to `outbound_message` in v8.3 for symmetric naming with `inbound_message`
 - Extended: `audit_action_type` with EMAIL_SENT, EMAIL_FAILED, SUBMISSION_RECEIVED, SUBMISSION_TOKEN_CREATED
 - Reuses `calculate_next_run_time()` from migration 018 for schedule timing
 - Reuses `customer_contact` from migration 028 for recipient resolution

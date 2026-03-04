@@ -2,7 +2,7 @@
  * Notifications API Client
  *
  * API client for email notification management: templates, schedules,
- * email logs, submissions, and immediate sends.
+ * outbound messages, submissions, and immediate sends.
  *
  * Follows the same patterns as reportsClient.ts.
  */
@@ -89,7 +89,7 @@ export interface NotificationSchedule {
   updated_at: string
 }
 
-export interface EmailLogEntry {
+export interface OutboundMessageEntry {
   id: number
   organization_id: number
   email_notification_schedule_id?: number
@@ -187,12 +187,47 @@ export interface UpdateScheduleRequest {
   is_active?: boolean
 }
 
-export interface EmailLogFilters {
+export interface OutboundMessageFilters {
   invoice_header_id?: number
   schedule_id?: number
   email_status?: EmailStatus
+  project_id?: number
   limit?: number
   offset?: number
+}
+
+export interface ScheduleListFilters {
+  include_inactive?: boolean
+  project_id?: number
+}
+
+export interface PreviewTemplateRequest {
+  template_id?: number
+  subject_template?: string
+  body_html?: string
+  invoice_header_id?: number
+  extra_context?: Record<string, unknown>
+}
+
+export interface PreviewTemplateResponse {
+  success: boolean
+  subject: string
+  html: string
+}
+
+export interface ContactItem {
+  id: number
+  full_name?: string
+  email: string
+  role?: string
+  counterparty_id: number
+  counterparty_name?: string
+}
+
+export interface ContactListFilters {
+  counterparty_id?: number
+  project_id?: number
+  include_all?: boolean
 }
 
 // ============================================================================
@@ -211,9 +246,9 @@ interface ScheduleListResponse {
   total: number
 }
 
-interface EmailLogListResponse {
+interface OutboundMessageListResponse {
   success: boolean
-  logs: EmailLogEntry[]
+  messages: OutboundMessageEntry[]
   total: number
 }
 
@@ -226,7 +261,7 @@ interface SubmissionListResponse {
 interface SendEmailAPIResponse {
   success: boolean
   emails_sent: number
-  email_log_ids: number[]
+  outbound_message_ids: number[]
   submission_token_id?: number
   message: string
 }
@@ -234,6 +269,12 @@ interface SendEmailAPIResponse {
 interface SuccessResponse {
   success: boolean
   message: string
+}
+
+interface ContactListAPIResponse {
+  success: boolean
+  contacts: ContactItem[]
+  total: number
 }
 
 // ============================================================================
@@ -353,7 +394,7 @@ export class NotificationsClient {
 
   async sendEmail(request: SendEmailRequest): Promise<{
     emailsSent: number
-    emailLogIds: number[]
+    outboundMessageIds: number[]
     submissionTokenId?: number
     message: string
   }> {
@@ -369,7 +410,7 @@ export class NotificationsClient {
     })
     return {
       emailsSent: result.emails_sent,
-      emailLogIds: result.email_log_ids,
+      outboundMessageIds: result.outbound_message_ids,
       submissionTokenId: result.submission_token_id,
       message: result.message,
     }
@@ -426,10 +467,11 @@ export class NotificationsClient {
   // Schedule Methods
   // --------------------------------------------------------------------------
 
-  async listSchedules(includeInactive = false): Promise<NotificationSchedule[]> {
+  async listSchedules(includeInactive = false, filters?: ScheduleListFilters): Promise<NotificationSchedule[]> {
     const headers = await this.getHeaders()
     const params = new URLSearchParams()
-    if (includeInactive) params.append('include_inactive', 'true')
+    if (includeInactive || filters?.include_inactive) params.append('include_inactive', 'true')
+    if (filters?.project_id) params.append('project_id', filters.project_id.toString())
     const qs = params.toString()
     const url = `${this.baseUrl}/api/notifications/schedules${qs ? '?' + qs : ''}`
     const result = await this.fetchWithRetry<ScheduleListResponse>(url, { method: 'GET', headers })
@@ -481,18 +523,48 @@ export class NotificationsClient {
   // Email Log Methods
   // --------------------------------------------------------------------------
 
-  async listEmailLogs(filters?: EmailLogFilters): Promise<{ logs: EmailLogEntry[]; total: number }> {
+  async listOutboundMessages(filters?: OutboundMessageFilters): Promise<{ messages: OutboundMessageEntry[]; total: number }> {
     const headers = await this.getHeaders()
     const params = new URLSearchParams()
     if (filters?.invoice_header_id) params.append('invoice_header_id', filters.invoice_header_id.toString())
     if (filters?.schedule_id) params.append('schedule_id', filters.schedule_id.toString())
     if (filters?.email_status) params.append('email_status', filters.email_status)
+    if (filters?.project_id) params.append('project_id', filters.project_id.toString())
     if (filters?.limit) params.append('limit', filters.limit.toString())
     if (filters?.offset) params.append('offset', filters.offset.toString())
     const qs = params.toString()
-    const url = `${this.baseUrl}/api/notifications/email-log${qs ? '?' + qs : ''}`
-    const result = await this.fetchWithRetry<EmailLogListResponse>(url, { method: 'GET', headers })
-    return { logs: result.logs, total: result.total }
+    const url = `${this.baseUrl}/api/notifications/outbound-messages${qs ? '?' + qs : ''}`
+    const result = await this.fetchWithRetry<OutboundMessageListResponse>(url, { method: 'GET', headers })
+    return { messages: result.messages, total: result.total }
+  }
+
+  // --------------------------------------------------------------------------
+  // Submission Methods
+  // --------------------------------------------------------------------------
+
+  // --------------------------------------------------------------------------
+  // Preview & Contacts
+  // --------------------------------------------------------------------------
+
+  async previewTemplate(req: PreviewTemplateRequest): Promise<{ subject: string; html: string }> {
+    const headers = await this.getHeaders()
+    const result = await this.fetchWithRetry<PreviewTemplateResponse>(
+      `${this.baseUrl}/api/notifications/templates/preview`,
+      { method: 'POST', headers, body: JSON.stringify(req) }
+    )
+    return { subject: result.subject, html: result.html }
+  }
+
+  async listContacts(filters?: ContactListFilters): Promise<{ contacts: ContactItem[]; total: number }> {
+    const headers = await this.getHeaders()
+    const params = new URLSearchParams()
+    if (filters?.counterparty_id) params.append('counterparty_id', filters.counterparty_id.toString())
+    if (filters?.project_id) params.append('project_id', filters.project_id.toString())
+    if (filters?.include_all) params.append('include_all', 'true')
+    const qs = params.toString()
+    const url = `${this.baseUrl}/api/notifications/contacts${qs ? '?' + qs : ''}`
+    const result = await this.fetchWithRetry<ContactListAPIResponse>(url, { method: 'GET', headers })
+    return { contacts: result.contacts, total: result.total }
   }
 
   // --------------------------------------------------------------------------

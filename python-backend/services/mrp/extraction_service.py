@@ -90,7 +90,7 @@ class MRPExtractionService:
         operating_year: int,
         s3_path: str,
         file_hash: str,
-        submission_response_id: Optional[int] = None,
+        inbound_attachment_id: Optional[int] = None,
     ) -> Dict[str, Any]:
         """
         Full pipeline: OCR → extract → calculate → store.
@@ -104,7 +104,7 @@ class MRPExtractionService:
             operating_year: Contract operating year.
             s3_path: S3 path where document was uploaded.
             file_hash: SHA-256 hash of file for dedup.
-            submission_response_id: Link to submission_response if via token.
+            inbound_attachment_id: Link to inbound_attachment if via token upload.
 
         Returns:
             Dict with observation_id, mrp_per_kwh, totals, and line_items_count.
@@ -185,7 +185,7 @@ class MRPExtractionService:
             line_items=line_items,
             metadata=metadata,
             confidence=confidence,
-            submission_response_id=submission_response_id,
+            inbound_attachment_id=inbound_attachment_id,
         )
 
         result = {
@@ -410,7 +410,7 @@ class MRPExtractionService:
         line_items: List[Dict],
         metadata: Dict,
         confidence: str,
-        submission_response_id: Optional[int],
+        inbound_attachment_id: Optional[int] = None,
     ) -> int:
         """Upsert monthly observation into reference_price."""
         # Calculate period_end from billing_month
@@ -453,7 +453,8 @@ class MRPExtractionService:
                         calculated_mrp_per_kwh, currency_id,
                         total_variable_charges, total_kwh_invoiced,
                         observation_type, source_document_path, source_document_hash,
-                        source_metadata, verification_status, submission_response_id
+                        source_metadata, verification_status,
+                        inbound_attachment_id
                     ) VALUES (
                         %s, %s, %s, %s, %s, %s, %s, %s, %s,
                         'monthly', %s, %s, %s, 'pending', %s
@@ -465,7 +466,7 @@ class MRPExtractionService:
                         source_document_path = EXCLUDED.source_document_path,
                         source_document_hash = EXCLUDED.source_document_hash,
                         source_metadata = EXCLUDED.source_metadata,
-                        submission_response_id = EXCLUDED.submission_response_id,
+                        inbound_attachment_id = EXCLUDED.inbound_attachment_id,
                         verification_status = 'pending',
                         verified_at = NULL,
                         updated_at = NOW()
@@ -484,7 +485,7 @@ class MRPExtractionService:
                         s3_path,
                         file_hash,
                         Json(source_metadata),
-                        submission_response_id,
+                        inbound_attachment_id,
                     ),
                 )
                 observation_id = cur.fetchone()["id"]

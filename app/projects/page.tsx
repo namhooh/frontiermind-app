@@ -19,6 +19,7 @@ import { TechnicalTab } from './components/TechnicalTab'
 import { MonthlyBillingTab } from './components/MonthlyBillingTab'
 import { PlantPerformanceTab } from './components/PlantPerformanceTab'
 import { PortfolioHome } from './components/PortfolioHome'
+import { CommunicationsTab } from './components/CommunicationsTab'
 // import { SpreadsheetTab } from './components/SpreadsheetTab'
 
 export default function ProjectsPage() {
@@ -286,6 +287,7 @@ function ProjectsPageContent() {
                   <TabsTrigger value="technical">Technical</TabsTrigger>
                   <TabsTrigger value="performance">Performance</TabsTrigger>
                   <TabsTrigger value="monthly-billing">Billing</TabsTrigger>
+                  <TabsTrigger value="communications">Communications</TabsTrigger>
                 </TabsList>
 
                 <div className="mt-4 bg-white rounded-lg border border-slate-200 p-6">
@@ -340,6 +342,14 @@ function ProjectsPageContent() {
 
                   <TabsContent value="monthly-billing">
                     <MonthlyBillingTab projectId={projectId} editMode={editMode} />
+                  </TabsContent>
+
+                  <TabsContent value="communications">
+                    <CommunicationsTab
+                      projectId={projectId}
+                      organizationId={dashboard?.project.organization_id as number | undefined}
+                      editMode={editMode}
+                    />
                   </TabsContent>
 
                 </div>

@@ -1253,7 +1253,7 @@ Pre-deployment verification steps to ensure the system is production-ready.
 | **`s3_destination` field defined but not used** | S3 delivery is not implemented; the field exists in `scheduled_report` and `CreateScheduleRequest` but is never acted on. Only email delivery is functional. | Open — implement when S3 delivery is needed |
 | **No retry/backoff for transient failures** | When a scheduled report generation fails, `next_run_at` advances to the next cycle. Transient failures (e.g., temporary DB outage) are not retried within the same cycle. | Open — add retry logic if transient failures become common |
 | **`invoice_direction` in API responses** | The field is persisted on creation and now returned in `GET /api/reports/generated` and `GET /api/reports/generated/{id}` responses. | Fixed (Round 2 remediation) |
-| **Report-ready emails logged to `email_log`** | Scheduled report delivery emails are now recorded in `email_log` for audit trail, providing visibility in the notification email history tab. | Fixed (Round 2 remediation) |
+| **Report-ready emails logged to `outbound_message`** | Scheduled report delivery emails are now recorded in `outbound_message` for audit trail, providing visibility in the notification email history tab. | Fixed (Round 2 remediation) |
 | **Event loop blocking resolved** | Sync DB queries, PDF rendering, S3 uploads, and SES sends in scheduler jobs are now offloaded to thread pool via `asyncio.to_thread()`. | Fixed (Round 2 remediation) |
 | **Report scheduler row locking** | `get_due_schedules()` now uses `FOR UPDATE OF sr SKIP LOCKED` to prevent double-processing in concurrent instances. | Fixed (Round 2 remediation) |
 

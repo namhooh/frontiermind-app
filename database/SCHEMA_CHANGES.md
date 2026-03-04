@@ -1108,7 +1108,7 @@ and token-based external submission collection.
 - `next_run_at` (calculated by trigger using `calculate_next_run_time()` from migration 018)
 - Scoping FKs: `project_id`, `contract_id`, `counterparty_id`
 
-**email_log** - Every email sent
+**outbound_message** (formerly `email_log`, renamed in v8.3) - Every email sent
 - `id`, `organization_id`, `email_notification_schedule_id`, `email_template_id`
 - `recipient_email`, `recipient_name`, `subject`, `email_status`
 - `ses_message_id`, `reminder_count`, `invoice_header_id`, `submission_token_id`
@@ -1117,11 +1117,10 @@ and token-based external submission collection.
 **submission_token** - Secure tokens for external data collection
 - `id`, `organization_id`, `token_hash` (SHA-256, unique indexed)
 - `submission_fields` (JSONB), `submission_token_status`, `max_uses`, `use_count`, `expires_at`
-- Linked entity FKs: `invoice_header_id`, `counterparty_id`, `email_log_id`
+- Linked entity FKs: `invoice_header_id`, `counterparty_id`, `outbound_message_id`
 
-**submission_response** - Data submitted by counterparties
-- `id`, `organization_id`, `submission_token_id`
-- `response_data` (JSONB), `submitted_by_email`, `ip_address`, `invoice_header_id`
+**~~submission_response~~** - Replaced by `inbound_message` in v8.3
+- Dropped in migration 052 (Phase B)
 
 **Helper Functions:**
 - `update_email_template_timestamp()` - Timestamp trigger for email_template
@@ -2272,5 +2271,83 @@ per-meter performance detail, and restructured frontend tabs.
 - Inbound email: MX → SES → S3 (`frontiermind-email-ingest`) + SNS notification
 - Outbound sender: `SES_SENDER_EMAIL` secret updated to `cbe@mail.frontiermind.co`
 - Task definition env vars: `SES_INGEST_BUCKET`, `SES_SENDER_DOMAIN`
+
+---
+
+### v8.3 - 2026-03-04 (Unified Inbound Message Model — Combined Expand/Contract)
+
+**Description:** Unified `inbound_message` + `inbound_attachment` tables fully replacing `submission_response`. Renames `email_log` → `outbound_message` for symmetric naming. Combined expand/contract migration in two transaction blocks within a single file.
+
+**Migration File:** `database/migrations/052_inbound_message.sql`
+
+**Renamed Table: `email_log` → `outbound_message`**
+- Table renamed for symmetric naming with `inbound_message`
+- FK column on `submission_token` renamed: `email_log_id` → `outbound_message_id`
+- All indexes and RLS policies renamed accordingly
+
+**Phase A (Expand):**
+
+**New Table: `inbound_message`**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | BIGSERIAL | Primary key |
+| `organization_id` | BIGINT | FK → `organization(id)` |
+| `channel` | VARCHAR(20) | `email`, `token_form`, or `token_upload` |
+| `subject` | TEXT | Email subject |
+| `body_text` | TEXT | Plain text body |
+| `raw_headers` | JSONB | Full parsed email headers |
+| `ses_message_id` | VARCHAR(255) | SES Message-ID for threading |
+| `in_reply_to` | VARCHAR(255) | In-Reply-To header value |
+| `references_chain` | TEXT[] | References header as array |
+| `s3_raw_path` | TEXT | S3 path of raw MIME |
+| `submission_token_id` | BIGINT | FK → `submission_token(id)` |
+| `response_data` | JSONB | Submitted form data |
+| `sender_email` | VARCHAR(320) | Sender email (all channels) |
+| `sender_name` | VARCHAR(255) | Sender display name |
+| `ip_address` | INET | Submitter IP |
+| `invoice_header_id` | BIGINT | FK → `invoice_header(id)` |
+| `project_id` | BIGINT | FK → `project(id)` |
+| `counterparty_id` | BIGINT | FK → `counterparty(id)` |
+| `outbound_message_id` | BIGINT | FK → `outbound_message(id)` (threading) |
+| `customer_contact_id` | BIGINT | FK → `customer_contact(id)` |
+| `attachment_count` | INTEGER | Number of attachments |
+| `inbound_message_status` | `inbound_message_status` | ENUM: received, pending_review, approved, rejected, noise, auto_processed, failed |
+| `classification_reason` | VARCHAR(255) | Why this status was assigned |
+| `failed_reason` | TEXT | Detailed failure info |
+
+
+**New Table: `inbound_attachment`**
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | BIGSERIAL | Primary key |
+| `inbound_message_id` | BIGINT | FK → `inbound_message(id)` |
+| `filename` | VARCHAR(500) | Original filename |
+| `content_type` | VARCHAR(100) | MIME type |
+| `size_bytes` | BIGINT | File size |
+| `s3_path` | TEXT | S3 storage path |
+| `file_hash` | VARCHAR(64) | SHA-256 hash |
+| `attachment_processing_status` | `attachment_processing_status` | ENUM: pending, processing, extracted, failed, skipped |
+| `extraction_result` | JSONB | Extraction output |
+| `reference_price_id` | BIGINT | FK → `reference_price(id)` |
+
+**Modified Table: `reference_price`**
+- Added `inbound_message_id` BIGINT FK → `inbound_message(id)` (nullable)
+- Added `inbound_attachment_id` BIGINT FK → `inbound_attachment(id)` (nullable)
+
+**Backfill:** All existing `submission_response` rows migrated to `inbound_message` via temporary `legacy_submission_response_id` column. `reference_price.inbound_message_id` backfilled via exact join.
+
+**RLS Policies:** Follows migration 032 pattern — org members read, org admins manage, service_role full access.
+
+**Phase B (Contract):**
+
+- Dropped `inbound_message.legacy_submission_response_id` column
+- Dropped `reference_price.submission_response_id` column
+- Dropped RLS policies on `submission_response`
+- Dropped indexes on `submission_response`
+- **Dropped `submission_response` table entirely**
+
+**Verification:** Two DO blocks — Phase A asserts row count parity between `submission_response` and backfilled `inbound_message` rows; Phase B asserts `submission_response` table, `legacy_submission_response_id` column, and `reference_price.submission_response_id` column are all gone.
 
 ---

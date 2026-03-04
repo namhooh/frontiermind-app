@@ -18,11 +18,11 @@ import {
   Play,
   Pause,
   Send,
-  CheckCircle2,
-  XCircle,
   AlertCircle,
   ChevronLeft,
   ChevronRight,
+  Plus,
+  Pencil,
 } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/app/components/ui/button'
@@ -30,11 +30,13 @@ import {
   NotificationsClient,
   type EmailTemplate,
   type NotificationSchedule,
-  type EmailLogEntry,
+  type OutboundMessageEntry,
   type SubmissionResponse,
-  type EmailStatus,
 } from '@/lib/api/notificationsClient'
 import { createClient } from '@/lib/supabase/client'
+import { ComposeEmailDialog } from './components/ComposeEmailDialog'
+import { ScheduleFormDialog } from './components/ScheduleFormDialog'
+import { TemplateEditorDialog } from './components/TemplateEditorDialog'
 
 type TabId = 'schedules' | 'email-history' | 'templates' | 'submissions'
 
@@ -60,7 +62,7 @@ export default function NotificationsPage() {
   const [activeTab, setActiveTab] = useState<TabId>('schedules')
   const [schedules, setSchedules] = useState<NotificationSchedule[]>([])
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
-  const [emailLogs, setEmailLogs] = useState<EmailLogEntry[]>([])
+  const [emailLogs, setEmailLogs] = useState<OutboundMessageEntry[]>([])
   const [emailLogsTotal, setEmailLogsTotal] = useState(0)
   const [submissions, setSubmissions] = useState<SubmissionResponse[]>([])
   const [submissionsTotal, setSubmissionsTotal] = useState(0)
@@ -68,6 +70,13 @@ export default function NotificationsPage() {
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(0)
   const pageSize = 25
+
+  // Dialog state
+  const [composeOpen, setComposeOpen] = useState(false)
+  const [scheduleFormOpen, setScheduleFormOpen] = useState(false)
+  const [editingSchedule, setEditingSchedule] = useState<NotificationSchedule | undefined>()
+  const [templateEditorOpen, setTemplateEditorOpen] = useState(false)
+  const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | undefined>()
 
   const supabase = useRef(createClient())
   const [organizationId, setOrganizationId] = useState<number | undefined>()
@@ -121,8 +130,8 @@ export default function NotificationsPage() {
 
   const loadEmailLogs = useCallback(async () => {
     try {
-      const { logs, total } = await client.listEmailLogs({ limit: pageSize, offset: page * pageSize })
-      setEmailLogs(logs)
+      const { messages, total } = await client.listOutboundMessages({ limit: pageSize, offset: page * pageSize })
+      setEmailLogs(messages)
       setEmailLogsTotal(total)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load email history')
@@ -204,19 +213,25 @@ export default function NotificationsPage() {
       {/* Header */}
       <div className="bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-6 py-4">
-          <div className="flex items-center gap-4">
-            <Link href="/" className="text-slate-400 hover:text-slate-600">
-              <ArrowLeft className="w-5 h-5" />
-            </Link>
-            <div>
-              <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
-                <Bell className="w-5 h-5" />
-                Notifications
-              </h1>
-              <p className="text-sm text-slate-500">
-                Email schedules, templates, and delivery history
-              </p>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Link href="/" className="text-slate-400 hover:text-slate-600">
+                <ArrowLeft className="w-5 h-5" />
+              </Link>
+              <div>
+                <h1 className="text-xl font-semibold text-slate-900 flex items-center gap-2">
+                  <Bell className="w-5 h-5" />
+                  Notifications
+                </h1>
+                <p className="text-sm text-slate-500">
+                  Email schedules, templates, and delivery history
+                </p>
+              </div>
             </div>
+            <Button onClick={() => setComposeOpen(true)}>
+              <Send className="w-4 h-4 mr-1.5" />
+              Compose
+            </Button>
           </div>
         </div>
       </div>
@@ -261,6 +276,16 @@ export default function NotificationsPage() {
             {/* Schedules Tab */}
             {activeTab === 'schedules' && (
               <div className="space-y-3">
+                <div className="flex justify-end mb-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => { setEditingSchedule(undefined); setScheduleFormOpen(true) }}
+                  >
+                    <Plus className="w-4 h-4 mr-1" />
+                    Create Schedule
+                  </Button>
+                </div>
                 {schedules.length === 0 ? (
                   <EmptyState icon={Clock} message="No notification schedules configured" />
                 ) : (
@@ -298,6 +323,14 @@ export default function NotificationsPage() {
                           )}
                         </div>
                         <div className="flex items-center gap-2 ml-4">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => { setEditingSchedule(s); setScheduleFormOpen(true) }}
+                            title="Edit"
+                          >
+                            <Pencil className="w-3.5 h-3.5" />
+                          </Button>
                           <Button
                             variant="outline"
                             size="sm"
@@ -364,6 +397,16 @@ export default function NotificationsPage() {
             {/* Templates Tab */}
             {activeTab === 'templates' && (
               <div className="space-y-3">
+                <div className="flex justify-end mb-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => { setEditingTemplate(undefined); setTemplateEditorOpen(true) }}
+                  >
+                    <Plus className="w-4 h-4 mr-1" />
+                    Create Template
+                  </Button>
+                </div>
                 {templates.length === 0 ? (
                   <EmptyState icon={FileText} message="No email templates found" />
                 ) : (
@@ -385,6 +428,14 @@ export default function NotificationsPage() {
                             Type: {t.email_schedule_type.replace(/_/g, ' ')} | Subject: {t.subject_template}
                           </p>
                         </div>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => { setEditingTemplate(t); setTemplateEditorOpen(true) }}
+                          title="Edit"
+                        >
+                          <Pencil className="w-3.5 h-3.5" />
+                        </Button>
                       </div>
                     </div>
                   ))
@@ -459,6 +510,30 @@ export default function NotificationsPage() {
           </>
         )}
       </div>
+
+      {/* Dialogs */}
+      <ComposeEmailDialog
+        open={composeOpen}
+        onOpenChange={setComposeOpen}
+        client={client}
+        onSent={() => { if (activeTab === 'email-history') loadEmailLogs() }}
+      />
+
+      <ScheduleFormDialog
+        open={scheduleFormOpen}
+        onOpenChange={setScheduleFormOpen}
+        client={client}
+        schedule={editingSchedule}
+        onSaved={loadSchedules}
+      />
+
+      <TemplateEditorDialog
+        open={templateEditorOpen}
+        onOpenChange={setTemplateEditorOpen}
+        client={client}
+        template={editingTemplate}
+        onSaved={loadTemplates}
+      />
     </div>
   )
 }

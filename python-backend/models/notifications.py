@@ -204,8 +204,8 @@ class EmailTemplateResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
-class EmailLogResponse(BaseModel):
-    """Response model for email log entry."""
+class OutboundMessageResponse(BaseModel):
+    """Response model for outbound message (sent email)."""
     id: int
     organization_id: int
     email_notification_schedule_id: Optional[int]
@@ -300,7 +300,7 @@ class SendEmailResponse(BaseModel):
     """Response for immediate email send."""
     success: bool = True
     emails_sent: int
-    email_log_ids: List[int]
+    outbound_message_ids: List[int]
     submission_token_id: Optional[int] = None
     message: str
 
@@ -315,9 +315,9 @@ class EmailTemplateListResponse(BaseModel):
     total: int
 
 
-class EmailLogListResponse(BaseModel):
+class OutboundMessageListResponse(BaseModel):
     success: bool = True
-    logs: List[EmailLogResponse]
+    messages: List[OutboundMessageResponse]
     total: int
 
 
@@ -330,4 +330,39 @@ class NotificationScheduleListResponse(BaseModel):
 class SubmissionResponseListResponse(BaseModel):
     success: bool = True
     submissions: List[SubmissionResponseModel]
+    total: int
+
+
+# =============================================================================
+# PREVIEW & CONTACTS MODELS
+# =============================================================================
+
+class PreviewTemplateRequest(BaseModel):
+    """Request to preview a rendered template."""
+    template_id: Optional[int] = Field(None, description="Load template from DB")
+    subject_template: Optional[str] = Field(None, description="Inline subject template")
+    body_html: Optional[str] = Field(None, description="Inline body HTML template")
+    invoice_header_id: Optional[int] = Field(None, description="Real invoice for context")
+    extra_context: Optional[Dict[str, Any]] = Field(None, description="Override variables")
+
+
+class PreviewTemplateResponse(BaseModel):
+    success: bool = True
+    subject: str
+    html: str
+
+
+class ContactItem(BaseModel):
+    """A contact eligible for email notifications."""
+    id: int
+    full_name: Optional[str] = None
+    email: str
+    role: Optional[str] = None
+    counterparty_id: int
+    counterparty_name: Optional[str] = None
+
+
+class ContactListResponse(BaseModel):
+    success: bool = True
+    contacts: List[ContactItem]
     total: int

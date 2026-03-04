@@ -52,6 +52,7 @@ from api.spreadsheet import router as spreadsheet_router
 from api.billing import router as billing_router
 from api.performance import router as performance_router
 from api.portfolio import router as portfolio_router
+from api.email_ingest import router as email_ingest_router
 
 # Import email notification scheduler
 from services.email import scheduler as email_scheduler
@@ -135,6 +136,7 @@ app.include_router(spreadsheet_router)
 app.include_router(billing_router)
 app.include_router(performance_router)
 app.include_router(portfolio_router)
+app.include_router(email_ingest_router)
 
 
 @app.get("/", response_model=Dict[str, str])

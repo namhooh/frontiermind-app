@@ -2,6 +2,7 @@
 Notifications API Endpoints
 
 REST API for email notification management: templates, schedules, email logs.
+Dashboard endpoints use Supabase JWT auth (require_supabase_auth).
 """
 
 import logging
@@ -11,7 +12,7 @@ from typing import Optional, List
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from pydantic import BaseModel
 
-from middleware.api_key_auth import require_api_key
+from middleware.supabase_auth import require_supabase_auth
 from models.notifications import (
     SendEmailRequest,
     CreateEmailTemplateRequest,
@@ -20,17 +21,21 @@ from models.notifications import (
     UpdateScheduleRequest,
     EmailTemplateResponse,
     EmailTemplateListResponse,
-    EmailLogResponse,
-    EmailLogListResponse,
+    OutboundMessageResponse,
+    OutboundMessageListResponse,
     NotificationScheduleResponse,
     NotificationScheduleListResponse,
     SubmissionResponseListResponse,
     SubmissionResponseModel,
     SendEmailResponse,
     MRPCollectionRequest,
+    PreviewTemplateRequest,
+    PreviewTemplateResponse,
+    ContactItem,
+    ContactListResponse,
 )
 from db.notification_repository import NotificationRepository
-from db.database import init_connection_pool
+from db.database import init_connection_pool, get_db_connection
 
 logger = logging.getLogger(__name__)
 
@@ -38,7 +43,7 @@ router = APIRouter(
     prefix="/api/notifications",
     tags=["notifications"],
     responses={
-        401: {"description": "Missing or invalid API key"},
+        401: {"description": "Missing or invalid token"},
         404: {"description": "Resource not found"},
         500: {"description": "Internal server error"},
     },
@@ -59,24 +64,6 @@ class SuccessResponse(BaseModel):
     message: str
 
 
-def get_org_id(request: Request) -> int:
-    org_id = request.headers.get("X-Organization-ID")
-    if not org_id:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail={"success": False, "error": "MissingOrganization",
-                    "message": "X-Organization-ID header required"},
-        )
-    try:
-        return int(org_id)
-    except ValueError:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail={"success": False, "error": "InvalidOrganization",
-                    "message": "X-Organization-ID must be an integer"},
-        )
-
-
 def require_repo():
     if not notification_repo:
         raise HTTPException(
@@ -86,8 +73,27 @@ def require_repo():
         )
 
 
+def _validate_entity_ownership(table: str, entity_id: int, org_id: int) -> None:
+    """Verify an entity belongs to the given organization. Raises 404 if not."""
+    allowed_tables = {"project", "contract", "counterparty"}
+    if table not in allowed_tables:
+        raise ValueError(f"Invalid table: {table}")
+
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT id FROM {table} WHERE id = %s AND organization_id = %s",
+                (entity_id, org_id),
+            )
+            if not cur.fetchone():
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail={"success": False, "message": f"{table.title()} not found"},
+                )
+
+
 # ============================================================================
-# Test Email (easy CLI access)
+# Test Email
 # ============================================================================
 
 class TestEmailRequest(BaseModel):
@@ -107,10 +113,9 @@ class TestEmailResponse(BaseModel):
     response_model=TestEmailResponse,
     summary="Send a quick test email using org sender config",
 )
-async def test_email(request: Request, body: TestEmailRequest) -> TestEmailResponse:
-    """Quick test endpoint — sends a plain email using the org's configured sender."""
+async def test_email(request: Request, body: TestEmailRequest, auth: dict = Depends(require_supabase_auth)) -> TestEmailResponse:
     require_repo()
-    org_id = get_org_id(request)
+    org_id = auth["organization_id"]
 
     try:
         from services.email.ses_client import SESClient
@@ -150,9 +155,9 @@ async def test_email(request: Request, body: TestEmailRequest) -> TestEmailRespo
     response_model=SendEmailResponse,
     summary="Send email immediately",
 )
-async def send_email(request: Request, body: SendEmailRequest, auth: dict = Depends(require_api_key)) -> SendEmailResponse:
+async def send_email(request: Request, body: SendEmailRequest, auth: dict = Depends(require_supabase_auth)) -> SendEmailResponse:
     require_repo()
-    org_id = get_org_id(request)
+    org_id = auth["organization_id"]
 
     try:
         from services.email.notification_service import NotificationService
@@ -172,7 +177,7 @@ async def send_email(request: Request, body: SendEmailRequest, auth: dict = Depe
         return SendEmailResponse(
             success=True,
             emails_sent=result["emails_sent"],
-            email_log_ids=result["email_log_ids"],
+            outbound_message_ids=result["outbound_message_ids"],
             submission_token_id=result.get("submission_token_id"),
             message=f"Sent {result['emails_sent']} email(s)",
         )
@@ -189,13 +194,12 @@ async def send_email(request: Request, body: SendEmailRequest, auth: dict = Depe
 
 @router.get("/templates", response_model=EmailTemplateListResponse)
 async def list_templates(
-    request: Request,
     email_schedule_type: Optional[str] = Query(None),
     include_inactive: bool = Query(False),
-    auth: dict = Depends(require_api_key),
+    auth: dict = Depends(require_supabase_auth),
 ) -> EmailTemplateListResponse:
     require_repo()
-    org_id = get_org_id(request)
+    org_id = auth["organization_id"]
     try:
         templates = notification_repo.list_templates(
             org_id, email_schedule_type=email_schedule_type, include_inactive=include_inactive
@@ -210,9 +214,9 @@ async def list_templates(
 
 
 @router.get("/templates/{template_id}", response_model=EmailTemplateResponse)
-async def get_template(request: Request, template_id: int, auth: dict = Depends(require_api_key)) -> EmailTemplateResponse:
+async def get_template(template_id: int, auth: dict = Depends(require_supabase_auth)) -> EmailTemplateResponse:
     require_repo()
-    org_id = get_org_id(request)
+    org_id = auth["organization_id"]
     template = notification_repo.get_template(template_id, org_id)
     if not template:
         raise HTTPException(status_code=404, detail={"success": False, "message": "Template not found"})
@@ -225,10 +229,10 @@ async def get_template(request: Request, template_id: int, auth: dict = Depends(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_template(
-    request: Request, body: CreateEmailTemplateRequest, auth: dict = Depends(require_api_key),
+    body: CreateEmailTemplateRequest, auth: dict = Depends(require_supabase_auth),
 ) -> EmailTemplateResponse:
     require_repo()
-    org_id = get_org_id(request)
+    org_id = auth["organization_id"]
     try:
         template_id = notification_repo.create_template(
             org_id, body.model_dump(exclude_none=True)
@@ -242,10 +246,10 @@ async def create_template(
 
 @router.put("/templates/{template_id}", response_model=EmailTemplateResponse)
 async def update_template(
-    request: Request, template_id: int, body: UpdateEmailTemplateRequest, auth: dict = Depends(require_api_key),
+    template_id: int, body: UpdateEmailTemplateRequest, auth: dict = Depends(require_supabase_auth),
 ) -> EmailTemplateResponse:
     require_repo()
-    org_id = get_org_id(request)
+    org_id = auth["organization_id"]
     existing = notification_repo.get_template(template_id, org_id)
     if not existing:
         raise HTTPException(status_code=404, detail={"success": False, "message": "Template not found"})
@@ -257,13 +261,138 @@ async def update_template(
 
 
 @router.delete("/templates/{template_id}", response_model=SuccessResponse)
-async def delete_template(request: Request, template_id: int, auth: dict = Depends(require_api_key)) -> SuccessResponse:
+async def delete_template(template_id: int, auth: dict = Depends(require_supabase_auth)) -> SuccessResponse:
     require_repo()
-    org_id = get_org_id(request)
+    org_id = auth["organization_id"]
     success = notification_repo.deactivate_template(template_id, org_id)
     if not success:
         raise HTTPException(status_code=404, detail={"success": False, "message": "Template not found or is system template"})
     return SuccessResponse(message="Template deactivated")
+
+
+# ============================================================================
+# Template Preview
+# ============================================================================
+
+# Sample context for previewing templates without real invoice data
+SAMPLE_CONTEXT = {
+    "company_name": "Acme Solar LLC",
+    "project_name": "Solar Farm Alpha",
+    "invoice_number": "INV-2026-001",
+    "invoice_date": "2026-03-01",
+    "due_date": "2026-03-31",
+    "total_amount": "12,500.00",
+    "currency": "USD",
+    "billing_period": "February 2026",
+    "counterparty_name": "Green Energy Corp",
+    "contract_name": "PPA — Solar Farm Alpha",
+    "submission_url": "#",
+    "recipient_name": "Jane Doe",
+    "sender_name": "FrontierMind",
+}
+
+
+@router.post(
+    "/templates/preview",
+    response_model=PreviewTemplateResponse,
+    summary="Preview a rendered template",
+)
+async def preview_template(
+    body: PreviewTemplateRequest, auth: dict = Depends(require_supabase_auth),
+) -> PreviewTemplateResponse:
+    """Render a template with sample or real data, returns HTML without sending."""
+    require_repo()
+    org_id = auth["organization_id"]
+
+    subject_tpl = body.subject_template
+    body_html_tpl = body.body_html
+
+    # Load from DB if template_id given (and inline not provided)
+    if body.template_id and (not subject_tpl or not body_html_tpl):
+        template = notification_repo.get_template(body.template_id, org_id)
+        if not template:
+            raise HTTPException(status_code=404, detail={"success": False, "message": "Template not found"})
+        if not subject_tpl:
+            subject_tpl = template["subject_template"]
+        if not body_html_tpl:
+            body_html_tpl = template["body_html"]
+
+    if not subject_tpl or not body_html_tpl:
+        raise HTTPException(
+            status_code=400,
+            detail={"success": False, "message": "Provide template_id or inline subject_template + body_html"},
+        )
+
+    # Build context
+    context = dict(SAMPLE_CONTEXT)
+
+    # If invoice_header_id provided, use real data
+    if body.invoice_header_id:
+        _validate_entity_ownership("project", body.invoice_header_id, org_id) if False else None
+        try:
+            from services.email.notification_service import NotificationService
+            service = NotificationService(notification_repo)
+            invoice_context = service._build_invoice_context(body.invoice_header_id, org_id)
+            if invoice_context:
+                context.update(invoice_context)
+        except Exception as e:
+            logger.warning(f"Failed to load invoice context for preview: {e}")
+
+    # Override with extra_context
+    if body.extra_context:
+        context.update(body.extra_context)
+
+    try:
+        from services.email.template_renderer import EmailTemplateRenderer
+        renderer = EmailTemplateRenderer()
+        rendered = renderer.render_email(
+            subject_template=subject_tpl,
+            body_html_template=body_html_tpl,
+            body_text_template=None,
+            context=context,
+        )
+        return PreviewTemplateResponse(
+            success=True,
+            subject=rendered["subject"],
+            html=rendered["html"],
+        )
+    except Exception as e:
+        logger.error(f"Template preview render error: {e}", exc_info=True)
+        raise HTTPException(status_code=400, detail={"success": False, "message": f"Render error: {e}"})
+
+
+# ============================================================================
+# Contacts Endpoint
+# ============================================================================
+
+@router.get(
+    "/contacts",
+    response_model=ContactListResponse,
+    summary="List email-eligible contacts",
+)
+async def list_contacts(
+    counterparty_id: Optional[int] = Query(None),
+    project_id: Optional[int] = Query(None),
+    include_all: bool = Query(False),
+    auth: dict = Depends(require_supabase_auth),
+) -> ContactListResponse:
+    """List contacts eligible for email notifications, optionally filtered."""
+    require_repo()
+    org_id = auth["organization_id"]
+    try:
+        contacts = notification_repo.list_contacts(
+            org_id,
+            counterparty_id=counterparty_id,
+            project_id=project_id,
+            include_all=include_all,
+        )
+        return ContactListResponse(
+            contacts=[ContactItem(**c) for c in contacts],
+            total=len(contacts),
+        )
+    except Exception as e:
+        logger.error(f"Error listing contacts: {e}")
+        raise HTTPException(status_code=500, detail={"success": False, "message": str(e)})
 
 
 # ============================================================================
@@ -272,13 +401,13 @@ async def delete_template(request: Request, template_id: int, auth: dict = Depen
 
 @router.get("/schedules", response_model=NotificationScheduleListResponse)
 async def list_schedules(
-    request: Request,
     include_inactive: bool = Query(False),
-    auth: dict = Depends(require_api_key),
+    project_id: Optional[int] = Query(None),
+    auth: dict = Depends(require_supabase_auth),
 ) -> NotificationScheduleListResponse:
     require_repo()
-    org_id = get_org_id(request)
-    schedules = notification_repo.list_schedules(org_id, include_inactive=include_inactive)
+    org_id = auth["organization_id"]
+    schedules = notification_repo.list_schedules(org_id, include_inactive=include_inactive, project_id=project_id)
     return NotificationScheduleListResponse(
         schedules=[NotificationScheduleResponse(**s) for s in schedules],
         total=len(schedules),
@@ -286,9 +415,9 @@ async def list_schedules(
 
 
 @router.get("/schedules/{schedule_id}", response_model=NotificationScheduleResponse)
-async def get_schedule(request: Request, schedule_id: int, auth: dict = Depends(require_api_key)) -> NotificationScheduleResponse:
+async def get_schedule(schedule_id: int, auth: dict = Depends(require_supabase_auth)) -> NotificationScheduleResponse:
     require_repo()
-    org_id = get_org_id(request)
+    org_id = auth["organization_id"]
     schedule = notification_repo.get_schedule(schedule_id, org_id)
     if not schedule:
         raise HTTPException(status_code=404, detail={"success": False, "message": "Schedule not found"})
@@ -301,15 +430,23 @@ async def get_schedule(request: Request, schedule_id: int, auth: dict = Depends(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_schedule(
-    request: Request, body: CreateScheduleRequest, auth: dict = Depends(require_api_key),
+    body: CreateScheduleRequest, auth: dict = Depends(require_supabase_auth),
 ) -> NotificationScheduleResponse:
     require_repo()
-    org_id = get_org_id(request)
+    org_id = auth["organization_id"]
     try:
         # Verify template exists
         template = notification_repo.get_template(body.email_template_id, org_id)
         if not template:
             raise HTTPException(status_code=404, detail={"success": False, "message": "Template not found"})
+
+        # Validate entity ownership for scope fields
+        if body.project_id:
+            _validate_entity_ownership("project", body.project_id, org_id)
+        if body.contract_id:
+            _validate_entity_ownership("contract", body.contract_id, org_id)
+        if body.counterparty_id:
+            _validate_entity_ownership("counterparty", body.counterparty_id, org_id)
 
         schedule_id = notification_repo.create_schedule(
             org_id, body.model_dump(exclude_none=True)
@@ -325,13 +462,22 @@ async def create_schedule(
 
 @router.put("/schedules/{schedule_id}", response_model=NotificationScheduleResponse)
 async def update_schedule(
-    request: Request, schedule_id: int, body: UpdateScheduleRequest, auth: dict = Depends(require_api_key),
+    schedule_id: int, body: UpdateScheduleRequest, auth: dict = Depends(require_supabase_auth),
 ) -> NotificationScheduleResponse:
     require_repo()
-    org_id = get_org_id(request)
+    org_id = auth["organization_id"]
     existing = notification_repo.get_schedule(schedule_id, org_id)
     if not existing:
         raise HTTPException(status_code=404, detail={"success": False, "message": "Schedule not found"})
+
+    # Validate entity ownership for scope fields if being updated
+    if body.project_id:
+        _validate_entity_ownership("project", body.project_id, org_id)
+    if body.contract_id:
+        _validate_entity_ownership("contract", body.contract_id, org_id)
+    if body.counterparty_id:
+        _validate_entity_ownership("counterparty", body.counterparty_id, org_id)
+
     updates = body.model_dump(exclude_none=True)
     if updates:
         notification_repo.update_schedule(schedule_id, org_id, updates)
@@ -340,9 +486,9 @@ async def update_schedule(
 
 
 @router.delete("/schedules/{schedule_id}", response_model=SuccessResponse)
-async def delete_schedule(request: Request, schedule_id: int, auth: dict = Depends(require_api_key)) -> SuccessResponse:
+async def delete_schedule(schedule_id: int, auth: dict = Depends(require_supabase_auth)) -> SuccessResponse:
     require_repo()
-    org_id = get_org_id(request)
+    org_id = auth["organization_id"]
     existing = notification_repo.get_schedule(schedule_id, org_id)
     if not existing:
         raise HTTPException(status_code=404, detail={"success": False, "message": "Schedule not found"})
@@ -351,10 +497,10 @@ async def delete_schedule(request: Request, schedule_id: int, auth: dict = Depen
 
 
 @router.post("/schedules/{schedule_id}/trigger", response_model=SendEmailResponse)
-async def trigger_schedule(request: Request, schedule_id: int, auth: dict = Depends(require_api_key)) -> SendEmailResponse:
+async def trigger_schedule(request: Request, schedule_id: int, auth: dict = Depends(require_supabase_auth)) -> SendEmailResponse:
     """Manually trigger a schedule immediately."""
     require_repo()
-    org_id = get_org_id(request)
+    org_id = auth["organization_id"]
     schedule = notification_repo.get_schedule(schedule_id, org_id)
     if not schedule:
         raise HTTPException(status_code=404, detail={"success": False, "message": "Schedule not found"})
@@ -378,7 +524,7 @@ async def trigger_schedule(request: Request, schedule_id: int, auth: dict = Depe
         return SendEmailResponse(
             success=True,
             emails_sent=sent,
-            email_log_ids=[],
+            outbound_message_ids=[],
             message=f"Triggered: sent {sent} email(s)",
         )
     except Exception as e:
@@ -388,31 +534,32 @@ async def trigger_schedule(request: Request, schedule_id: int, auth: dict = Depe
 
 
 # ============================================================================
-# Email Log Endpoints
+# Outbound Message Endpoints
 # ============================================================================
 
-@router.get("/email-log", response_model=EmailLogListResponse)
-async def list_email_logs(
-    request: Request,
+@router.get("/outbound-messages", response_model=OutboundMessageListResponse)
+async def list_outbound_messages(
     invoice_header_id: Optional[int] = Query(None),
     schedule_id: Optional[int] = Query(None),
     email_status: Optional[str] = Query(None, alias="email_status"),
+    project_id: Optional[int] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    auth: dict = Depends(require_api_key),
-) -> EmailLogListResponse:
+    auth: dict = Depends(require_supabase_auth),
+) -> OutboundMessageListResponse:
     require_repo()
-    org_id = get_org_id(request)
-    logs, total = notification_repo.list_email_logs(
+    org_id = auth["organization_id"]
+    logs, total = notification_repo.list_outbound_messages(
         org_id,
         invoice_header_id=invoice_header_id,
         schedule_id=schedule_id,
         status=email_status,
+        project_id=project_id,
         limit=limit,
         offset=offset,
     )
-    return EmailLogListResponse(
-        logs=[EmailLogResponse(**log) for log in logs],
+    return OutboundMessageListResponse(
+        messages=[OutboundMessageResponse(**log) for log in logs],
         total=total,
     )
 
@@ -423,15 +570,14 @@ async def list_email_logs(
 
 @router.get("/submissions", response_model=SubmissionResponseListResponse)
 async def list_submissions(
-    request: Request,
     invoice_header_id: Optional[int] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    auth: dict = Depends(require_api_key),
+    auth: dict = Depends(require_supabase_auth),
 ) -> SubmissionResponseListResponse:
     require_repo()
-    org_id = get_org_id(request)
-    submissions, total = notification_repo.list_submission_responses(
+    org_id = auth["organization_id"]
+    submissions, total = notification_repo.list_inbound_messages(
         org_id, invoice_header_id=invoice_header_id, limit=limit, offset=offset
     )
     return SubmissionResponseListResponse(
@@ -457,28 +603,20 @@ class MRPCollectionResponse(BaseModel):
     summary="Generate MRP collection token",
 )
 async def create_mrp_collection(
-    request: Request, body: MRPCollectionRequest
+    request: Request, body: MRPCollectionRequest, auth: dict = Depends(require_supabase_auth),
 ) -> MRPCollectionResponse:
-    """
-    Generate a reusable MRP upload token for a project.
-    The token allows the counterparty to upload utility invoices monthly.
-    """
+    """Generate a reusable MRP upload token for a project."""
     require_repo()
-    org_id = get_org_id(request)
+    org_id = auth["organization_id"]
 
-    # Validate project belongs to this organization
-    _validate_project_ownership(body.project_id, org_id)
-
-    # Validate counterparty belongs to this organization (if provided)
+    _validate_entity_ownership("project", body.project_id, org_id)
     if body.counterparty_id:
-        _validate_counterparty_ownership(body.counterparty_id, org_id)
+        _validate_entity_ownership("counterparty", body.counterparty_id, org_id)
 
     try:
         from services.email.token_service import TokenService
 
         token_svc = TokenService(notification_repo)
-
-        # Store operating_year in submission_fields so upload endpoint can use it
         result = token_svc.generate_token(
             org_id=org_id,
             counterparty_id=body.counterparty_id,
@@ -489,14 +627,11 @@ async def create_mrp_collection(
             submission_type="mrp_upload",
         )
 
-        # Build the submission URL
         frontend_url = request.headers.get(
             "X-Frontend-URL",
             os.getenv("APP_BASE_URL", "https://frontiermind-app.vercel.app"),
         )
         submission_url = f"{frontend_url}/submit/{result['token']}"
-
-        # Persist URL alongside token (raw token is never stored, only hash)
         token_svc.store_submission_url(result["token_id"], submission_url)
 
         return MRPCollectionResponse(
@@ -546,16 +681,16 @@ class SubmissionTokenListResponse(BaseModel):
     summary="List submission tokens",
 )
 async def list_tokens(
-    request: Request,
     project_id: Optional[int] = Query(None),
     submission_type: Optional[str] = Query(None),
     include_expired: bool = Query(False),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    auth: dict = Depends(require_supabase_auth),
 ) -> SubmissionTokenListResponse:
-    """List submission tokens for the organization, optionally filtered by project or type."""
+    """List submission tokens for the organization."""
     require_repo()
-    org_id = get_org_id(request)
+    org_id = auth["organization_id"]
 
     try:
         tokens, total = notification_repo.list_submission_tokens(
@@ -588,10 +723,10 @@ async def list_tokens(
     response_model=SuccessResponse,
     summary="Revoke a submission token",
 )
-async def revoke_token(request: Request, token_id: int) -> SuccessResponse:
+async def revoke_token(token_id: int, auth: dict = Depends(require_supabase_auth)) -> SuccessResponse:
     """Revoke an active submission token so its link stops working."""
     require_repo()
-    org_id = get_org_id(request)
+    org_id = auth["organization_id"]
 
     try:
         notification_repo.revoke_submission_token(token_id, org_id)
@@ -601,37 +736,3 @@ async def revoke_token(request: Request, token_id: int) -> SuccessResponse:
         if "not found" in msg:
             raise HTTPException(status_code=404, detail={"success": False, "message": msg})
         raise HTTPException(status_code=400, detail={"success": False, "message": msg})
-
-
-def _validate_project_ownership(project_id: int, org_id: int) -> None:
-    """Verify project exists and belongs to the given organization."""
-    from db.database import get_db_connection
-
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id FROM project WHERE id = %s AND organization_id = %s",
-                (project_id, org_id),
-            )
-            if not cur.fetchone():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail={"success": False, "message": "Project not found"},
-                )
-
-
-def _validate_counterparty_ownership(counterparty_id: int, org_id: int) -> None:
-    """Verify counterparty exists and belongs to the given organization."""
-    from db.database import get_db_connection
-
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                "SELECT id FROM counterparty WHERE id = %s AND organization_id = %s",
-                (counterparty_id, org_id),
-            )
-            if not cur.fetchone():
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail={"success": False, "message": "Counterparty not found"},
-                )

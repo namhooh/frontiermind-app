@@ -105,9 +105,9 @@ class ReportDeliveryService:
                     f"delivery email sent to {email_addr}"
                 )
 
-                # Log to email_log for audit trail
+                # Log to outbound_message for audit trail
                 try:
-                    notification_repo.create_email_log({
+                    notification_repo.create_outbound_message({
                         "organization_id": report_record.get("organization_id"),
                         "recipient_email": email_addr,
                         "subject": subject,
@@ -118,7 +118,7 @@ class ReportDeliveryService:
                 except Exception as log_err:
                     logger.warning(
                         f"Report {report_record['id']}: "
-                        f"email_log creation failed for {email_addr}: {log_err}"
+                        f"outbound_message creation failed for {email_addr}: {log_err}"
                     )
 
             except Exception as e:
@@ -127,9 +127,9 @@ class ReportDeliveryService:
                     f"failed to send to {email_addr}: {e}"
                 )
 
-                # Log failure to email_log
+                # Log failure to outbound_message
                 try:
-                    notification_repo.create_email_log({
+                    notification_repo.create_outbound_message({
                         "organization_id": report_record.get("organization_id"),
                         "recipient_email": email_addr,
                         "subject": subject,
@@ -138,7 +138,7 @@ class ReportDeliveryService:
                 except Exception as log_err:
                     logger.warning(
                         f"Report {report_record['id']}: "
-                        f"email_log failure creation failed for {email_addr}: {log_err}"
+                        f"outbound_message failure creation failed for {email_addr}: {log_err}"
                     )
 
         return emails_sent

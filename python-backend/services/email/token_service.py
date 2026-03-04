@@ -30,7 +30,7 @@ class TokenService:
         fields: Optional[List[str]] = None,
         expiry_hours: int = DEFAULT_EXPIRY_HOURS,
         max_uses: int = 1,
-        email_log_id: Optional[int] = None,
+        outbound_message_id: Optional[int] = None,
         project_id: Optional[int] = None,
         submission_type: str = "form_response",
         submission_url: Optional[str] = None,
@@ -65,7 +65,7 @@ class TokenService:
             "expires_at": datetime.now(timezone.utc) + timedelta(hours=expiry_hours),
             "invoice_header_id": invoice_header_id,
             "counterparty_id": counterparty_id,
-            "email_log_id": email_log_id,
+            "outbound_message_id": outbound_message_id,
             "project_id": project_id,
             "submission_type": submission_type,
         })
@@ -118,6 +118,7 @@ class TokenService:
         response_data: Dict[str, Any],
         submitted_by_email: Optional[str] = None,
         ip_address: Optional[str] = None,
+        channel: Optional[str] = None,
     ) -> int:
         """
         Record a submission against a token.
@@ -127,28 +128,38 @@ class TokenService:
             response_data: Submitted form data
             submitted_by_email: Email of submitter
             ip_address: IP of submitter
+            channel: Override channel ('token_form' or 'token_upload').
+                     Defaults based on submission_type.
 
         Returns:
-            submission_response ID
+            inbound_message ID
         """
         # Increment usage (atomic: WHERE status='active' ensures only one wins)
         success = self.repo.use_submission_token(token_record["id"])
         if not success:
             raise ValueError("Token already used or expired")
 
-        # Store response
-        response_id = self.repo.create_submission_response({
+        # Determine channel
+        if channel is None:
+            submission_type = token_record.get("submission_type", "form_response")
+            channel = "token_upload" if submission_type == "mrp_upload" else "token_form"
+
+        # Store as inbound_message
+        inbound_message_id = self.repo.create_inbound_message({
             "organization_id": token_record["organization_id"],
             "submission_token_id": token_record["id"],
             "response_data": response_data,
             "submitted_by_email": submitted_by_email,
             "ip_address": ip_address,
             "invoice_header_id": token_record.get("invoice_header_id"),
+            "channel": channel,
+            "project_id": token_record.get("project_id"),
+            "counterparty_id": token_record.get("counterparty_id"),
         })
 
         logger.info(
-            f"Submission recorded: response_id={response_id}, "
-            f"token_id={token_record['id']}"
+            f"Submission recorded: inbound_message_id={inbound_message_id}, "
+            f"token_id={token_record['id']}, channel={channel}"
         )
 
-        return response_id
+        return inbound_message_id

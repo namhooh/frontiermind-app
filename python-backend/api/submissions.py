@@ -342,7 +342,6 @@ async def submit_file(
             operating_year=operating_year,
             s3_path=s3_key,
             file_hash=file_hash,
-            submission_response_id=None,  # Linked after token consumption via UPDATE
         )
 
     except Exception as e:
@@ -371,6 +370,7 @@ async def submit_file(
             },
             submitted_by_email=submitted_by_email,
             ip_address=ip_address,
+            channel="token_upload",
         )
     except ValueError as e:
         # Token exhausted between validation and consumption — extraction succeeded
@@ -378,9 +378,38 @@ async def submit_file(
         logger.warning(f"Token use failed after successful extraction: {e}")
         response_id = None
 
-    # 12. Link submission_response to the reference_price observation
-    if response_id and result.get("observation_id"):
-        _link_submission_to_observation(result["observation_id"], response_id)
+    # 12. Create inbound_attachment for the uploaded file
+    inbound_message_id = response_id  # use_token now returns inbound_message.id directly
+    inbound_attachment_id = None
+    if inbound_message_id:
+        try:
+            from db.ingest_repository import IngestRepository
+            _ingest_repo = IngestRepository()
+            inbound_attachment_id = _ingest_repo.create_inbound_attachment({
+                "inbound_message_id": inbound_message_id,
+                "filename": file.filename,
+                "content_type": file.content_type,
+                "size_bytes": len(file_bytes),
+                "s3_path": s3_key,
+                "file_hash": file_hash,
+                "attachment_processing_status": "extracted",
+            })
+            # Update attachment with extraction result
+            _ingest_repo.update_attachment_status(
+                inbound_attachment_id,
+                "extracted",
+                reference_price_id=result.get("observation_id"),
+            )
+        except Exception as e:
+            logger.warning(f"Failed to create inbound_attachment: {e}")
+
+    # 13. Link inbound_message and attachment to the reference_price observation
+    if inbound_message_id and result.get("observation_id"):
+        _link_submission_to_observation(
+            result["observation_id"],
+            inbound_message_id=inbound_message_id,
+            inbound_attachment_id=inbound_attachment_id,
+        )
 
     return FileUploadSuccessResponse(
         success=True,
@@ -484,18 +513,38 @@ def _get_cod_date(project_id: int):
             return row["cod_date"] if row else None
 
 
-def _link_submission_to_observation(observation_id: int, response_id: int) -> None:
-    """Link the submission_response back to the reference_price observation."""
+def _link_submission_to_observation(
+    observation_id: int,
+    inbound_message_id: Optional[int] = None,
+    inbound_attachment_id: Optional[int] = None,
+) -> None:
+    """Link inbound_message and attachment back to reference_price."""
     from db.database import get_db_connection
 
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
+                sets = []
+                params = []
+
+                if inbound_message_id:
+                    sets.append("inbound_message_id = %s")
+                    params.append(inbound_message_id)
+                if inbound_attachment_id:
+                    sets.append("inbound_attachment_id = %s")
+                    params.append(inbound_attachment_id)
+
+                if not sets:
+                    return
+
+                params.append(observation_id)
                 cur.execute(
-                    "UPDATE reference_price SET submission_response_id = %s WHERE id = %s",
-                    (response_id, observation_id),
+                    f"UPDATE reference_price SET {', '.join(sets)} WHERE id = %s",
+                    params,
                 )
                 conn.commit()
     except Exception as e:
         # Non-fatal: observation was stored successfully, just missing the FK link
-        logger.warning(f"Failed to link submission {response_id} to observation {observation_id}: {e}")
+        logger.warning(f"Failed to link inbound_message {inbound_message_id} to observation {observation_id}: {e}")
+
+

@@ -22,7 +22,7 @@ class NotificationService:
     Orchestrates email notifications.
 
     Pipeline: resolve recipients -> render template -> generate token (if needed)
-              -> send via SES -> log in email_log -> audit log
+              -> send via SES -> log in outbound_message -> audit log
     """
 
     def __init__(self, notification_repo, ses_client: Optional[SESClient] = None, frontend_url: Optional[str] = None):
@@ -50,7 +50,7 @@ class NotificationService:
         Send email immediately (user-initiated).
 
         Returns:
-            Dict with emails_sent count, email_log_ids, and optional submission_token_id
+            Dict with emails_sent count, outbound_message_ids, and optional submission_token_id
         """
         # Load template
         template = self.repo.get_template(template_id, org_id)
@@ -84,7 +84,7 @@ class NotificationService:
         )
 
         # Send to each recipient
-        email_log_ids = []
+        outbound_message_ids = []
         emails_sent = 0
 
         for email_addr in recipient_emails:
@@ -98,13 +98,13 @@ class NotificationService:
                 invoice_header_id=invoice_header_id,
                 submission_token_id=submission_token_id,
             )
-            email_log_ids.append(log_id)
+            outbound_message_ids.append(log_id)
             if success:
                 emails_sent += 1
 
         return {
             "emails_sent": emails_sent,
-            "email_log_ids": email_log_ids,
+            "outbound_message_ids": outbound_message_ids,
             "submission_token_id": submission_token_id,
         }
 
@@ -307,7 +307,7 @@ class NotificationService:
         org_sender = self._get_org_sender(org_id)
 
         # Create log entry (pending)
-        log_id = self.repo.create_email_log({
+        log_id = self.repo.create_outbound_message({
             "organization_id": org_id,
             "email_notification_schedule_id": schedule_id,
             "email_template_id": template_id,
@@ -330,13 +330,13 @@ class NotificationService:
                 sender_name=org_sender["sender_name"],
                 sender_email=org_sender["sender_email"],
             )
-            self.repo.update_email_log_status(
+            self.repo.update_outbound_message_status(
                 log_id, "delivered", ses_message_id=ses_message_id
             )
             return log_id, True
         except SESError as e:
             logger.error(f"Email send failed for {recipient_email}: {e}")
-            self.repo.update_email_log_status(
+            self.repo.update_outbound_message_status(
                 log_id, "failed", error_message=str(e)
             )
             return log_id, False
