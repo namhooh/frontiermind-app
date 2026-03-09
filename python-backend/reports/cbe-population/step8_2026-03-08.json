@@ -1,0 +1,2471 @@
+{
+  "step": 8,
+  "step_name": "Invoice Calibration & Tax Rule Extraction",
+  "mode": "DRY RUN",
+  "status": "critical",
+  "summary": {
+    "pdfs_discovered": 33,
+    "pdfs_parsed": 33,
+    "projects_covered": [
+      "QMM01",
+      "MB01",
+      "CAL01",
+      "GBL01",
+      "MIR01",
+      "MP01",
+      "NBL02",
+      "XFL01",
+      "XFBV",
+      "XFAB",
+      "TBM01",
+      "ZL02",
+      "MF01",
+      "NC02",
+      "ERG",
+      "LOI01",
+      "KAS01",
+      "NC03",
+      "MP02",
+      "XFSS",
+      "AR01",
+      "MOH01",
+      "NBL01",
+      "UTK01",
+      "GC001",
+      "AMP01",
+      "UGL01",
+      "IVL01"
+    ],
+    "tax_rules_created": 18,
+    "check_counts": {
+      "critical": 1,
+      "warning": 44,
+      "info": 33
+    }
+  },
+  "tax_rules_created": [
+    {
+      "country_code": "SL",
+      "project_id": null,
+      "name": "SL Standard Tax Regime",
+      "rules_summary": "OTHER=15.0%",
+      "source_invoices": [
+        "MIR01"
+      ]
+    },
+    {
+      "country_code": "SL",
+      "project_id": 72,
+      "name": "SL Tax Regime \u2014 MIR01 override",
+      "rules_summary": "VAT=15%, WHT=6.5%",
+      "source_invoices": [
+        "MIR01"
+      ]
+    },
+    {
+      "country_code": "SL",
+      "project_id": 73,
+      "name": "SL Tax Regime \u2014 ZL02 override",
+      "rules_summary": "VAT=15%, WHT=6.5%",
+      "source_invoices": [
+        "ZL02"
+      ]
+    },
+    {
+      "country_code": "MG",
+      "project_id": null,
+      "name": "MG Standard Tax Regime",
+      "rules_summary": "VAT=20%",
+      "source_invoices": [
+        "ERG"
+      ]
+    },
+    {
+      "country_code": "MG",
+      "project_id": 67,
+      "name": "MG Tax Regime \u2014 QMM01 override",
+      "rules_summary": "VAT=0%",
+      "source_invoices": [
+        "QMM01"
+      ]
+    },
+    {
+      "country_code": "GH",
+      "project_id": null,
+      "name": "GH Standard Tax Regime",
+      "rules_summary": "VAT=15%, NHIL=2.5%, GETFUND=2.5%, COVID=1.0%, WHT=3.0%, WHVAT=7.0%",
+      "source_invoices": [
+        "GBL01",
+        "UGL01"
+      ]
+    },
+    {
+      "country_code": "GH",
+      "project_id": 53,
+      "name": "GH Tax Regime \u2014 KAS01 override",
+      "rules_summary": "VAT=15%, NHIL=2.5%, GETFUND=2.5%, COVID=1.0%, WHT=7.5%, WHVAT=7.0%",
+      "source_invoices": [
+        "KAS01"
+      ]
+    },
+    {
+      "country_code": "GH",
+      "project_id": 8,
+      "name": "GH Tax Regime \u2014 MOH01 override",
+      "rules_summary": "VAT=15%, NHIL=2.5%, GETFUND=2.5%, COVID=1.0%, WHT=3.0%, WHVAT=7.0%",
+      "source_invoices": [
+        "MOH01"
+      ]
+    },
+    {
+      "country_code": "KE",
+      "project_id": null,
+      "name": "KE Standard Tax Regime",
+      "rules_summary": "VAT=16%, WHVAT=2.0%",
+      "source_invoices": [
+        "LOI01",
+        "MP02",
+        "NC02",
+        "UTK01",
+        "XFAB",
+        "XFBV",
+        "XFL01",
+        "XFSS",
+        "AR01",
+        "MB01",
+        "MF01",
+        "MP01",
+        "NC03",
+        "TBM01"
+      ]
+    },
+    {
+      "country_code": "KE",
+      "project_id": 48,
+      "name": "KE Tax Regime \u2014 GC001 override",
+      "rules_summary": "VAT=0%",
+      "source_invoices": [
+        "GC001"
+      ]
+    },
+    {
+      "country_code": "KE",
+      "project_id": 59,
+      "name": "KE Tax Regime \u2014 MP02 override",
+      "rules_summary": "VAT=16%",
+      "source_invoices": [
+        "MP02"
+      ]
+    },
+    {
+      "country_code": "KE",
+      "project_id": 61,
+      "name": "KE Tax Regime \u2014 NC02 override",
+      "rules_summary": "VAT=16%",
+      "source_invoices": [
+        "NC02"
+      ]
+    },
+    {
+      "country_code": "KE",
+      "project_id": 64,
+      "name": "KE Tax Regime \u2014 UTK01 override",
+      "rules_summary": "VAT=16%",
+      "source_invoices": [
+        "UTK01"
+      ]
+    },
+    {
+      "country_code": "KE",
+      "project_id": 115,
+      "name": "KE Tax Regime \u2014 XFSS override",
+      "rules_summary": "VAT=16%",
+      "source_invoices": [
+        "XFSS"
+      ]
+    },
+    {
+      "country_code": "KE",
+      "project_id": 66,
+      "name": "KE Tax Regime \u2014 AMP01 override",
+      "rules_summary": "VAT=16%",
+      "source_invoices": [
+        "AMP01"
+      ]
+    },
+    {
+      "country_code": "EG",
+      "project_id": null,
+      "name": "EG Standard Tax Regime",
+      "rules_summary": "VAT=0%, WHT=3.0%",
+      "source_invoices": [
+        "IVL01"
+      ]
+    },
+    {
+      "country_code": "NG",
+      "project_id": null,
+      "name": "NG Standard Tax Regime",
+      "rules_summary": "VAT=8%, WHT=2.0%",
+      "source_invoices": [
+        "NBL02",
+        "NBL01"
+      ]
+    },
+    {
+      "country_code": "ZW",
+      "project_id": null,
+      "name": "ZW Standard Tax Regime",
+      "rules_summary": "VAT=15%",
+      "source_invoices": [
+        "CAL01"
+      ]
+    }
+  ],
+  "invoice_extractions": [
+    {
+      "sage_id": "MIR01",
+      "filename": "CrossBoundary - Miro ECR receipt invoice SINMIR012512030  Jan 2026.pdf",
+      "invoice_number": "1/2026",
+      "currency": "SLL",
+      "grand_total": 181536.73,
+      "billing_period": null,
+      "confidence": "medium",
+      "tax_codes": [
+        "OTHER"
+      ],
+      "line_item_count": 1,
+      "checks": [
+        {
+          "check": 3,
+          "severity": "info",
+          "field": "currency",
+          "message": "MIR01: Invoice billed in SLL, clause_tariff reference currency is SLE (floor/ceiling rates \u2014 not a billing mismatch)",
+          "project": "MIR01",
+          "filename": "CrossBoundary - Miro ECR receipt invoice SINMIR012512030  Jan 2026.pdf"
+        },
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "MIR01: 1 energy line(s) but no billing_products in DB",
+          "project": "MIR01",
+          "filename": "CrossBoundary Energy Invoice - SINMIR012512030 - 172026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "MIR01: Invoice shows 24018 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "MIR01",
+          "filename": "CrossBoundary Energy Invoice - SINMIR012512030 - 172026.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "ERG",
+      "filename": "CrossBoundary Energy Invoice - SINERG  2512029 - 162026.pdf",
+      "invoice_number": "SINERG 2512029",
+      "currency": "MGA",
+      "grand_total": 52324113.3,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT"
+      ],
+      "line_item_count": 1,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "ERG: 1 energy line(s) but no billing_products in DB",
+          "project": "ERG",
+          "filename": "CrossBoundary Energy Invoice - SINERG  2512029 - 162026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "ERG: Invoice shows 106773 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "ERG",
+          "filename": "CrossBoundary Energy Invoice - SINERG  2512029 - 162026.pdf"
+        },
+        {
+          "check": 5,
+          "severity": "warning",
+          "field": "exchange_rate",
+          "message": "ERG: Invoice FX=4532.4631 vs DB=4468.9285 (1.4% diff)",
+          "project": "ERG",
+          "filename": "CrossBoundary Energy Invoice - SINERG  2512029 - 162026.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "GBL01",
+      "filename": "CrossBoundary Energy Invoice - SINGBL 012511024 - 1242025.pdf",
+      "invoice_number": "SINGBL012511024",
+      "currency": "GHS",
+      "grand_total": 227458.03,
+      "billing_period": "2025-11",
+      "confidence": "high",
+      "tax_codes": [
+        "NHIL",
+        "GETFUND",
+        "COVID",
+        "VAT",
+        "WHT",
+        "WHVAT"
+      ],
+      "line_item_count": 2,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "GBL01: 2 energy line(s) but no billing_products in DB",
+          "project": "GBL01",
+          "filename": "CrossBoundary Energy Invoice - SINGBL 012511024 - 1242025.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "GBL01: Invoice shows 116497 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "GBL01",
+          "filename": "CrossBoundary Energy Invoice - SINGBL 012511024 - 1242025.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "GC001",
+      "filename": "CrossBoundary Energy Invoice - SINGC0012504009 - 562025.pdf",
+      "invoice_number": "SINGC0012504009",
+      "currency": "USD",
+      "grand_total": 21109.62,
+      "billing_period": "2025-04",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT"
+      ],
+      "line_item_count": 2,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "GC001: 2 energy line(s) but no billing_products in DB",
+          "project": "GC001",
+          "filename": "CrossBoundary Energy Invoice - SINGC0012504009 - 562025.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "GC001: Invoice shows 61383 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "GC001",
+          "filename": "CrossBoundary Energy Invoice - SINGC0012504009 - 562025.pdf"
+        },
+        {
+          "check": 4,
+          "severity": "warning",
+          "field": "tax_rate.VAT",
+          "message": "GC001: Invoice VAT rate=0.0000 vs DB=0.1600",
+          "project": "GC001",
+          "filename": "CrossBoundary Energy Invoice - SINGC0012504009 - 562025.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "IVL01",
+      "filename": "CrossBoundary Energy Invoice - SINIVL 012511021 - 1242025.pdf",
+      "invoice_number": "SINIVL012511021",
+      "currency": "USD",
+      "grand_total": 97.61,
+      "billing_period": "2025-11",
+      "confidence": "medium",
+      "tax_codes": [
+        "VAT",
+        "WHT"
+      ],
+      "line_item_count": 1,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "IVL01: 1 energy line(s) but no billing_products in DB",
+          "project": "IVL01",
+          "filename": "CrossBoundary Energy Invoice - SINIVL 012511021 - 1242025.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "IVL01: Invoice shows 1619 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "IVL01",
+          "filename": "CrossBoundary Energy Invoice - SINIVL 012511021 - 1242025.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "KAS01",
+      "filename": "CrossBoundary Energy Invoice - SINKAS012512035 - 172026.pdf",
+      "invoice_number": "SINKAS012512035",
+      "currency": "GHS",
+      "grand_total": 203658.26,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "NHIL",
+        "GETFUND",
+        "COVID",
+        "VAT",
+        "WHT",
+        "WHVAT"
+      ],
+      "line_item_count": 3,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "KAS01: 3 energy line(s) but no billing_products in DB",
+          "project": "KAS01",
+          "filename": "CrossBoundary Energy Invoice - SINKAS012512035 - 172026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "KAS01: Invoice shows 133060 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "KAS01",
+          "filename": "CrossBoundary Energy Invoice - SINKAS012512035 - 172026.pdf"
+        },
+        {
+          "check": 4,
+          "severity": "warning",
+          "field": "tax_rate.WHT",
+          "message": "KAS01: Invoice WHT rate=0.0750 vs DB=0.0300",
+          "project": "KAS01",
+          "filename": "CrossBoundary Energy Invoice - SINKAS012512035 - 172026.pdf"
+        },
+        {
+          "check": 6,
+          "severity": "warning",
+          "field": "clause_tariff.floor_rate",
+          "message": "KAS01: Invoice floor=0.0989 vs DB=0.0874",
+          "project": "KAS01",
+          "filename": "CrossBoundary Energy Invoice - SINKAS012512035 - 172026.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "LOI01",
+      "filename": "CrossBoundary Energy Invoice - SINLOI 012512011 - 172026.pdf",
+      "invoice_number": "SINLOI012512011",
+      "currency": "USD",
+      "grand_total": 5720.83,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT",
+        "WHVAT"
+      ],
+      "line_item_count": 3,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "LOI01: 2 energy line(s) but no billing_products in DB",
+          "project": "LOI01",
+          "filename": "CrossBoundary Energy Invoice - SINLOI 012512011 - 172026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "LOI01: Invoice shows 9894 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "LOI01",
+          "filename": "CrossBoundary Energy Invoice - SINLOI 012512011 - 172026.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "MIR01",
+      "filename": "CrossBoundary Energy Invoice - SINMIR012512030 - 172026.pdf",
+      "invoice_number": "SINMIR012512030",
+      "currency": "SLE",
+      "grand_total": 181536.73,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT",
+        "WHT"
+      ],
+      "line_item_count": 1,
+      "checks": [
+        {
+          "check": 3,
+          "severity": "info",
+          "field": "currency",
+          "message": "MIR01: Invoice billed in SLL, clause_tariff reference currency is SLE (floor/ceiling rates \u2014 not a billing mismatch)",
+          "project": "MIR01",
+          "filename": "CrossBoundary - Miro ECR receipt invoice SINMIR012512030  Jan 2026.pdf"
+        },
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "MIR01: 1 energy line(s) but no billing_products in DB",
+          "project": "MIR01",
+          "filename": "CrossBoundary Energy Invoice - SINMIR012512030 - 172026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "MIR01: Invoice shows 24018 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "MIR01",
+          "filename": "CrossBoundary Energy Invoice - SINMIR012512030 - 172026.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "MOH01",
+      "filename": "CrossBoundary Energy Invoice - SINMOH012512037 - 172026.pdf",
+      "invoice_number": "SINMOH012512037",
+      "currency": "GHS",
+      "grand_total": 296925.04,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "NHIL",
+        "GETFUND",
+        "COVID",
+        "VAT",
+        "WHT",
+        "WHVAT"
+      ],
+      "line_item_count": 7,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "MOH01: 6 energy line(s) but no billing_products in DB",
+          "project": "MOH01",
+          "filename": "CrossBoundary Energy Invoice - SINMOH012512037 - 172026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "MOH01: Invoice shows 171596 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "MOH01",
+          "filename": "CrossBoundary Energy Invoice - SINMOH012512037 - 172026.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "MP02",
+      "filename": "CrossBoundary Energy Invoice - SINMP02 2512015 - 172026.pdf",
+      "invoice_number": "SINMP02 2512015",
+      "currency": "KES",
+      "grand_total": 1184787.43,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT",
+        "WHVAT"
+      ],
+      "line_item_count": 2,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "MP02: 2 energy line(s) but no billing_products in DB",
+          "project": "MP02",
+          "filename": "CrossBoundary Energy Invoice - SINMP02 2512015 - 172026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "MP02: Invoice shows 119861 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "MP02",
+          "filename": "CrossBoundary Energy Invoice - SINMP02 2512015 - 172026.pdf"
+        },
+        {
+          "check": 3,
+          "severity": "info",
+          "field": "currency",
+          "message": "MP02: Invoice billed in KES, clause_tariff reference currency is USD (floor/ceiling rates \u2014 not a billing mismatch)",
+          "project": "MP02",
+          "filename": "CrossBoundary Energy Invoice - SINMP02 2512015 - 172026.pdf"
+        },
+        {
+          "check": 6,
+          "severity": "warning",
+          "field": "clause_tariff.base_rate",
+          "message": "MP02: Invoice solar_tariff=8.5213 vs DB base_rate=0.0654",
+          "project": "MP02",
+          "filename": "CrossBoundary Energy Invoice - SINMP02 2512015 - 172026.pdf"
+        },
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "MP02: 1 energy line(s) but no billing_products in DB",
+          "project": "MP02",
+          "filename": "eTIMS SINMP02 2512015.pdf"
+        },
+        {
+          "check": 3,
+          "severity": "info",
+          "field": "currency",
+          "message": "MP02: Invoice billed in KES, clause_tariff reference currency is USD (floor/ceiling rates \u2014 not a billing mismatch)",
+          "project": "MP02",
+          "filename": "eTIMS SINMP02 2512015.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "NBL02",
+      "filename": "CrossBoundary Energy Invoice - SINNBL022512008 - 1162026.pdf",
+      "invoice_number": "SINNBL022512008",
+      "currency": "NGN",
+      "grand_total": 105742451.57,
+      "billing_period": "2025-12",
+      "confidence": "medium",
+      "tax_codes": [
+        "VAT",
+        "WHT"
+      ],
+      "line_item_count": 2,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "NBL02: 2 energy line(s) but no billing_products in DB",
+          "project": "NBL02",
+          "filename": "CrossBoundary Energy Invoice - SINNBL022512008 - 1162026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "NBL02: Invoice shows 420 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "NBL02",
+          "filename": "CrossBoundary Energy Invoice - SINNBL022512008 - 1162026.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "NC02",
+      "filename": "CrossBoundary Energy Invoice - SINNC02 2512016 - 192026.pdf",
+      "invoice_number": "SINNC02 2512016",
+      "currency": "USD",
+      "grand_total": 1202.85,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT",
+        "WHVAT"
+      ],
+      "line_item_count": 1,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "NC02: 1 energy line(s) but no billing_products in DB",
+          "project": "NC02",
+          "filename": "CrossBoundary Energy Invoice - SINNC02 2512016 - 192026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "NC02: Invoice shows 15523 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "NC02",
+          "filename": "CrossBoundary Energy Invoice - SINNC02 2512016 - 192026.pdf"
+        },
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "NC02: 1 energy line(s) but no billing_products in DB",
+          "project": "NC02",
+          "filename": "eTIMS SINNC02 2512016.pdf"
+        },
+        {
+          "check": 3,
+          "severity": "info",
+          "field": "currency",
+          "message": "NC02: Invoice billed in KES, clause_tariff reference currency is USD (floor/ceiling rates \u2014 not a billing mismatch)",
+          "project": "NC02",
+          "filename": "eTIMS SINNC02 2512016.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "QMM01",
+      "filename": "CrossBoundary Energy Invoice - SINQMM012512028 - 162026.pdf",
+      "invoice_number": "SINQMM012512028",
+      "currency": "MGA",
+      "grand_total": 1233440021.85,
+      "billing_period": "2025-12",
+      "confidence": "medium",
+      "tax_codes": [
+        "VAT"
+      ],
+      "line_item_count": 4,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "QMM01: 3 energy line(s) but no billing_products in DB",
+          "project": "QMM01",
+          "filename": "CrossBoundary Energy Invoice - SINQMM012512028 - 162026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "QMM01: Invoice shows 2127598 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "QMM01",
+          "filename": "CrossBoundary Energy Invoice - SINQMM012512028 - 162026.pdf"
+        },
+        {
+          "check": 4,
+          "severity": "warning",
+          "field": "tax_rate.VAT",
+          "message": "QMM01: Invoice VAT rate=0.0000 vs DB=0.2000",
+          "project": "QMM01",
+          "filename": "CrossBoundary Energy Invoice - SINQMM012512028 - 162026.pdf"
+        },
+        {
+          "check": 5,
+          "severity": "warning",
+          "field": "exchange_rate",
+          "message": "QMM01: Invoice FX=4532.4631 vs DB=4468.9285 (1.4% diff)",
+          "project": "QMM01",
+          "filename": "CrossBoundary Energy Invoice - SINQMM012512028 - 162026.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "UGL01",
+      "filename": "CrossBoundary Energy Invoice - SINUGL012512036 - 172026.pdf",
+      "invoice_number": "SINUGL012512036",
+      "currency": "GHS",
+      "grand_total": 193396.44,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "NHIL",
+        "GETFUND",
+        "COVID",
+        "VAT",
+        "WHT",
+        "WHVAT"
+      ],
+      "line_item_count": 2,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "UGL01: 2 energy line(s) but no billing_products in DB",
+          "project": "UGL01",
+          "filename": "CrossBoundary Energy Invoice - SINUGL012512036 - 172026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "UGL01: Invoice shows 99856 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "UGL01",
+          "filename": "CrossBoundary Energy Invoice - SINUGL012512036 - 172026.pdf"
+        },
+        {
+          "check": 6,
+          "severity": "warning",
+          "field": "clause_tariff.floor_rate",
+          "message": "UGL01: Invoice floor=0.1453 vs DB=0.1199",
+          "project": "UGL01",
+          "filename": "CrossBoundary Energy Invoice - SINUGL012512036 - 172026.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "UTK01",
+      "filename": "CrossBoundary Energy Invoice - SINUTK012512019 - 172026.pdf",
+      "invoice_number": "SINUTK012512019",
+      "currency": "KES",
+      "grand_total": 1427222.18,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT",
+        "WHVAT"
+      ],
+      "line_item_count": 2,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "UTK01: 2 energy line(s) but no billing_products in DB",
+          "project": "UTK01",
+          "filename": "CrossBoundary Energy Invoice - SINUTK012512019 - 172026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "UTK01: Invoice shows 71000 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "UTK01",
+          "filename": "CrossBoundary Energy Invoice - SINUTK012512019 - 172026.pdf"
+        },
+        {
+          "check": 6,
+          "severity": "warning",
+          "field": "clause_tariff.floor_rate",
+          "message": "UTK01: Invoice floor=0.1274 vs DB=0.1099",
+          "project": "UTK01",
+          "filename": "CrossBoundary Energy Invoice - SINUTK012512019 - 172026.pdf"
+        },
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "UTK01: 1 energy line(s) but no billing_products in DB",
+          "project": "UTK01",
+          "filename": "eTIMS SINUTK012512019.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "XFAB",
+      "filename": "CrossBoundary Energy Invoice - SINXFAB 2512020 - 172026.pdf",
+      "invoice_number": "SINXFAB 2512020",
+      "currency": "KES",
+      "grand_total": 358146.85,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT",
+        "WHVAT"
+      ],
+      "line_item_count": 3,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "XFAB: 2 energy line(s) but no billing_products in DB",
+          "project": "XFAB",
+          "filename": "CrossBoundary Energy Invoice - SINXFAB 2512020 - 172026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "XFAB: Invoice shows 21126 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "XFAB",
+          "filename": "CrossBoundary Energy Invoice - SINXFAB 2512020 - 172026.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "XFBV",
+      "filename": "CrossBoundary Energy Invoice - SINXFBV 2512021 - 172026.pdf",
+      "invoice_number": "SINXFBV 2512021",
+      "currency": "KES",
+      "grand_total": 118725.74,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT",
+        "WHVAT"
+      ],
+      "line_item_count": 5,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "XFBV: 2 energy line(s) but no billing_products in DB",
+          "project": "XFBV",
+          "filename": "CrossBoundary Energy Invoice - SINXFBV 2512021 - 172026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "XFBV: Invoice shows 6740 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "XFBV",
+          "filename": "CrossBoundary Energy Invoice - SINXFBV 2512021 - 172026.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "XFL01",
+      "filename": "CrossBoundary Energy Invoice - SINXFL012512022 - 172026.pdf",
+      "invoice_number": "SINXFL012512022",
+      "currency": "KES",
+      "grand_total": 344717.96,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT",
+        "WHVAT"
+      ],
+      "line_item_count": 3,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "XFL01: 2 energy line(s) but no billing_products in DB",
+          "project": "XFL01",
+          "filename": "CrossBoundary Energy Invoice - SINXFL012512022 - 172026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "XFL01: Invoice shows 18967 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "XFL01",
+          "filename": "CrossBoundary Energy Invoice - SINXFL012512022 - 172026.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "XFSS",
+      "filename": "CrossBoundary Energy Invoice - SINXFSS 2512023 - 172026.pdf",
+      "invoice_number": "SINXFSS 2512023",
+      "currency": "KES",
+      "grand_total": 218825.82,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT",
+        "WHVAT"
+      ],
+      "line_item_count": 3,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "XFSS: 2 energy line(s) but no billing_products in DB",
+          "project": "XFSS",
+          "filename": "CrossBoundary Energy Invoice - SINXFSS 2512023 - 172026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "XFSS: Invoice shows 11846 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "XFSS",
+          "filename": "CrossBoundary Energy Invoice - SINXFSS 2512023 - 172026.pdf"
+        },
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "XFSS: 1 energy line(s) but no billing_products in DB",
+          "project": "XFSS",
+          "filename": "eTIMS SINXFSS 2512023.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "XFSS: Invoice shows 1 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "XFSS",
+          "filename": "eTIMS SINXFSS 2512023.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "ZL02",
+      "filename": "CrossBoundary Energy Invoice - SINZL02 2512031 - 172026.pdf",
+      "invoice_number": "SINZL02 2512031",
+      "currency": "SLE",
+      "grand_total": 257571.85,
+      "billing_period": "2025-12",
+      "confidence": "medium",
+      "tax_codes": [
+        "VAT",
+        "WHT"
+      ],
+      "line_item_count": 3,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "ZL02: 1 energy line(s) but no billing_products in DB",
+          "project": "ZL02",
+          "filename": "CrossBoundary Energy Invoice - SINZL02 2512031 - 172026.pdf"
+        },
+        {
+          "check": 3,
+          "severity": "info",
+          "field": "currency",
+          "message": "ZL02: Invoice billed in SLE, clause_tariff reference currency is USD (floor/ceiling rates \u2014 not a billing mismatch)",
+          "project": "ZL02",
+          "filename": "CrossBoundary Energy Invoice - SINZL02 2512031 - 172026.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "MP02",
+      "filename": "eTIMS SINMP02 2512015.pdf",
+      "invoice_number": "KRACU0200129725/99",
+      "currency": "KES",
+      "grand_total": 1184787.43,
+      "billing_period": null,
+      "confidence": "high",
+      "tax_codes": [
+        "VAT"
+      ],
+      "line_item_count": 1,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "MP02: 2 energy line(s) but no billing_products in DB",
+          "project": "MP02",
+          "filename": "CrossBoundary Energy Invoice - SINMP02 2512015 - 172026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "MP02: Invoice shows 119861 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "MP02",
+          "filename": "CrossBoundary Energy Invoice - SINMP02 2512015 - 172026.pdf"
+        },
+        {
+          "check": 3,
+          "severity": "info",
+          "field": "currency",
+          "message": "MP02: Invoice billed in KES, clause_tariff reference currency is USD (floor/ceiling rates \u2014 not a billing mismatch)",
+          "project": "MP02",
+          "filename": "CrossBoundary Energy Invoice - SINMP02 2512015 - 172026.pdf"
+        },
+        {
+          "check": 6,
+          "severity": "warning",
+          "field": "clause_tariff.base_rate",
+          "message": "MP02: Invoice solar_tariff=8.5213 vs DB base_rate=0.0654",
+          "project": "MP02",
+          "filename": "CrossBoundary Energy Invoice - SINMP02 2512015 - 172026.pdf"
+        },
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "MP02: 1 energy line(s) but no billing_products in DB",
+          "project": "MP02",
+          "filename": "eTIMS SINMP02 2512015.pdf"
+        },
+        {
+          "check": 3,
+          "severity": "info",
+          "field": "currency",
+          "message": "MP02: Invoice billed in KES, clause_tariff reference currency is USD (floor/ceiling rates \u2014 not a billing mismatch)",
+          "project": "MP02",
+          "filename": "eTIMS SINMP02 2512015.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "NC02",
+      "filename": "eTIMS SINNC02 2512016.pdf",
+      "invoice_number": "KRACU0200129725/101",
+      "currency": "KES",
+      "grand_total": 155065.65,
+      "billing_period": null,
+      "confidence": "high",
+      "tax_codes": [
+        "VAT"
+      ],
+      "line_item_count": 1,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "NC02: 1 energy line(s) but no billing_products in DB",
+          "project": "NC02",
+          "filename": "CrossBoundary Energy Invoice - SINNC02 2512016 - 192026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "NC02: Invoice shows 15523 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "NC02",
+          "filename": "CrossBoundary Energy Invoice - SINNC02 2512016 - 192026.pdf"
+        },
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "NC02: 1 energy line(s) but no billing_products in DB",
+          "project": "NC02",
+          "filename": "eTIMS SINNC02 2512016.pdf"
+        },
+        {
+          "check": 3,
+          "severity": "info",
+          "field": "currency",
+          "message": "NC02: Invoice billed in KES, clause_tariff reference currency is USD (floor/ceiling rates \u2014 not a billing mismatch)",
+          "project": "NC02",
+          "filename": "eTIMS SINNC02 2512016.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "UTK01",
+      "filename": "eTIMS SINUTK012512019.pdf",
+      "invoice_number": "KRACU0200129725/90",
+      "currency": "KES",
+      "grand_total": 1427222.18,
+      "billing_period": null,
+      "confidence": "high",
+      "tax_codes": [
+        "VAT"
+      ],
+      "line_item_count": 1,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "UTK01: 2 energy line(s) but no billing_products in DB",
+          "project": "UTK01",
+          "filename": "CrossBoundary Energy Invoice - SINUTK012512019 - 172026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "UTK01: Invoice shows 71000 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "UTK01",
+          "filename": "CrossBoundary Energy Invoice - SINUTK012512019 - 172026.pdf"
+        },
+        {
+          "check": 6,
+          "severity": "warning",
+          "field": "clause_tariff.floor_rate",
+          "message": "UTK01: Invoice floor=0.1274 vs DB=0.1099",
+          "project": "UTK01",
+          "filename": "CrossBoundary Energy Invoice - SINUTK012512019 - 172026.pdf"
+        },
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "UTK01: 1 energy line(s) but no billing_products in DB",
+          "project": "UTK01",
+          "filename": "eTIMS SINUTK012512019.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "XFSS",
+      "filename": "eTIMS SINXFSS 2512023.pdf",
+      "invoice_number": "KRACU0200129725/92",
+      "currency": "KES",
+      "grand_total": 218825.82,
+      "billing_period": null,
+      "confidence": "high",
+      "tax_codes": [
+        "VAT"
+      ],
+      "line_item_count": 1,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "XFSS: 2 energy line(s) but no billing_products in DB",
+          "project": "XFSS",
+          "filename": "CrossBoundary Energy Invoice - SINXFSS 2512023 - 172026.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "XFSS: Invoice shows 11846 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "XFSS",
+          "filename": "CrossBoundary Energy Invoice - SINXFSS 2512023 - 172026.pdf"
+        },
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "XFSS: 1 energy line(s) but no billing_products in DB",
+          "project": "XFSS",
+          "filename": "eTIMS SINXFSS 2512023.pdf"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "XFSS: Invoice shows 1 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "XFSS",
+          "filename": "eTIMS SINXFSS 2512023.pdf"
+        }
+      ]
+    },
+    {
+      "sage_id": "AMP01",
+      "filename": "CBE Invoice - SINAMP012512009.eml",
+      "invoice_number": "SINAMP012512009",
+      "currency": "USD",
+      "grand_total": 5665.47,
+      "billing_period": "2025-12",
+      "confidence": "medium",
+      "tax_codes": [
+        "VAT"
+      ],
+      "line_item_count": 2,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "AMP01: 1 energy line(s) but no billing_products in DB",
+          "project": "AMP01",
+          "filename": "CBE Invoice - SINAMP012512009.eml"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "AMP01: Invoice shows 1993 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "AMP01",
+          "filename": "CBE Invoice - SINAMP012512009.eml"
+        },
+        {
+          "check": 8,
+          "severity": "critical",
+          "field": "grand_total",
+          "message": "AMP01: Computed total=10270.47 vs stated grand_total=5665.47 (diff=4605.00, 81.3%)",
+          "project": "AMP01",
+          "filename": "CBE Invoice - SINAMP012512009.eml"
+        }
+      ]
+    },
+    {
+      "sage_id": "AR01",
+      "filename": "CBE Invoice - SINAR01 2512010.eml",
+      "invoice_number": "SINAR01 2512010",
+      "currency": "USD",
+      "grand_total": 10922.12,
+      "billing_period": "2025-12",
+      "confidence": "medium",
+      "tax_codes": [
+        "VAT",
+        "WHVAT"
+      ],
+      "line_item_count": 2,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "AR01: 1 energy line(s) but no billing_products in DB",
+          "project": "AR01",
+          "filename": "CBE Invoice - SINAR01 2512010.eml"
+        }
+      ]
+    },
+    {
+      "sage_id": "CAL01",
+      "filename": "CBE Invoice - SINCAL012505031.eml",
+      "invoice_number": "SINCAL012505031",
+      "currency": "USD",
+      "grand_total": 321326.01,
+      "billing_period": "2025-05",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT"
+      ],
+      "line_item_count": 2,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "CAL01: 2 energy line(s) but no billing_products in DB",
+          "project": "CAL01",
+          "filename": "CBE Invoice - SINCAL012505031.eml"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "CAL01: Invoice shows 2085179 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "CAL01",
+          "filename": "CBE Invoice - SINCAL012505031.eml"
+        }
+      ]
+    },
+    {
+      "sage_id": "MB01",
+      "filename": "CBE Invoice - SINMB01 2512012.eml",
+      "invoice_number": "SINMB01 2512012",
+      "currency": "USD",
+      "grand_total": 7020.99,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT",
+        "WHVAT"
+      ],
+      "line_item_count": 2,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "MB01: 2 energy line(s) but no billing_products in DB",
+          "project": "MB01",
+          "filename": "CBE Invoice - SINMB01 2512012.eml"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "MB01: Invoice shows 92547 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "MB01",
+          "filename": "CBE Invoice - SINMB01 2512012.eml"
+        }
+      ]
+    },
+    {
+      "sage_id": "MF01",
+      "filename": "CBE Invoice - SINMF01 2512013.eml",
+      "invoice_number": "SINMF01 2512013",
+      "currency": "USD",
+      "grand_total": 3887.18,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT",
+        "WHVAT"
+      ],
+      "line_item_count": 2,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "MF01: 2 energy line(s) but no billing_products in DB",
+          "project": "MF01",
+          "filename": "CBE Invoice - SINMF01 2512013.eml"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "MF01: Invoice shows 50165 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "MF01",
+          "filename": "CBE Invoice - SINMF01 2512013.eml"
+        },
+        {
+          "check": 6,
+          "severity": "warning",
+          "field": "clause_tariff.base_rate",
+          "message": "MF01: Invoice solar_tariff=0.0668 vs DB base_rate=0.0654",
+          "project": "MF01",
+          "filename": "CBE Invoice - SINMF01 2512013.eml"
+        }
+      ]
+    },
+    {
+      "sage_id": "MP01",
+      "filename": "CBE Invoice - SINMP01 2512014.eml",
+      "invoice_number": "SINMP01 2512014",
+      "currency": "KES",
+      "grand_total": 171591.77,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT",
+        "WHVAT"
+      ],
+      "line_item_count": 1,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "MP01: 1 energy line(s) but no billing_products in DB",
+          "project": "MP01",
+          "filename": "CBE Invoice - SINMP01 2512014.eml"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "MP01: Invoice shows 17359 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "MP01",
+          "filename": "CBE Invoice - SINMP01 2512014.eml"
+        },
+        {
+          "check": 3,
+          "severity": "info",
+          "field": "currency",
+          "message": "MP01: Invoice billed in KES, clause_tariff reference currency is USD (floor/ceiling rates \u2014 not a billing mismatch)",
+          "project": "MP01",
+          "filename": "CBE Invoice - SINMP01 2512014.eml"
+        },
+        {
+          "check": 6,
+          "severity": "warning",
+          "field": "clause_tariff.base_rate",
+          "message": "MP01: Invoice solar_tariff=8.5213 vs DB base_rate=0.0654",
+          "project": "MP01",
+          "filename": "CBE Invoice - SINMP01 2512014.eml"
+        }
+      ]
+    },
+    {
+      "sage_id": "NBL01",
+      "filename": "CBE Invoice - SINNBL012512007.eml",
+      "invoice_number": "SINNBL012512007",
+      "currency": "NGN",
+      "grand_total": 108567179.93,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT",
+        "WHT"
+      ],
+      "line_item_count": 4,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "NBL01: 3 energy line(s) but no billing_products in DB",
+          "project": "NBL01",
+          "filename": "CBE Invoice - SINNBL012512007.eml"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "NBL01: Invoice shows 313808 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "NBL01",
+          "filename": "CBE Invoice - SINNBL012512007.eml"
+        }
+      ]
+    },
+    {
+      "sage_id": "NC03",
+      "filename": "CBE Invoice - SINNC03 2512017.eml",
+      "invoice_number": "SINNC03 2512017",
+      "currency": "USD",
+      "grand_total": 28255.16,
+      "billing_period": "2025-12",
+      "confidence": "high",
+      "tax_codes": [
+        "VAT",
+        "WHVAT"
+      ],
+      "line_item_count": 1,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "NC03: 1 energy line(s) but no billing_products in DB",
+          "project": "NC03",
+          "filename": "CBE Invoice - SINNC03 2512017.eml"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "NC03: Invoice shows 368501 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "NC03",
+          "filename": "CBE Invoice - SINNC03 2512017.eml"
+        }
+      ]
+    },
+    {
+      "sage_id": "TBM01",
+      "filename": "CBE Invoice - SINTBM012512018.eml",
+      "invoice_number": "SINTBM012512018",
+      "currency": "KES",
+      "grand_total": 1775523.69,
+      "billing_period": "2025-12",
+      "confidence": "medium",
+      "tax_codes": [
+        "VAT",
+        "WHVAT"
+      ],
+      "line_item_count": 2,
+      "checks": [
+        {
+          "check": 1,
+          "severity": "warning",
+          "field": "billing_product",
+          "message": "TBM01: 2 energy line(s) but no billing_products in DB",
+          "project": "TBM01",
+          "filename": "CBE Invoice - SINTBM012512018.eml"
+        },
+        {
+          "check": 2,
+          "severity": "info",
+          "field": "meter_aggregate",
+          "message": "TBM01: Invoice shows 188461 kWh but no meter_aggregate data in DB (sparse)",
+          "project": "TBM01",
+          "filename": "CBE Invoice - SINTBM012512018.eml"
+        },
+        {
+          "check": 6,
+          "severity": "warning",
+          "field": "clause_tariff.floor_rate",
+          "message": "TBM01: Invoice floor=0.0630 vs DB=0.0600",
+          "project": "TBM01",
+          "filename": "CBE Invoice - SINTBM012512018.eml"
+        }
+      ]
+    }
+  ],
+  "discrepancies": [
+    {
+      "severity": "info",
+      "category": "tax_deviation",
+      "project": "MIR01",
+      "field": "billing_tax_rule",
+      "source_a": "Invoice: VAT=15.0%, WHT=6.5%",
+      "source_b": "Country default: OTHER=15.0%",
+      "recommended_action": "Project-specific tax override created for MIR01",
+      "status": "resolved"
+    },
+    {
+      "severity": "info",
+      "category": "tax_deviation",
+      "project": "ZL02",
+      "field": "billing_tax_rule",
+      "source_a": "Invoice: VAT=15.0%, WHT=6.5%",
+      "source_b": "Country default: OTHER=15.0%",
+      "recommended_action": "Project-specific tax override created for ZL02",
+      "status": "resolved"
+    },
+    {
+      "severity": "info",
+      "category": "tax_deviation",
+      "project": "QMM01",
+      "field": "billing_tax_rule",
+      "source_a": "Invoice: VAT=?",
+      "source_b": "Country default: VAT=20.0%",
+      "recommended_action": "Project-specific tax override created for QMM01",
+      "status": "resolved"
+    },
+    {
+      "severity": "info",
+      "category": "tax_deviation",
+      "project": "KAS01",
+      "field": "billing_tax_rule",
+      "source_a": "Invoice: NHIL=2.5%, GETFUND=2.5%, COVID=1.0%, VAT=15.0%, WHT=7.5%, WHVAT=7.0%",
+      "source_b": "Country default: NHIL=2.5%, GETFUND=2.5%, COVID=1.0%, VAT=15.0%, WHT=3.0%, WHVAT=7.0%",
+      "recommended_action": "Project-specific tax override created for KAS01",
+      "status": "resolved"
+    },
+    {
+      "severity": "info",
+      "category": "tax_deviation",
+      "project": "MOH01",
+      "field": "billing_tax_rule",
+      "source_a": "Invoice: NHIL=2.5%, GETFUND=2.5%, COVID=1.0%, VAT=15.0%, WHT=3.0%, WHVAT=7.0%",
+      "source_b": "Country default: NHIL=2.5%, GETFUND=2.5%, COVID=1.0%, VAT=15.0%, WHT=3.0%, WHVAT=7.0%",
+      "recommended_action": "Project-specific tax override created for MOH01",
+      "status": "resolved"
+    },
+    {
+      "severity": "info",
+      "category": "tax_deviation",
+      "project": "GC001",
+      "field": "billing_tax_rule",
+      "source_a": "Invoice: VAT=?",
+      "source_b": "Country default: VAT=16.0%, WHVAT=2.0%",
+      "recommended_action": "Project-specific tax override created for GC001",
+      "status": "resolved"
+    },
+    {
+      "severity": "info",
+      "category": "tax_deviation",
+      "project": "MP02",
+      "field": "billing_tax_rule",
+      "source_a": "Invoice: VAT=16.0%",
+      "source_b": "Country default: VAT=16.0%, WHVAT=2.0%",
+      "recommended_action": "Project-specific tax override created for MP02",
+      "status": "resolved"
+    },
+    {
+      "severity": "info",
+      "category": "tax_deviation",
+      "project": "NC02",
+      "field": "billing_tax_rule",
+      "source_a": "Invoice: VAT=16.0%",
+      "source_b": "Country default: VAT=16.0%, WHVAT=2.0%",
+      "recommended_action": "Project-specific tax override created for NC02",
+      "status": "resolved"
+    },
+    {
+      "severity": "info",
+      "category": "tax_deviation",
+      "project": "UTK01",
+      "field": "billing_tax_rule",
+      "source_a": "Invoice: VAT=16.0%",
+      "source_b": "Country default: VAT=16.0%, WHVAT=2.0%",
+      "recommended_action": "Project-specific tax override created for UTK01",
+      "status": "resolved"
+    },
+    {
+      "severity": "info",
+      "category": "tax_deviation",
+      "project": "XFSS",
+      "field": "billing_tax_rule",
+      "source_a": "Invoice: VAT=16.0%",
+      "source_b": "Country default: VAT=16.0%, WHVAT=2.0%",
+      "recommended_action": "Project-specific tax override created for XFSS",
+      "status": "resolved"
+    },
+    {
+      "severity": "info",
+      "category": "tax_deviation",
+      "project": "AMP01",
+      "field": "billing_tax_rule",
+      "source_a": "Invoice: VAT=16.0%",
+      "source_b": "Country default: VAT=16.0%, WHVAT=2.0%",
+      "recommended_action": "Project-specific tax override created for AMP01",
+      "status": "resolved"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_3",
+      "project": "MIR01",
+      "field": "currency",
+      "source_a": "MIR01: Invoice billed in SLL, clause_tariff reference currency is SLE (floor/ceiling rates \u2014 not a billing mismatch)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "ERG",
+      "field": "billing_product",
+      "source_a": "ERG: 1 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "ERG",
+      "field": "meter_aggregate",
+      "source_a": "ERG: Invoice shows 106773 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_5",
+      "project": "ERG",
+      "field": "exchange_rate",
+      "source_a": "ERG: Invoice FX=4532.4631 vs DB=4468.9285 (1.4% diff)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "GBL01",
+      "field": "billing_product",
+      "source_a": "GBL01: 2 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "GBL01",
+      "field": "meter_aggregate",
+      "source_a": "GBL01: Invoice shows 116497 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "GC001",
+      "field": "billing_product",
+      "source_a": "GC001: 2 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "GC001",
+      "field": "meter_aggregate",
+      "source_a": "GC001: Invoice shows 61383 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_4",
+      "project": "GC001",
+      "field": "tax_rate.VAT",
+      "source_a": "GC001: Invoice VAT rate=0.0000 vs DB=0.1600",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "IVL01",
+      "field": "billing_product",
+      "source_a": "IVL01: 1 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "IVL01",
+      "field": "meter_aggregate",
+      "source_a": "IVL01: Invoice shows 1619 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "KAS01",
+      "field": "billing_product",
+      "source_a": "KAS01: 3 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "KAS01",
+      "field": "meter_aggregate",
+      "source_a": "KAS01: Invoice shows 133060 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_4",
+      "project": "KAS01",
+      "field": "tax_rate.WHT",
+      "source_a": "KAS01: Invoice WHT rate=0.0750 vs DB=0.0300",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_6",
+      "project": "KAS01",
+      "field": "clause_tariff.floor_rate",
+      "source_a": "KAS01: Invoice floor=0.0989 vs DB=0.0874",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "LOI01",
+      "field": "billing_product",
+      "source_a": "LOI01: 2 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "LOI01",
+      "field": "meter_aggregate",
+      "source_a": "LOI01: Invoice shows 9894 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "MIR01",
+      "field": "billing_product",
+      "source_a": "MIR01: 1 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "MIR01",
+      "field": "meter_aggregate",
+      "source_a": "MIR01: Invoice shows 24018 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "MOH01",
+      "field": "billing_product",
+      "source_a": "MOH01: 6 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "MOH01",
+      "field": "meter_aggregate",
+      "source_a": "MOH01: Invoice shows 171596 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "MP02",
+      "field": "billing_product",
+      "source_a": "MP02: 2 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "MP02",
+      "field": "meter_aggregate",
+      "source_a": "MP02: Invoice shows 119861 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_3",
+      "project": "MP02",
+      "field": "currency",
+      "source_a": "MP02: Invoice billed in KES, clause_tariff reference currency is USD (floor/ceiling rates \u2014 not a billing mismatch)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_6",
+      "project": "MP02",
+      "field": "clause_tariff.base_rate",
+      "source_a": "MP02: Invoice solar_tariff=8.5213 vs DB base_rate=0.0654",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "NBL02",
+      "field": "billing_product",
+      "source_a": "NBL02: 2 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "NBL02",
+      "field": "meter_aggregate",
+      "source_a": "NBL02: Invoice shows 420 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "NC02",
+      "field": "billing_product",
+      "source_a": "NC02: 1 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "NC02",
+      "field": "meter_aggregate",
+      "source_a": "NC02: Invoice shows 15523 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "QMM01",
+      "field": "billing_product",
+      "source_a": "QMM01: 3 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "QMM01",
+      "field": "meter_aggregate",
+      "source_a": "QMM01: Invoice shows 2127598 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_4",
+      "project": "QMM01",
+      "field": "tax_rate.VAT",
+      "source_a": "QMM01: Invoice VAT rate=0.0000 vs DB=0.2000",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_5",
+      "project": "QMM01",
+      "field": "exchange_rate",
+      "source_a": "QMM01: Invoice FX=4532.4631 vs DB=4468.9285 (1.4% diff)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "UGL01",
+      "field": "billing_product",
+      "source_a": "UGL01: 2 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "UGL01",
+      "field": "meter_aggregate",
+      "source_a": "UGL01: Invoice shows 99856 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_6",
+      "project": "UGL01",
+      "field": "clause_tariff.floor_rate",
+      "source_a": "UGL01: Invoice floor=0.1453 vs DB=0.1199",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "UTK01",
+      "field": "billing_product",
+      "source_a": "UTK01: 2 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "UTK01",
+      "field": "meter_aggregate",
+      "source_a": "UTK01: Invoice shows 71000 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_6",
+      "project": "UTK01",
+      "field": "clause_tariff.floor_rate",
+      "source_a": "UTK01: Invoice floor=0.1274 vs DB=0.1099",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "XFAB",
+      "field": "billing_product",
+      "source_a": "XFAB: 2 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "XFAB",
+      "field": "meter_aggregate",
+      "source_a": "XFAB: Invoice shows 21126 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "XFBV",
+      "field": "billing_product",
+      "source_a": "XFBV: 2 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "XFBV",
+      "field": "meter_aggregate",
+      "source_a": "XFBV: Invoice shows 6740 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "XFL01",
+      "field": "billing_product",
+      "source_a": "XFL01: 2 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "XFL01",
+      "field": "meter_aggregate",
+      "source_a": "XFL01: Invoice shows 18967 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "XFSS",
+      "field": "billing_product",
+      "source_a": "XFSS: 2 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "XFSS",
+      "field": "meter_aggregate",
+      "source_a": "XFSS: Invoice shows 11846 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "ZL02",
+      "field": "billing_product",
+      "source_a": "ZL02: 1 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_3",
+      "project": "ZL02",
+      "field": "currency",
+      "source_a": "ZL02: Invoice billed in SLE, clause_tariff reference currency is USD (floor/ceiling rates \u2014 not a billing mismatch)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "MP02",
+      "field": "billing_product",
+      "source_a": "MP02: 1 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_3",
+      "project": "MP02",
+      "field": "currency",
+      "source_a": "MP02: Invoice billed in KES, clause_tariff reference currency is USD (floor/ceiling rates \u2014 not a billing mismatch)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "NC02",
+      "field": "billing_product",
+      "source_a": "NC02: 1 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_3",
+      "project": "NC02",
+      "field": "currency",
+      "source_a": "NC02: Invoice billed in KES, clause_tariff reference currency is USD (floor/ceiling rates \u2014 not a billing mismatch)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "UTK01",
+      "field": "billing_product",
+      "source_a": "UTK01: 1 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "XFSS",
+      "field": "billing_product",
+      "source_a": "XFSS: 1 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "XFSS",
+      "field": "meter_aggregate",
+      "source_a": "XFSS: Invoice shows 1 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "AMP01",
+      "field": "billing_product",
+      "source_a": "AMP01: 1 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "AMP01",
+      "field": "meter_aggregate",
+      "source_a": "AMP01: Invoice shows 1993 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "critical",
+      "category": "validation_check_8",
+      "project": "AMP01",
+      "field": "grand_total",
+      "source_a": "AMP01: Computed total=10270.47 vs stated grand_total=5665.47 (diff=4605.00, 81.3%)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "AR01",
+      "field": "billing_product",
+      "source_a": "AR01: 1 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "CAL01",
+      "field": "billing_product",
+      "source_a": "CAL01: 2 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "CAL01",
+      "field": "meter_aggregate",
+      "source_a": "CAL01: Invoice shows 2085179 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "MB01",
+      "field": "billing_product",
+      "source_a": "MB01: 2 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "MB01",
+      "field": "meter_aggregate",
+      "source_a": "MB01: Invoice shows 92547 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "MF01",
+      "field": "billing_product",
+      "source_a": "MF01: 2 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "MF01",
+      "field": "meter_aggregate",
+      "source_a": "MF01: Invoice shows 50165 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_6",
+      "project": "MF01",
+      "field": "clause_tariff.base_rate",
+      "source_a": "MF01: Invoice solar_tariff=0.0668 vs DB base_rate=0.0654",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "MP01",
+      "field": "billing_product",
+      "source_a": "MP01: 1 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "MP01",
+      "field": "meter_aggregate",
+      "source_a": "MP01: Invoice shows 17359 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_3",
+      "project": "MP01",
+      "field": "currency",
+      "source_a": "MP01: Invoice billed in KES, clause_tariff reference currency is USD (floor/ceiling rates \u2014 not a billing mismatch)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_6",
+      "project": "MP01",
+      "field": "clause_tariff.base_rate",
+      "source_a": "MP01: Invoice solar_tariff=8.5213 vs DB base_rate=0.0654",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "NBL01",
+      "field": "billing_product",
+      "source_a": "NBL01: 3 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "NBL01",
+      "field": "meter_aggregate",
+      "source_a": "NBL01: Invoice shows 313808 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "NC03",
+      "field": "billing_product",
+      "source_a": "NC03: 1 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "NC03",
+      "field": "meter_aggregate",
+      "source_a": "NC03: Invoice shows 368501 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_1",
+      "project": "TBM01",
+      "field": "billing_product",
+      "source_a": "TBM01: 2 energy line(s) but no billing_products in DB",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "validation_check_2",
+      "project": "TBM01",
+      "field": "meter_aggregate",
+      "source_a": "TBM01: Invoice shows 188461 kWh but no meter_aggregate data in DB (sparse)",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "validation_check_6",
+      "project": "TBM01",
+      "field": "clause_tariff.floor_rate",
+      "source_a": "TBM01: Invoice floor=0.0630 vs DB=0.0600",
+      "source_b": "",
+      "recommended_action": "",
+      "status": "open"
+    }
+  ],
+  "gate_checks": [
+    {
+      "name": "Invoices parsed successfully",
+      "passed": true,
+      "expected": "> 0 invoices parsed",
+      "actual": "33/33 invoices parsed"
+    },
+    {
+      "name": "Tax rules created for missing countries",
+      "passed": true,
+      "expected": "> 0 tax rules created (or single-project mode)",
+      "actual": "18 tax rules created"
+    },
+    {
+      "name": "No critical validation failures",
+      "passed": false,
+      "expected": "0 critical checks",
+      "actual": "1 critical checks"
+    },
+    {
+      "name": "Extraction confidence acceptable",
+      "passed": true,
+      "expected": ">= 50% high confidence",
+      "actual": "25/33 high confidence"
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+{
+  "mrp_method": "utility_total_charges",
+  "mrp_included_components": [
+    "energy_charge",
+    "fuel_surcharge",
+    "regulatory_levy",
+    "infrastructure_levy",
+    "renewable_energy_levy",
+    "emergency_response_charge"
+  ],
+  "mrp_excluded_components": [
+    "VAT"
+  ],
+  "mrp_exclude_vat": true,
+  "mrp_exclude_demand_charges": true,
+  "mrp_currency": "KES",
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "April 2024\nKSh/kWh\nConsumption 20.58\nFCC 3.26\nFERFA 1.96\nIA 0.33\nWARMA 0.02\nERC 0.08\nREP 1.03\nVAT 3.81\nTotal 31.07",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "Breakdown shows various regulatory charges and levies. FCC likely refers to Fuel Cost Charge, FERFA to Foreign Exchange Rate Fluctuation Adjustment, IA to Infrastructure Adjustment, WARMA to Water Resources Management Authority levy, ERC to Energy and Petroleum Regulatory Authority charge, and REP to Renewable Energy Premium. VAT is listed separately and appears to be excluded from the MRP calculation."
+}

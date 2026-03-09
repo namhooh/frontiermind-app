@@ -1,0 +1,40 @@
+{
+  "timestamp": "2026-03-02T17:50:38.791915",
+  "projects_examined": 1,
+  "project_filter": "KAS01",
+  "data_dir": "/Users/namho/frontiermind-app/CBE_data_extracts/Data Extracts",
+  "masterfile_path": "/Users/namho/frontiermind-app/CBE_data_extracts/CBE Asset Management Operating Revenue Masterfile - new.xlsb",
+  "results": {
+    "KAS01": {
+      "overall_confidence": 0.7222,
+      "blocked": false,
+      "critical_conflicts": [],
+      "tariff_type": {
+        "energy_sale_type_id": "FLOATING_GRID",
+        "escalation_type_id": "PERCENTAGE",
+        "formula_type": "FLOATING_GRID",
+        "signals": {
+          "sage_cpi_flag": false,
+          "masterfile_floor_ceiling": true,
+          "masterfile_escalation_type": "PERCENTAGE",
+          "masterfile_formula_type": "FLOATING_GRID",
+          "grid_product_found": false,
+          "generator_product_found": false,
+          "ground_truth": "GRID",
+          "inferred_energy_sale_type": "FLOATING_GRID",
+          "inferred_escalation_type": "PERCENTAGE"
+        },
+        "confidence": 0.95
+      },
+      "line_decomposition": {
+        "pattern": "mother_children",
+        "mother_line_number": 2000,
+        "child_line_numbers": [
+          1000,
+          4000
+        ],
+        "notes": "Available energy line 2000 as mother, 2 metered children"
+      }
+    }
+  }
+}

@@ -98,6 +98,11 @@ export function RecipientPicker({ value, onChange, client, projectId }: Recipien
         <input
           ref={inputRef}
           type="text"
+          autoComplete="one-time-code"
+          name="recipient-search"
+          data-1p-ignore
+          data-lpignore="true"
+          data-form-type="other"
           placeholder="Search contacts or type email..."
           value={search}
           onChange={(e) => {

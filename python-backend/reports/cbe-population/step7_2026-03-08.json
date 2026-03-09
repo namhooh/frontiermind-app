@@ -1,0 +1,442 @@
+{
+  "step": 7,
+  "step_name": "Revenue Masterfile \u2014 Full Extraction",
+  "mode": "LIVE",
+  "status": "warnings",
+  "summary": {
+    "industry_updates": 0,
+    "tech_spec_updates": 29,
+    "tariff_updates": 50,
+    "exchange_rates_inserted": 43,
+    "loan_schedules": [
+      "ZL02",
+      "GC001"
+    ],
+    "rental_schedules": [
+      "LOI01",
+      "AR01",
+      "QMM01",
+      "TWG01",
+      "AMP01"
+    ],
+    "cpi_data_points": 192
+  },
+  "discrepancies": [
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "KAS01",
+      "field": "cod_date",
+      "source_a": "PO Summary: 2018-10-17",
+      "source_b": "DB: 2018-10-03",
+      "recommended_action": "Review \u2014 PO Summary vs PPW/DB",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "KAS01",
+      "field": "installed_dc_capacity_kwp",
+      "source_a": "PO Summary: 400.44",
+      "source_b": "DB: 1305.24",
+      "recommended_action": "Info \u2014 PO Summary cross-check",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "KAS01",
+      "field": "cod_date",
+      "source_a": "PO Summary: 2024-05-03",
+      "source_b": "DB: 2018-10-03",
+      "recommended_action": "Review \u2014 PO Summary vs PPW/DB",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "KAS01",
+      "field": "installed_dc_capacity_kwp",
+      "source_a": "PO Summary: 904.8",
+      "source_b": "DB: 1305.24",
+      "recommended_action": "Info \u2014 PO Summary cross-check",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "LOI01",
+      "field": "cod_date",
+      "source_a": "PO Summary: 2019-10-31",
+      "source_b": "DB: 2019-03-01",
+      "recommended_action": "Review \u2014 PO Summary vs PPW/DB",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "XFAB",
+      "field": "installed_dc_capacity_kwp",
+      "source_a": "PO Summary: 424.32",
+      "source_b": "DB: 141.45",
+      "recommended_action": "Info \u2014 PO Summary cross-check",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "MP02",
+      "field": "installed_dc_capacity_kwp",
+      "source_a": "PO Summary: 1386.0",
+      "source_b": "DB: 693.0",
+      "recommended_action": "Info \u2014 PO Summary cross-check",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "IVL01",
+      "field": "cod_date",
+      "source_a": "PO Summary: 2026-03-16",
+      "source_b": "DB: 2023-10-02",
+      "recommended_action": "Review \u2014 PO Summary vs PPW/DB",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "IVL01",
+      "field": "installed_dc_capacity_kwp",
+      "source_a": "PO Summary: 2270.0",
+      "source_b": "DB: 967.68",
+      "recommended_action": "Info \u2014 PO Summary cross-check",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "TWG01",
+      "field": "cod_date",
+      "source_a": "PO Summary: 2026-02-01",
+      "source_b": "DB: 2025-12-01",
+      "recommended_action": "Review \u2014 PO Summary vs PPW/DB",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "ZL02",
+      "field": "cod_date",
+      "source_a": "PO Summary: 2024-04-01",
+      "source_b": "DB: 2025-03-01",
+      "recommended_action": "Review \u2014 PO Summary vs PPW/DB",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "ZL02",
+      "field": "cod_date",
+      "source_a": "PO Summary: 2025-07-01",
+      "source_b": "DB: 2025-03-01",
+      "recommended_action": "Review \u2014 PO Summary vs PPW/DB",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "ZL02",
+      "field": "cod_date",
+      "source_a": "PO Summary: 2026-01-01",
+      "source_b": "DB: 2025-03-01",
+      "recommended_action": "Review \u2014 PO Summary vs PPW/DB",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.KES",
+      "source_a": "RevMasterfile: 129.135 on 2025-01-01",
+      "source_b": "DB: 129.3950",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.KES",
+      "source_a": "RevMasterfile: 129.425 on 2025-02-01",
+      "source_b": "DB: 129.2866",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.KES",
+      "source_a": "RevMasterfile: 129.534 on 2025-03-01",
+      "source_b": "DB: 129.4869",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.KES",
+      "source_a": "RevMasterfile: 128.971 on 2025-04-01",
+      "source_b": "DB: 129.2473",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.KES",
+      "source_a": "RevMasterfile: 129.227327 on 2025-05-01",
+      "source_b": "DB: 129.6003",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.KES",
+      "source_a": "RevMasterfile: 129.349575 on 2025-06-01",
+      "source_b": "DB: 129.3686",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.KES",
+      "source_a": "RevMasterfile: 129.224089 on 2025-07-01",
+      "source_b": "DB: 129.2555",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.KES",
+      "source_a": "RevMasterfile: 129.392681 on 2025-08-01",
+      "source_b": "DB: 129.2086",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.KES",
+      "source_a": "RevMasterfile: 128.80554 on 2025-09-01",
+      "source_b": "DB: 129.1699",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.KES",
+      "source_a": "RevMasterfile: 129.212904 on 2025-10-01",
+      "source_b": "DB: 129.2400",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.KES",
+      "source_a": "RevMasterfile: 129.70671 on 2025-11-01",
+      "source_b": "DB: 129.2422",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.KES",
+      "source_a": "RevMasterfile: 128.915202 on 2025-12-01",
+      "source_b": "DB: 129.2610",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.KES",
+      "source_a": "RevMasterfile: 129.112386 on 2026-01-01",
+      "source_b": "DB: 129.0122",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.NGN",
+      "source_a": "RevMasterfile: 1553.69 on 2025-01-01",
+      "source_b": "DB: 1543.2754",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.NGN",
+      "source_a": "RevMasterfile: 1500.97 on 2025-02-01",
+      "source_b": "DB: 1480.9433",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.NGN",
+      "source_a": "RevMasterfile: 1535.77 on 2025-03-01",
+      "source_b": "DB: 1498.8748",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.NGN",
+      "source_a": "RevMasterfile: 1602.14 on 2025-04-01",
+      "source_b": "DB: 1536.8936",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.NGN",
+      "source_a": "RevMasterfile: 1589.58649 on 2025-05-01",
+      "source_b": "DB: 1605.3237",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.NGN",
+      "source_a": "RevMasterfile: 1538.63072 on 2025-06-01",
+      "source_b": "DB: 1585.1389",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.NGN",
+      "source_a": "RevMasterfile: 1530.05847 on 2025-07-01",
+      "source_b": "DB: 1533.9913",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.NGN",
+      "source_a": "RevMasterfile: 1536.63996 on 2025-08-01",
+      "source_b": "DB: 1532.0928",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.NGN",
+      "source_a": "RevMasterfile: 1483.71155 on 2025-09-01",
+      "source_b": "DB: 1530.2605",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.NGN",
+      "source_a": "RevMasterfile: 1453.24487 on 2025-10-01",
+      "source_b": "DB: 1484.1700",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.NGN",
+      "source_a": "RevMasterfile: 1448.98361 on 2025-11-01",
+      "source_b": "DB: 1438.8593",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.NGN",
+      "source_a": "RevMasterfile: 1448.6541 on 2025-12-01",
+      "source_b": "DB: 1446.2972",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "PORTFOLIO",
+      "field": "exchange_rate.NGN",
+      "source_a": "RevMasterfile: 1388.47132 on 2026-01-01",
+      "source_b": "DB: 1445.8991",
+      "recommended_action": "RevMasterfile rate may be more authoritative for invoicing",
+      "status": "open"
+    }
+  ],
+  "gate_checks": [
+    {
+      "name": "PO Summary projects resolved to FM projects",
+      "passed": true,
+      "expected": "> 0 projects enriched",
+      "actual": "29 projects with technical_specs updates"
+    },
+    {
+      "name": "Tariff base_rate populated",
+      "passed": true,
+      "expected": "Tariff fields enriched",
+      "actual": "14 tariffs got base_rate, 50 total tariff updates"
+    },
+    {
+      "name": "Exchange rates extracted",
+      "passed": true,
+      "expected": "> 0 rates from RevMasterfile",
+      "actual": "43 new rates inserted"
+    },
+    {
+      "name": "No critical discrepancies",
+      "passed": true,
+      "expected": "0 critical",
+      "actual": "0 critical discrepancies"
+    }
+  ]
+}

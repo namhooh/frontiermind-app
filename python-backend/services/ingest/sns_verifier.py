@@ -23,7 +23,7 @@ _NOTIFICATION_FIELDS = [
     "Message", "MessageId", "Subject", "Timestamp", "TopicArn", "Type",
 ]
 _SUBSCRIPTION_FIELDS = [
-    "Message", "MessageId", "SubscribeURL", "Timestamp", "TopicArn", "Type",
+    "Message", "MessageId", "SubscribeURL", "Timestamp", "Token", "TopicArn", "Type",
 ]
 
 

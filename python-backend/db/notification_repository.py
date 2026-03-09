@@ -442,8 +442,11 @@ class NotificationRepository:
                            om.recipient_email, om.recipient_name, om.subject, om.email_status,
                            om.ses_message_id, om.reminder_count, om.invoice_header_id,
                            om.submission_token_id, om.error_message, om.sent_at,
-                           om.delivered_at, om.created_at
+                           om.delivered_at, om.created_at,
+                           et.body_html AS template_body_html,
+                           et.body_text AS template_body_text
                     FROM outbound_message om
+                    LEFT JOIN email_template et ON et.id = om.email_template_id
                     {where}
                     ORDER BY om.created_at DESC
                     LIMIT %s OFFSET %s
@@ -451,6 +454,30 @@ class NotificationRepository:
                     params + [limit, offset],
                 )
                 return [dict(row) for row in cursor.fetchall()], total
+
+    def has_sent_today_for_invoice(
+        self,
+        org_id: int,
+        invoice_header_id: int,
+        schedule_id: int,
+    ) -> bool:
+        """Check if a reminder was already sent today for this invoice+schedule combo."""
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    SELECT EXISTS(
+                        SELECT 1 FROM outbound_message
+                        WHERE organization_id = %s
+                          AND invoice_header_id = %s
+                          AND email_notification_schedule_id = %s
+                          AND sent_at::DATE = CURRENT_DATE
+                          AND email_status NOT IN ('failed', 'suppressed')
+                    ) AS sent_today
+                    """,
+                    (org_id, invoice_header_id, schedule_id),
+                )
+                return cursor.fetchone()["sent_today"]
 
     def count_reminders_for_invoice(
         self,
@@ -553,6 +580,31 @@ class NotificationRepository:
                     query += " AND c.counterparty_id = %s"
                     params.append(counterparty_id)
 
+                # Due-date-relative filters (for daily schedules)
+                due_rel = conditions.get("due_date_relative")
+                if due_rel:
+                    or_clauses = []
+                    if due_rel.get("days_before"):
+                        or_clauses.append(
+                            "ih.due_date = CURRENT_DATE + INTERVAL '1 day' * %s"
+                        )
+                        params.append(due_rel["days_before"])
+                    if due_rel.get("on_due_date"):
+                        or_clauses.append("ih.due_date = CURRENT_DATE")
+                    if due_rel.get("days_after_start") is not None and due_rel.get("days_after_interval"):
+                        or_clauses.append(
+                            "(ih.due_date < CURRENT_DATE"
+                            " AND (CURRENT_DATE - ih.due_date) >= %s"
+                            " AND ((CURRENT_DATE - ih.due_date) - %s) %% %s = 0)"
+                        )
+                        params.extend([
+                            due_rel["days_after_start"],
+                            due_rel["days_after_start"],
+                            due_rel["days_after_interval"],
+                        ])
+                    if or_clauses:
+                        query += " AND ih.due_date IS NOT NULL AND (" + " OR ".join(or_clauses) + ")"
+
                 query += " ORDER BY ih.due_date"
                 cursor.execute(query, params)
                 return [dict(row) for row in cursor.fetchall()]
@@ -603,7 +655,7 @@ class NotificationRepository:
                            cc.counterparty_id, cp.name as counterparty_name
                     FROM customer_contact cc
                     JOIN counterparty cp ON cp.id = cc.counterparty_id
-                    WHERE cp.organization_id = %s
+                    WHERE cc.organization_id = %s
                       AND cc.is_active = true
                       AND cc.email IS NOT NULL
                 """

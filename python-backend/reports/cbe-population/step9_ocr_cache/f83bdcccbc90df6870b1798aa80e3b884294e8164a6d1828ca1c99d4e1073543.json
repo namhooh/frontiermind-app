@@ -1,0 +1,18 @@
+{
+  "mrp_method": "blended_grid_generator",
+  "mrp_included_components": [
+    "energy_charge",
+    "subsidy",
+    "lighting_levy"
+  ],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": null,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": "GHS",
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "Payment = Energy Output_Grid \u00d7 Reference Price_Grid \u00d7 (1 - Solar Discount_Grid) + Energy Output_Diesel \u00d7 Reference Price_Diesel \u00d7 (1 - Solar Discount_Diesel)\n\nWhere:\nGrid Reference Bill = The electric utility bill or bills for Customer's Site for the consecutive 12-month period immediately prior to the applicable Operating Year\n\nDiesel Reference Bill = The invoices of the direct fuel costs incurred by Generator Equipment for the consecutive 12-month period immediately prior to the applicable Operating Year\n\nPayment = Monthly payment due to Developer for Solar Services, denominated in GHS\n\nEnergy Output_Grid = Quantity of Energy Output (in kWh) for supply to Customer's private distribution network available to displace demand for an equivalent quantity of energy supplied by the Utility during the given period\n\nReference Price_Grid = Equal to the sum of the total variable charges (levied per kWh) in the Reference Bill divided by the sum of the total kWh consumed in the Reference Bill. Variable charges shall include, but are not limited to: energy charge, subsidy, and streetlight levy. If by reason of changes to the presentation or categorization of component charges the Reference Bill is no longer an adequate and reasonable means for ascertaining variable charges levied by the Utility, either Party may refer determination of the Reference Price to an Expert Dispute or agree on an appropriate Reference Price;\n\nSolar Discount_Grid = 5%\n\nEnergy Output_Diesel = Quantity of Energy Output (in kWh) for supply to Customer's private distribution network available to displace demand for an equivalent quantity of energy supplied by the Customer's Generator Equipment during the given period\n\nReference Price_Diesel = Equal to the product of: the diesel fuel price (derived from the Diesel Reference Bill and specified in GHS/litre); the average diesel genset efficiency, which for all years of the Agreement will be pegged at a value of 0.28 litres/kWh; the surcharge accounting for non-fuel diesel power expenses that are also avoided / reduced via operation of the Solar Facility (including operations & maintenance and wear & tear of the asset), which for all years of the Agreement will be equivalent to a factor of 1.10\n\nSolar Discount_Diesel = 5%",
+  "tou_windows": [],
+  "discount_percentage": 0.05,
+  "notes": "Blended pricing structure with separate calculations for grid electricity displacement and diesel generator displacement. Both grid and diesel components receive a 5% solar discount. Diesel pricing includes efficiency factor of 0.28 litres/kWh and O&M surcharge factor of 1.10. Grid reference price based on variable charges including energy charge, subsidy, and streetlight levy."
+}

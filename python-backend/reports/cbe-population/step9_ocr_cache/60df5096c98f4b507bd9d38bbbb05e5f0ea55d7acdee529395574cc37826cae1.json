@@ -1,0 +1,21 @@
+{
+  "mrp_method": "blended_grid_generator",
+  "mrp_included_components": [
+    "energy_charge",
+    "fuel_surcharge",
+    "all_charges_except_taxes"
+  ],
+  "mrp_excluded_components": [
+    "VAT",
+    "taxes"
+  ],
+  "mrp_exclude_vat": true,
+  "mrp_exclude_demand_charges": false,
+  "mrp_currency": "not_specified",
+  "floor_ceiling_currency": "not_specified",
+  "floor_ceiling_escalation": "none",
+  "mrp_clause_text": "No less than 15 days prior to each monthly Invoice Date, the Customer shall provide the System Owner with all previous Utility Reference Invoices for the previous month. If the Utility Reference Invoices are not provided to the System Owner by such date, the System Owner shall be entitled to use publicly available sources to reach a reasonable estimate of the Grid Reference Price until such information is received from the System Owner. If by reason of changes to the presentation or categorization of component charges the Utility Reference Invoices are no longer an adequate and reasonable means for determination of the charges incurred by the Utility, either Party may refer its determination to an Expert Dispute if the Parties do not agree on an appropriate Grid Reference Price. Upon receipt of the Utility Reference Invoices from the Customer, the System Owner shall provide the Customer with its calculation of the Grid Reference Price in the corresponding invoice. Generator Reference Price = Equal to the product of: (i) the diesel fuel price (derived from the Diesel Reference Bills, as defined below, and specified in Narrative); (ii) the average diesel genset efficiency, which for all years of the Agreement will be pegged at a value of 0.28 litres/kWh; and (iii) the surcharge accounting for non-fuel diesel power expenses such as labor, lubricants, maintenance and general operations costs. The Facility O&M operations & maintenance and wear & tear of the asset should be years of the Agreement will be equivalent to a factor of 1.10. No less than 15 days prior to each monthly Invoice Date, the Customer shall provide the System Owner with all previous Diesel Reference Invoices that show direct fuel costs incurred by the Generator Equipment for the previous month. If the Diesel Reference Invoices are not provided to the System Owner by such date, the System Owner shall be entitled to use publicly available sources to reach a reasonable estimate of the Generator Reference Price until such information is received from the System Owner. If by reason of changes to the presentation or categorization of component charges the Diesel Reference Invoices provided are no longer an adequate and reasonable means for determination of the Generator Reference Price, either Party may refer its determination to an Expert Dispute if the Parties do not agree on an appropriate Generator Reference Price. Upon receipt of the Diesel Reference Invoices from the Customer, the System Owner shall provide the Customer with its calculation of the Generator Reference Price in the corresponding invoice. If in any Operating Year, the Customer shifts a material portion of its power supply to an alternative power source that is not anticipated in the solar pricing formula above (i.e. power not generated from solar, grid or diesel generator), the Parties shall verify the effective per-kWh cost of such power and agree on an applicable pricing reference for such alternative power source. For power procured from the grid in the subsequent Operating Year, the System Owner shall apply the solar pricing formula to the alternative power source as applied to the incumbent power source and at solar discount of 20%.",
+  "tou_windows": [],
+  "discount_percentage": 0.2,
+  "notes": "Contract defines both Grid Reference Price and Generator Reference Price methodologies. Grid reference excludes taxes but includes all other utility charges. Generator reference is based on diesel fuel price with 0.28 litres/kWh efficiency factor and 1.10 multiplier for O&M costs. Solar discount of 20% applies when customer shifts to alternative power sources."
+}

@@ -1,0 +1,657 @@
+{
+  "step": 6,
+  "step_name": "Plant Performance Workbook \u2014 Project Tabs",
+  "status": "warnings",
+  "projects_processed": 34,
+  "forecasts_enriched": 1772,
+  "discrepancies": [
+    {
+      "severity": "info",
+      "category": "missing_project",
+      "project": "ABB",
+      "field": "project",
+      "source_a": "ABB",
+      "source_b": "NOT FOUND",
+      "recommended_action": "PPW tab has no matching FM project \u2014 skip",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "missing_project",
+      "project": "AJJ",
+      "field": "project",
+      "source_a": "AJJ",
+      "source_b": "NOT FOUND",
+      "recommended_action": "PPW tab has no matching FM project \u2014 skip",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "missing_project",
+      "project": "BM",
+      "field": "project",
+      "source_a": "BM",
+      "source_b": "NOT FOUND",
+      "recommended_action": "PPW tab has no matching FM project \u2014 skip",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "missing_project",
+      "project": "BNTR",
+      "field": "project",
+      "source_a": "BNTR",
+      "source_b": "NOT FOUND",
+      "recommended_action": "PPW tab has no matching FM project \u2014 skip",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "CAL01",
+      "field": "cod_date",
+      "source_a": "PPW: 2023-01-27",
+      "source_b": "DB: 2025-04-15",
+      "recommended_action": "Review \u2014 PPW may have #REF! errors",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "ERG",
+      "field": "country",
+      "source_a": "PPW: Madagascar 2",
+      "source_b": "DB: Madagascar",
+      "recommended_action": "Verify country",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "IVL01",
+      "field": "installed_dc_capacity_kwp",
+      "source_a": "PPW: 3242.52",
+      "source_b": "DB: 967.68",
+      "recommended_action": "PPW is authority \u2014 consider updating",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "KAS01",
+      "field": "cod_date",
+      "source_a": "PPW: 2018-10-17",
+      "source_b": "DB: 2018-10-03",
+      "recommended_action": "Review \u2014 PPW may have #REF! errors",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "KAS01",
+      "field": "installed_dc_capacity_kwp",
+      "source_a": "PPW: 904.8",
+      "source_b": "DB: 1305.24",
+      "recommended_action": "PPW is authority \u2014 consider updating",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "missing_project",
+      "project": "LTC",
+      "field": "project",
+      "source_a": "LTC",
+      "source_b": "NOT FOUND",
+      "recommended_action": "PPW tab has no matching FM project \u2014 skip",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "MB01",
+      "field": "installed_dc_capacity_kwp",
+      "source_a": "PPW: 544.92",
+      "source_b": "DB: 1172.52",
+      "recommended_action": "PPW is authority \u2014 consider updating",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "MF01",
+      "field": "installed_dc_capacity_kwp",
+      "source_a": "PPW: 118.5",
+      "source_b": "DB: 674.0",
+      "recommended_action": "PPW is authority \u2014 consider updating",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "NBL01",
+      "field": "cod_date",
+      "source_a": "PPW: 2021-02-22",
+      "source_b": "DB: 2025-01-01",
+      "recommended_action": "Review \u2014 PPW may have #REF! errors",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "NBL01",
+      "field": "installed_dc_capacity_kwp",
+      "source_a": "PPW: 2511.0",
+      "source_b": "DB: 3173.0",
+      "recommended_action": "PPW is authority \u2014 consider updating",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "NC02",
+      "field": "installed_dc_capacity_kwp",
+      "source_a": "PPW: 493.42",
+      "source_b": "DB: 1282.58247390291",
+      "recommended_action": "PPW is authority \u2014 consider updating",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "QMM01",
+      "field": "country",
+      "source_a": "PPW: Madagascar 1",
+      "source_b": "DB: Madagascar",
+      "recommended_action": "Verify country",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "QMM01",
+      "field": "installed_dc_capacity_kwp",
+      "source_a": "PPW: 16150.0",
+      "source_b": "DB: 14447.76",
+      "recommended_action": "PPW is authority \u2014 consider updating",
+      "status": "open"
+    }
+  ],
+  "gate_checks": [
+    {
+      "name": "All known FM projects with PPW tabs resolved",
+      "passed": true,
+      "expected": "All FM projects resolved",
+      "actual": "5 non-FM tabs skipped: ['ABB', 'AJJ', 'BM', 'BNTR', 'LTC']"
+    },
+    {
+      "name": "Forecasts enriched with source_metadata",
+      "passed": true,
+      "expected": ">0 projects enriched",
+      "actual": "29 of 34 projects enriched"
+    },
+    {
+      "name": "No critical discrepancies",
+      "passed": true,
+      "expected": "0 critical",
+      "actual": "0 critical discrepancies"
+    }
+  ],
+  "project_results": [
+    {
+      "sage_id": "ABB",
+      "forecasts_enriched": 0,
+      "site_params_stored": false,
+      "allocation_stored": false,
+      "details_verified": false,
+      "discrepancies": [
+        {
+          "severity": "info",
+          "category": "missing_project",
+          "project": "ABB",
+          "field": "project",
+          "source_a": "ABB",
+          "source_b": "NOT FOUND",
+          "recommended_action": "PPW tab has no matching FM project \u2014 skip",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "sage_id": "AJJ",
+      "forecasts_enriched": 0,
+      "site_params_stored": false,
+      "allocation_stored": false,
+      "details_verified": false,
+      "discrepancies": [
+        {
+          "severity": "info",
+          "category": "missing_project",
+          "project": "AJJ",
+          "field": "project",
+          "source_a": "AJJ",
+          "source_b": "NOT FOUND",
+          "recommended_action": "PPW tab has no matching FM project \u2014 skip",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "sage_id": "AMP01",
+      "forecasts_enriched": 14,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "BM",
+      "forecasts_enriched": 0,
+      "site_params_stored": false,
+      "allocation_stored": false,
+      "details_verified": false,
+      "discrepancies": [
+        {
+          "severity": "info",
+          "category": "missing_project",
+          "project": "BM",
+          "field": "project",
+          "source_a": "BM",
+          "source_b": "NOT FOUND",
+          "recommended_action": "PPW tab has no matching FM project \u2014 skip",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "sage_id": "BNTR",
+      "forecasts_enriched": 0,
+      "site_params_stored": false,
+      "allocation_stored": false,
+      "details_verified": false,
+      "discrepancies": [
+        {
+          "severity": "info",
+          "category": "missing_project",
+          "project": "BNTR",
+          "field": "project",
+          "source_a": "BNTR",
+          "source_b": "NOT FOUND",
+          "recommended_action": "PPW tab has no matching FM project \u2014 skip",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "sage_id": "CAL01",
+      "forecasts_enriched": 21,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": [
+        {
+          "severity": "warning",
+          "category": "value_conflict",
+          "project": "CAL01",
+          "field": "cod_date",
+          "source_a": "PPW: 2023-01-27",
+          "source_b": "DB: 2025-04-15",
+          "recommended_action": "Review \u2014 PPW may have #REF! errors",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "sage_id": "ERG",
+      "forecasts_enriched": 38,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": [
+        {
+          "severity": "warning",
+          "category": "value_conflict",
+          "project": "ERG",
+          "field": "country",
+          "source_a": "PPW: Madagascar 2",
+          "source_b": "DB: Madagascar",
+          "recommended_action": "Verify country",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "sage_id": "GBL01",
+      "forecasts_enriched": 69,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "GC001",
+      "forecasts_enriched": 127,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "IVL01",
+      "forecasts_enriched": 39,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": [
+        {
+          "severity": "warning",
+          "category": "value_conflict",
+          "project": "IVL01",
+          "field": "installed_dc_capacity_kwp",
+          "source_a": "PPW: 3242.52",
+          "source_b": "DB: 967.68",
+          "recommended_action": "PPW is authority \u2014 consider updating",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "sage_id": "JAB01",
+      "forecasts_enriched": 78,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "KAS01",
+      "forecasts_enriched": 288,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": [
+        {
+          "severity": "warning",
+          "category": "value_conflict",
+          "project": "KAS01",
+          "field": "cod_date",
+          "source_a": "PPW: 2018-10-17",
+          "source_b": "DB: 2018-10-03",
+          "recommended_action": "Review \u2014 PPW may have #REF! errors",
+          "status": "open"
+        },
+        {
+          "severity": "warning",
+          "category": "value_conflict",
+          "project": "KAS01",
+          "field": "installed_dc_capacity_kwp",
+          "source_a": "PPW: 904.8",
+          "source_b": "DB: 1305.24",
+          "recommended_action": "PPW is authority \u2014 consider updating",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "sage_id": "LOI01",
+      "forecasts_enriched": 86,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "LTC",
+      "forecasts_enriched": 0,
+      "site_params_stored": false,
+      "allocation_stored": false,
+      "details_verified": false,
+      "discrepancies": [
+        {
+          "severity": "info",
+          "category": "missing_project",
+          "project": "LTC",
+          "field": "project",
+          "source_a": "LTC",
+          "source_b": "NOT FOUND",
+          "recommended_action": "PPW tab has no matching FM project \u2014 skip",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "sage_id": "MB01",
+      "forecasts_enriched": 38,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": [
+        {
+          "severity": "warning",
+          "category": "value_conflict",
+          "project": "MB01",
+          "field": "installed_dc_capacity_kwp",
+          "source_a": "PPW: 544.92",
+          "source_b": "DB: 1172.52",
+          "recommended_action": "PPW is authority \u2014 consider updating",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "sage_id": "MF01",
+      "forecasts_enriched": 38,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": [
+        {
+          "severity": "warning",
+          "category": "value_conflict",
+          "project": "MF01",
+          "field": "installed_dc_capacity_kwp",
+          "source_a": "PPW: 118.5",
+          "source_b": "DB: 674.0",
+          "recommended_action": "PPW is authority \u2014 consider updating",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "sage_id": "MIR01",
+      "forecasts_enriched": 39,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "MOH01",
+      "forecasts_enriched": 24,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "MP01",
+      "forecasts_enriched": 33,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "MP02",
+      "forecasts_enriched": 33,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "NBL01",
+      "forecasts_enriched": 71,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": [
+        {
+          "severity": "warning",
+          "category": "value_conflict",
+          "project": "NBL01",
+          "field": "cod_date",
+          "source_a": "PPW: 2021-02-22",
+          "source_b": "DB: 2025-01-01",
+          "recommended_action": "Review \u2014 PPW may have #REF! errors",
+          "status": "open"
+        },
+        {
+          "severity": "warning",
+          "category": "value_conflict",
+          "project": "NBL01",
+          "field": "installed_dc_capacity_kwp",
+          "source_a": "PPW: 2511.0",
+          "source_b": "DB: 3173.0",
+          "recommended_action": "PPW is authority \u2014 consider updating",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "sage_id": "NBL02",
+      "forecasts_enriched": 47,
+      "site_params_stored": true,
+      "allocation_stored": true,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "NC02",
+      "forecasts_enriched": 38,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": [
+        {
+          "severity": "warning",
+          "category": "value_conflict",
+          "project": "NC02",
+          "field": "installed_dc_capacity_kwp",
+          "source_a": "PPW: 493.42",
+          "source_b": "DB: 1282.58247390291",
+          "recommended_action": "PPW is authority \u2014 consider updating",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "sage_id": "NC03",
+      "forecasts_enriched": 33,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "QMM01",
+      "forecasts_enriched": 41,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": [
+        {
+          "severity": "warning",
+          "category": "value_conflict",
+          "project": "QMM01",
+          "field": "country",
+          "source_a": "PPW: Madagascar 1",
+          "source_b": "DB: Madagascar",
+          "recommended_action": "Verify country",
+          "status": "open"
+        },
+        {
+          "severity": "warning",
+          "category": "value_conflict",
+          "project": "QMM01",
+          "field": "installed_dc_capacity_kwp",
+          "source_a": "PPW: 16150.0",
+          "source_b": "DB: 14447.76",
+          "recommended_action": "PPW is authority \u2014 consider updating",
+          "status": "open"
+        }
+      ]
+    },
+    {
+      "sage_id": "TBM01",
+      "forecasts_enriched": 47,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "TWG01",
+      "forecasts_enriched": 49,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "UGL01",
+      "forecasts_enriched": 72,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "UNSOS",
+      "forecasts_enriched": 34,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "UTK01",
+      "forecasts_enriched": 91,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "XFAB",
+      "forecasts_enriched": 71,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "XFBV",
+      "forecasts_enriched": 71,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "XFL01",
+      "forecasts_enriched": 71,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    },
+    {
+      "sage_id": "XFSS",
+      "forecasts_enriched": 71,
+      "site_params_stored": true,
+      "allocation_stored": false,
+      "details_verified": true,
+      "discrepancies": []
+    }
+  ]
+}

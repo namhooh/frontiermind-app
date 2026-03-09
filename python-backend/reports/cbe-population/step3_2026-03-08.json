@@ -1,0 +1,116 @@
+{
+  "step_number": 3,
+  "step_name": "Contract Lines & Meter Cross-Check",
+  "status": "failed",
+  "run_date": "2026-03-08",
+  "validated": 31,
+  "gaps_filled": 114,
+  "discrepancy_count": 6,
+  "discrepancies": [
+    {
+      "severity": "info",
+      "category": "missing_data",
+      "project": "IVL01",
+      "step": 3,
+      "field": "contract",
+      "source_a": "Auto-created: CONEGY00-2025-00002 (OM/USD)",
+      "source_b": "contract.id=100",
+      "recommended_action": "Verify auto-created contract",
+      "status": "resolved"
+    },
+    {
+      "severity": "info",
+      "category": "missing_data",
+      "project": "TWG01",
+      "step": 3,
+      "field": "contract",
+      "source_a": "Auto-created: CONMOZ00-2023-00002 (OM/USD)",
+      "source_b": "contract.id=101",
+      "recommended_action": "Verify auto-created contract",
+      "status": "resolved"
+    },
+    {
+      "severity": "warning",
+      "category": "fk_resolution",
+      "project": "CAL01",
+      "step": 3,
+      "field": "meter_reading \u2192 contract_line",
+      "source_a": "Reading: contract=CONZIM00-2025-00002, line=1000",
+      "source_b": "No matching contract_line (DIM_CURRENT_RECORD=1) in SAGE CSV",
+      "recommended_action": "Likely SCD2-superseded line \u2014 verify in source CSV",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "fk_resolution",
+      "project": "CAL01",
+      "step": 3,
+      "field": "meter_reading \u2192 contract_line",
+      "source_a": "Reading: contract=CONZIM00-2025-00002, line=2000",
+      "source_b": "No matching contract_line (DIM_CURRENT_RECORD=1) in SAGE CSV",
+      "recommended_action": "Likely SCD2-superseded line \u2014 verify in source CSV",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "fk_resolution",
+      "project": "CAL01",
+      "step": 3,
+      "field": "meter_reading \u2192 contract_line",
+      "source_a": "Reading: contract=CONZIM00-2025-00002, line=3000",
+      "source_b": "No matching contract_line (DIM_CURRENT_RECORD=1) in SAGE CSV",
+      "recommended_action": "Likely SCD2-superseded line \u2014 verify in source CSV",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "missing_data",
+      "project": "ALL",
+      "step": 3,
+      "field": "contract_line \u2192 meter_reading",
+      "source_a": "18 active contract_line(s) have no meter readings",
+      "source_b": "Expected \u2014 readings populated later or non-energy lines",
+      "recommended_action": "No action needed",
+      "status": "open"
+    }
+  ],
+  "gate_checks": [
+    {
+      "name": "All contract_lines resolve to a contract",
+      "passed": true,
+      "expected": "114/114",
+      "actual": "114/114"
+    },
+    {
+      "name": "Contract_line count matches SAGE CSV",
+      "passed": true,
+      "expected": "114 from CSV",
+      "actual": "114 in DB"
+    },
+    {
+      "name": "Active/inactive line breakdown",
+      "passed": true,
+      "expected": "active > 0",
+      "actual": "87 active, 27 inactive"
+    },
+    {
+      "name": "No orphaned meter readings",
+      "passed": false,
+      "expected": "0 orphans",
+      "actual": "3 orphan(s)"
+    },
+    {
+      "name": "Projects with contract_lines",
+      "passed": true,
+      "expected": "25+",
+      "actual": "31"
+    }
+  ],
+  "summary": {
+    "critical": 0,
+    "warning": 3,
+    "info": 3,
+    "gates_passed": 4,
+    "gates_total": 5
+  }
+}

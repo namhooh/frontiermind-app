@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { Loader2 } from 'lucide-react'
+import { Loader2, Sparkles } from 'lucide-react'
 import { Button } from '@/app/components/ui/button'
 import {
   Dialog,
@@ -21,10 +21,7 @@ import { VariableInsertBar } from './VariableInsertBar'
 const SCHEDULE_TYPES: { value: EmailScheduleType; label: string }[] = [
   { value: 'invoice_reminder', label: 'Invoice Reminder' },
   { value: 'invoice_initial', label: 'Invoice Initial' },
-  { value: 'invoice_escalation', label: 'Invoice Escalation' },
   { value: 'compliance_alert', label: 'Compliance Alert' },
-  { value: 'meter_data_missing', label: 'Meter Data Missing' },
-  { value: 'report_ready', label: 'Report Ready' },
   { value: 'custom', label: 'Custom' },
 ]
 
@@ -45,10 +42,12 @@ interface TemplateEditorDialogProps {
 export function TemplateEditorDialog({ open, onOpenChange, client, template, onSaved }: TemplateEditorDialogProps) {
   const isEdit = !!template
   const [saving, setSaving] = useState(false)
+  const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [previewHtml, setPreviewHtml] = useState('')
   const [previewLoading, setPreviewLoading] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [aiPrompt, setAiPrompt] = useState('')
 
   // Form state
   const [name, setName] = useState('')
@@ -70,6 +69,7 @@ export function TemplateEditorDialog({ open, onOpenChange, client, template, onS
     if (open) {
       setError(null)
       setPreviewHtml('')
+      setAiPrompt('')
       if (template) {
         setName(template.name)
         setScheduleType(template.email_schedule_type)
@@ -139,9 +139,30 @@ export function TemplateEditorDialog({ open, onOpenChange, client, template, onS
     }
   }
 
+  async function handleGenerate() {
+    if (!aiPrompt.trim()) return
+    setGenerating(true)
+    setError(null)
+    try {
+      const result = await client.generateTemplate({
+        prompt: aiPrompt.trim(),
+        email_schedule_type: scheduleType,
+        variables: variables as string[],
+      })
+      setSubjectTemplate(result.subject_template)
+      setBodyHtml(result.body_html)
+      setBodyText(result.body_text)
+      if (result.body_text) setShowBodyText(true)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to generate template')
+    } finally {
+      setGenerating(false)
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle>{isEdit ? 'Edit Template' : 'Create Template'}</DialogTitle>
         </DialogHeader>
@@ -150,9 +171,9 @@ export function TemplateEditorDialog({ open, onOpenChange, client, template, onS
           <div className="p-2 text-sm text-red-600 bg-red-50 rounded border border-red-200">{error}</div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1 min-h-0 overflow-hidden">
           {/* Left: Editor */}
-          <div className="space-y-3">
+          <div className="space-y-3 overflow-y-auto">
             <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Name</label>
               <input
@@ -203,6 +224,36 @@ export function TemplateEditorDialog({ open, onOpenChange, client, template, onS
             </div>
 
             <div>
+              <label className="block text-sm font-medium text-slate-700 mb-1">Generate with AI</label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={aiPrompt}
+                  onChange={(e) => setAiPrompt(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && !generating) handleGenerate() }}
+                  placeholder="e.g. Professional invoice reminder, firm but polite tone"
+                  className="flex-1 px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-purple-400"
+                  disabled={generating}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={handleGenerate}
+                  disabled={generating || !aiPrompt.trim()}
+                  className="shrink-0"
+                >
+                  {generating ? (
+                    <Loader2 className="w-4 h-4 animate-spin mr-1" />
+                  ) : (
+                    <Sparkles className="w-4 h-4 mr-1" />
+                  )}
+                  {generating ? 'Generating...' : 'Generate'}
+                </Button>
+              </div>
+            </div>
+
+            <div>
               <label className="block text-sm font-medium text-slate-700 mb-1">Body HTML</label>
               <textarea
                 ref={bodyRef}
@@ -237,9 +288,11 @@ export function TemplateEditorDialog({ open, onOpenChange, client, template, onS
           </div>
 
           {/* Right: Preview */}
-          <div>
-            <label className="block text-sm font-medium text-slate-700 mb-1">Live Preview</label>
-            <TemplatePreview html={previewHtml} loading={previewLoading} />
+          <div className="flex flex-col min-h-0">
+            <label className="block text-sm font-medium text-slate-700 mb-1 shrink-0">Live Preview</label>
+            <div className="flex-1 min-h-0">
+              <TemplatePreview html={previewHtml} loading={previewLoading} />
+            </div>
           </div>
         </div>
 

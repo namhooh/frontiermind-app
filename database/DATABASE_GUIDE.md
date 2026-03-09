@@ -92,6 +92,10 @@ database/
 │   ├── 050_rename_grp_to_mrp.sql                      # Phase 10.13: Rename GRP (Grid Reference Price) → MRP (Market Reference Price) — terminology only
 │   ├── 051_org_email_address.sql                      # Phase 8.1: Org → email address mapping for bidirectional email on mail.frontiermind.co
 │   ├── 052_inbound_message.sql                       # Phase 8.3: Unified inbound_message + inbound_attachment (combined expand/contract, drops submission_response)
+│   ├── 053_org_scoped_credentials.sql                # Org-scoped API keys: nullable data_source_id, allowed_scopes, api_key_hash
+│   ├── 054_sage_id_aliases_and_data_fixes.sql        # Sage ID reversal, data fixes, additional_external_ids, phase_cod_date, XF-AB→XFAB split (4 projects), ZL02 contracts
+│   ├── 055_step4_billing_product_tariff_structure.sql # Step 4: billing_product linking, contract_billing_product junction, clause_tariff placeholders
+│   ├── 056_billing_tax_rule_project_scope.sql        # Step 8: Add project_id to billing_tax_rule for project-specific overrides
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │

@@ -86,7 +86,7 @@ export function TechnicalTab({ project, contracts, assets, meters, tariffs, fore
   const meteringTypes = unique(billingMeters.map((m) => m.metering_type as string).filter(Boolean)).join(', ') || '—'
 
   // Forecasts: sort Jan → Dec
-  const forecasts = useMemo(() =>
+  const allForecasts = useMemo(() =>
     [...rawForecasts].sort((a, b) => {
       const da = new Date(String(a.forecast_month ?? ''))
       const db = new Date(String(b.forecast_month ?? ''))
@@ -94,6 +94,45 @@ export function TechnicalTab({ project, contracts, assets, meters, tariffs, fore
     }),
     [rawForecasts],
   )
+
+  // Build lists of available operating years and calendar years for filters
+  const operatingYears = useMemo(() => {
+    const years = new Set<number>()
+    for (const f of allForecasts) {
+      const oy = f.operating_year != null ? Number(f.operating_year) : null
+      if (oy != null && !isNaN(oy)) years.add(oy)
+    }
+    return Array.from(years).sort((a, b) => a - b)
+  }, [allForecasts])
+
+  const calendarYears = useMemo(() => {
+    const years = new Set<number>()
+    for (const f of allForecasts) {
+      const d = new Date(String(f.forecast_month ?? ''))
+      if (!isNaN(d.getTime())) years.add(d.getFullYear())
+    }
+    return Array.from(years).sort((a, b) => a - b)
+  }, [allForecasts])
+
+  const [selectedOpYear, setSelectedOpYear] = useState<number | 'all'>(() =>
+    operatingYears.length > 0 ? 1 : 'all'
+  )
+  const [selectedCalYear, setSelectedCalYear] = useState<number | 'all'>('all')
+
+  // Filter forecasts by selected operating year and/or calendar year
+  const forecasts = useMemo(() => {
+    let filtered = allForecasts
+    if (selectedOpYear !== 'all') {
+      filtered = filtered.filter((f) => Number(f.operating_year) === selectedOpYear)
+    }
+    if (selectedCalYear !== 'all') {
+      filtered = filtered.filter((f) => {
+        const d = new Date(String(f.forecast_month ?? ''))
+        return d.getFullYear() === selectedCalYear
+      })
+    }
+    return filtered
+  }, [allForecasts, selectedOpYear, selectedCalYear])
 
   // Guarantees subtitle info
   const fxRule = guarantees.find((g) => g.shortfall_cap_fx_rule != null)?.shortfall_cap_fx_rule
@@ -274,19 +313,51 @@ export function TechnicalTab({ project, contracts, assets, meters, tariffs, fore
       {/* Production Forecasts */}
       <CollapsibleSection
         title="Production Forecasts"
-        subtitle={editMode && !IS_DEMO && degradationPct != null ? (
-          <div className="mb-3">
-            <button
-              type="button"
-              onClick={handleApplyDegradation}
-              disabled={applyingDegradation}
-              className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors disabled:opacity-50"
-            >
-              {applyingDegradation && <Loader2 className="h-3 w-3 animate-spin" />}
-              Apply Degradation ({(degradationPct * 100).toFixed(2)}%)
-            </button>
+        subtitle={
+          <div className="mb-3 flex items-center gap-3 flex-wrap">
+            {operatingYears.length > 1 && (
+              <div className="flex items-center gap-1.5">
+                <label className="text-xs text-slate-500">Operating Year:</label>
+                <select
+                  value={selectedOpYear}
+                  onChange={(e) => { setSelectedOpYear(e.target.value === 'all' ? 'all' : Number(e.target.value)); setSelectedCalYear('all') }}
+                  className="text-xs border border-slate-200 rounded-md px-2 py-1 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                >
+                  {operatingYears.map((y) => (
+                    <option key={y} value={y}>Year {y}</option>
+                  ))}
+                  <option value="all">All</option>
+                </select>
+              </div>
+            )}
+            {calendarYears.length > 1 && (
+              <div className="flex items-center gap-1.5">
+                <label className="text-xs text-slate-500">Calendar Year:</label>
+                <select
+                  value={selectedCalYear}
+                  onChange={(e) => { setSelectedCalYear(e.target.value === 'all' ? 'all' : Number(e.target.value)); setSelectedOpYear('all') }}
+                  className="text-xs border border-slate-200 rounded-md px-2 py-1 bg-white text-slate-700 focus:outline-none focus:ring-1 focus:ring-blue-400"
+                >
+                  <option value="all">All</option>
+                  {calendarYears.map((y) => (
+                    <option key={y} value={y}>{y}</option>
+                  ))}
+                </select>
+              </div>
+            )}
+            {editMode && !IS_DEMO && degradationPct != null && (
+              <button
+                type="button"
+                onClick={handleApplyDegradation}
+                disabled={applyingDegradation}
+                className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-md bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 transition-colors disabled:opacity-50"
+              >
+                {applyingDegradation && <Loader2 className="h-3 w-3 animate-spin" />}
+                Apply Degradation ({(degradationPct * 100).toFixed(2)}%)
+              </button>
+            )}
           </div>
-        ) : undefined}
+        }
       >
         <ProjectTableTab
           data={forecasts}

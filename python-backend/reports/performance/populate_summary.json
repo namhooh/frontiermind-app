@@ -1,0 +1,11 @@
+{
+  "KAS01": {
+    "sage_id": "KAS01",
+    "meters_created": 0,
+    "contract_lines_linked": 0,
+    "forecasts_upserted": 288,
+    "meter_aggregates_upserted": 108,
+    "plant_performance_upserted": 88,
+    "errors": []
+  }
+}

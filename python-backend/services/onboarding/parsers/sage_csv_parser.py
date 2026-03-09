@@ -29,13 +29,9 @@ logger = logging.getLogger(__name__)
 
 # ─── Customer Alias Resolution (from sage_to_fm_ontology.yaml) ─────────────
 CUSTOMER_ALIASES: Dict[str, str] = {
-    "GC001": "GC01",
+    "GC001": "GC001",  # Identity — no alias needed (migration 054)
     "TWG": "TWG01",
-    "ZL01": "ZO01",
-    "XFAB": "XF-AB",
-    "XFBV": "XF-AB",
-    "XFL01": "XF-AB",
-    "XFSS": "XF-AB",
+    # XFAB, XFBV, XFL01, XFSS pass through as-is (separate projects after XF-AB split)
 }
 
 # Customers NOT in FM portfolio (intentional exclusions)

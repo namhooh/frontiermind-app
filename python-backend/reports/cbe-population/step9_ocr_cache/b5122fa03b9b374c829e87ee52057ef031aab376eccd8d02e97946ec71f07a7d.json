@@ -1,0 +1,14 @@
+{
+  "mrp_method": null,
+  "mrp_included_components": [],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": null,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": null,
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "2. SSA Amendments. Unless expressly specified otherwise, the following amendments to the SSA shall be effective from the Second Amendment Effective Date:\n\n2.1. Revised Solar Discount. The value of the Solar Discount as set forth in Exhibit C of the SSA is hereby amended from 10% and restated as 15%, provided the conditions recorded in Clause 2.2 of this Agreement",
+  "tou_windows": [],
+  "discount_percentage": 0.15,
+  "notes": "This appears to be an amendment to a solar service agreement that changes the Solar Discount from 10% to 15%. This is not an MRP formula but rather a discount amendment clause. The text is cut off and references conditions in Clause 2.2 that are not visible."
+}

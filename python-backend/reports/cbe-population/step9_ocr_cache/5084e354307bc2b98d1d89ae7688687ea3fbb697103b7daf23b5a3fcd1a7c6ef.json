@@ -1,0 +1,16 @@
+{
+  "mrp_method": null,
+  "mrp_included_components": [],
+  "mrp_excluded_components": [
+    "VAT"
+  ],
+  "mrp_exclude_vat": true,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": null,
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "From the period of commissioning of the Solar Facility, the Buyer shall pay the Seller for Energy Output of the Solar Facility the amounts (the \"Price\") determined in accordance with Exhibit C for each Operating Year of the Term. The Price and all amounts and fees payable under this Agreement are exclusive of any VAT as in existence now or its equivalent as may be enacted in the future.",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "This appears to be a pricing clause that references a separate Exhibit C for the actual price determination methodology. The clause only specifies VAT exclusion and refers to amounts determined per Operating Year of the Term."
+}

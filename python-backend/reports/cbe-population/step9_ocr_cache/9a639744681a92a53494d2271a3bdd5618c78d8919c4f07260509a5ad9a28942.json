@@ -1,0 +1,27 @@
+{
+  "mrp_method": "blended_grid_generator",
+  "mrp_included_components": [
+    "energy_charge",
+    "variable_charges"
+  ],
+  "mrp_excluded_components": [
+    "VAT",
+    "demand_charge",
+    "fixed_charge"
+  ],
+  "mrp_exclude_vat": true,
+  "mrp_exclude_demand_charges": true,
+  "mrp_currency": "NGN",
+  "floor_ceiling_currency": "USD",
+  "floor_ceiling_escalation": "none",
+  "mrp_clause_text": "Grid Reference Price = Equal to the sum of the total variable charges (kwed per kWh) in the Utility Reference Invoices, as defined below, divided by the sum of the total kWh invoiced during the period, provided that, in the event that the amount of some or all of the variable charges in the Utility Reference Invoices vary depending on the time of use, such charges shall be calculated as the average weighted by the charges levied and the kWh invoiced related to consumption between 6am and 6pm, VAT and any demand charge serving are specifically will be excluded from the calculation of the Grid Reference Price.",
+  "tou_windows": [
+    {
+      "name": "weighted_average_period",
+      "start": "06:00",
+      "end": "18:00"
+    }
+  ],
+  "discount_percentage": 0.15,
+  "notes": "Contract includes minimum solar price of 0.071 USD/kWh and maximum of 0.210 USD/kWh. Payment formula blends grid and generator costs with respective discounts of 15% and 24%. Time-weighted averaging applies to variable charges between 6am-6pm for TOU calculations."
+}

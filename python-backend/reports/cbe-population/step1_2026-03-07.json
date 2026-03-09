@@ -1,0 +1,303 @@
+{
+  "step_number": 1,
+  "step_name": "Customer Summary \u2192 Projects & Counterparties",
+  "status": "warnings",
+  "run_date": "2026-03-07",
+  "validated": 30,
+  "gaps_filled": 31,
+  "discrepancy_count": 23,
+  "discrepancies": [
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "GC01",
+      "step": 1,
+      "field": "project.country",
+      "source_a": "xlsx: Mauritius",
+      "source_b": "DB: Kenya",
+      "recommended_action": "DB wins \u2014 xlsx shows legal entity country, DB shows site country",
+      "status": "resolved"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "ZO01",
+      "step": 1,
+      "field": "project.country",
+      "source_a": "xlsx: Mauritius",
+      "source_b": "DB: Sierra Leone",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "TBC",
+      "step": 1,
+      "field": "project.country",
+      "source_a": "xlsx: Mauritius",
+      "source_b": "DB: DRC",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "missing_data",
+      "project": "TBC",
+      "step": 1,
+      "field": "contract",
+      "source_a": "xlsx project exists",
+      "source_b": "NO CONTRACTS IN DB",
+      "recommended_action": "Create contract in Step 2",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "KAS01",
+      "step": 1,
+      "field": "project.cod_date",
+      "source_a": "xlsx: 2024-05-03",
+      "source_b": "DB: 2018-10-03",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "MOH01",
+      "step": 1,
+      "field": "project.cod_date",
+      "source_a": "xlsx: 2025-12-12",
+      "source_b": "DB: 2025-09-01",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "LOI01",
+      "step": 1,
+      "field": "project.name",
+      "source_a": "xlsx: Loisaba - Solar",
+      "source_b": "DB: Loisaba",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "MF01",
+      "step": 1,
+      "field": "counterparty.industry",
+      "source_a": "xlsx: Chemical",
+      "source_b": "DB: Manufacturing",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "MP02",
+      "step": 1,
+      "field": "counterparty.industry",
+      "source_a": "xlsx: Paper",
+      "source_b": "DB: Manufacturing",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "MP01",
+      "step": 1,
+      "field": "counterparty.industry",
+      "source_a": "xlsx: Paper",
+      "source_b": "DB: Manufacturing",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "NC02",
+      "step": 1,
+      "field": "counterparty.industry",
+      "source_a": "xlsx: Cement/Concrete",
+      "source_b": "DB: Manufacturing",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "NC03",
+      "step": 1,
+      "field": "project.name",
+      "source_a": "xlsx: National Cement \nNakuru",
+      "source_b": "DB: National Cement Nakuru",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "NC03",
+      "step": 1,
+      "field": "counterparty.industry",
+      "source_a": "xlsx: Cement/Concrete",
+      "source_b": "DB: Manufacturing",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "AMP01",
+      "step": 1,
+      "field": "project.name",
+      "source_a": "xlsx: Ampersand - Solar",
+      "source_b": "DB: Ampersand",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "QMM01",
+      "step": 1,
+      "field": "project.name",
+      "source_a": "xlsx: Rio Tinto QMM - Solar Expanded",
+      "source_b": "DB: Rio Tinto QMM",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "value_conflict",
+      "project": "QMM01",
+      "step": 1,
+      "field": "project.country",
+      "source_a": "xlsx: Madagascar 1",
+      "source_b": "DB: Madagascar",
+      "recommended_action": "DB wins \u2014 xlsx has trailing suffix",
+      "status": "resolved"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "QMM01",
+      "step": 1,
+      "field": "project.installed_dc_capacity_kwp",
+      "source_a": "xlsx: 30597.76",
+      "source_b": "DB: 14447.76",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "QMM01",
+      "step": 1,
+      "field": "project.external_project_id",
+      "source_a": "xlsx: MG 22017 MG 22452",
+      "source_b": "DB: MG 22017",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "ERG",
+      "step": 1,
+      "field": "project.country",
+      "source_a": "xlsx: Madagascar 2",
+      "source_b": "DB: Madagascar",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "NBL01",
+      "step": 1,
+      "field": "project.external_project_id",
+      "source_a": "xlsx: NG 22016 NG 22051",
+      "source_b": "DB: NG 22016",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "NBL01",
+      "step": 1,
+      "field": "counterparty.name",
+      "source_a": "xlsx: Heineken",
+      "source_b": "DB: CROSSBOUNDARY ENERGY NIGERIA LTD.",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "value_conflict",
+      "project": "ZL02",
+      "step": 1,
+      "field": "project.name",
+      "source_a": "xlsx: Zoodlabs Group - Energy Services",
+      "source_b": "DB: Zoodlabs Energy Services",
+      "recommended_action": "Review: check field authority matrix",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "missing_data",
+      "project": "ZL02",
+      "step": 1,
+      "field": "contract",
+      "source_a": "xlsx project exists",
+      "source_b": "NO CONTRACTS IN DB",
+      "recommended_action": "Create contract in Step 2",
+      "status": "open"
+    }
+  ],
+  "gate_checks": [
+    {
+      "name": "All projects have sage_id",
+      "passed": true,
+      "expected": "32/32",
+      "actual": "32/32"
+    },
+    {
+      "name": "Contracts have external_contract_id",
+      "passed": true,
+      "expected": "27+",
+      "actual": "27"
+    },
+    {
+      "name": "Contracts have payment_terms",
+      "passed": true,
+      "expected": "27+",
+      "actual": "27"
+    },
+    {
+      "name": "Contracts have end_date",
+      "passed": true,
+      "expected": "27+",
+      "actual": "27"
+    },
+    {
+      "name": "Multi-contract patterns flagged",
+      "passed": true,
+      "expected": "XF-AB flagged",
+      "actual": "XF-AB: 1 project(s)"
+    }
+  ],
+  "summary": {
+    "critical": 0,
+    "warning": 21,
+    "info": 2,
+    "gates_passed": 5,
+    "gates_total": 5
+  }
+}

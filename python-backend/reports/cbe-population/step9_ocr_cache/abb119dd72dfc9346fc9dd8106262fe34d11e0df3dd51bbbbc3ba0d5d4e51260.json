@@ -1,0 +1,16 @@
+{
+  "mrp_method": "utility_variable_charges_tou",
+  "mrp_included_components": [
+    "energy_charge"
+  ],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": false,
+  "mrp_exclude_demand_charges": false,
+  "mrp_currency": null,
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "\"Calculated Price\" means the higher of (a) the Average Reference Price with the Solar Discount applied and (b) the Minimum Solar Price, provided that at no time shall the Calculated Price be higher than the Maximum Solar Price.",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "This appears to be a calculated price definition that references an Average Reference Price with a Solar Discount, but the actual MRP methodology is not specified in this excerpt. The clause establishes a price floor (Minimum Solar Price) and ceiling (Maximum Solar Price) structure."
+}

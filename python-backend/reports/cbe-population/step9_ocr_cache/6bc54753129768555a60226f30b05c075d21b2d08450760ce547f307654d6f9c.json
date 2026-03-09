@@ -1,0 +1,16 @@
+{
+  "mrp_method": "utility_total_charges",
+  "mrp_included_components": [],
+  "mrp_excluded_components": [
+    "demand_charge"
+  ],
+  "mrp_exclude_vat": false,
+  "mrp_exclude_demand_charges": true,
+  "mrp_currency": null,
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "1. RATE CALCULATION\n\n1.1 UL shall provide Developer with a copy of each electric utility bill constituting a Reference Bill within one month of receipt of such bill and in any event no later than one month prior to the annual anniversary of the Commercial Operations Date for each year of the Agreement. If a Reference Bill is not provided in a reasonable time then Developer is entitled to use publicly available sources to reach a reasonable estimate of the Reference Bill.\n\n1.2 Upon receipt of the Reference Bill from UL, Developer shall provide UL a calculation of the Market Reference Price and Rate for the subsequent year prior to the annual anniversary of the Commercial Operations Date for each year of the Agreement.\n\n1.3 All Demand Charge savings associated with the System are excluded from the calculation of the Market Reference Price.",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "Document shows the process for calculating Market Reference Price based on Reference Bills from utility (UL). Developer must provide annual MRP calculations. Demand charges are explicitly excluded from MRP calculation. No specific currency, rates, or detailed tariff components are visible in this excerpt."
+}

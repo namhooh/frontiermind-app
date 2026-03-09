@@ -1,0 +1,14 @@
+{
+  "mrp_method": "utility_variable_charges_tou",
+  "mrp_included_components": [],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": null,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": "NGN",
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "Payment = Monthly payment due to Seller for Energy Output, denominated in Naira\nSolar Discount = 15.17%\nEnergy Output_Grid = Quantity of Energy Output (in kWh) supplied and/or available for supply from the Solar Facility to Buyer's private distribution network available to displace demand for an equivalent quantity of energy supplied by the Utility during the given period. Energy Output calculated in accordance with Exhibit F.",
+  "tou_windows": [],
+  "discount_percentage": 0.1517,
+  "notes": "This appears to be a definitions section rather than a complete MRP formula. The text mentions a 15.17% solar discount and references energy output calculations per Exhibit F, but the actual MRP calculation method is not shown in this excerpt."
+}

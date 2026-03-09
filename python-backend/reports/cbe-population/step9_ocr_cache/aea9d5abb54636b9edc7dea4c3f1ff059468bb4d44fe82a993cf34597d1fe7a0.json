@@ -1,0 +1,26 @@
+{
+  "mrp_method": "utility_variable_charges_tou",
+  "mrp_included_components": [
+    "energy_charge",
+    "fuel_surcharge"
+  ],
+  "mrp_excluded_components": [
+    "VAT",
+    "demand_charge"
+  ],
+  "mrp_exclude_vat": true,
+  "mrp_exclude_demand_charges": true,
+  "mrp_currency": "KSH",
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "Grid Reference Price = Equal to the sum of the total variable charges (levied per KWh) in the Utility Reference Invoices, as defined below, divided by the sum of the total kWh invoiced in the Utility Reference Invoices, provided that, in the event that the amount of some or all of the variable charges in the Utility Reference Invoices vary depending on time of use, the calculation of the Grid Reference Price shall only be based on the charges levied and the kWh invoiced related to consumption between 6am and 6pm. VAT and any demand charge savings associated with the System are excluded from the calculation of the Grid Reference Price. No less than 15 days prior to the annual anniversary of each Operating Year, the Customer shall provide the Developer with its electric utility invoices (the \"Utility Reference Invoices\") for the preceding 12-month period. If the Utility Reference Invoices are not provided to the Developer by such date, the Developer shall be entitled to use publicly available sources to reach a reasonable estimate of the Grid Reference Price. If by reason of changes to the presentation or categorization of component charges the Utility Reference Invoices are no longer an adequate and reasonable means for ascertaining what charges levied by the Utility, either Party may refer its determination to an Expert Dispute if the Parties do not agree on an appropriate Grid Reference Price. Upon receipt of the Utility Reference Invoices from the Customer, the Developer shall provide the Customer with its calculation of the Grid Reference Price for the subsequent Operating Year. This shall occur no later than 30 days after the beginning of the relevant Operating Year.",
+  "tou_windows": [
+    {
+      "name": "daytime",
+      "start": "06:00",
+      "end": "18:00"
+    }
+  ],
+  "discount_percentage": 0.55,
+  "notes": "Grid Reference Price calculation is based only on consumption between 6am and 6pm when variable charges vary by time of use. Solar discount of 55% is applied. Payment terms denominated in KSH with currency conversion provisions."
+}

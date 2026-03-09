@@ -4,7 +4,8 @@ This document maps CBE's data architecture to FrontierMind's canonical schema an
 
 **Sources:** AM Onboarding Template (Excel), PPA Contract PDFs, Utility Invoices (GRP — Grid Reference Price), Snowflake data warehouse, Operations Plant Performance Workbook, Operating Revenue Masterfile.
 
-**Schema version:** v10.11 (migration 049)
+**Schema version:** v10.14 (migration 056)
+**Latest population step:** Step 10b — Tariff Rate Population (2026-03-09)
 
 **Companion documentation:**
 - [`contract-digitization/docs/IMPLEMENTATION_GUIDE.md`](../contract-digitization/docs/IMPLEMENTATION_GUIDE.md) — Full contract digitization pipeline (OCR, PII, clause extraction, ontology)
@@ -13,7 +14,15 @@ This document maps CBE's data architecture to FrontierMind's canonical schema an
 - [`database/migrations/046_populate_portfolio_base_data.sql`](../database/migrations/046_populate_portfolio_base_data.sql) — Full portfolio population (Section 17)
 - [`database/migrations/047_populate_sage_contract_ids.sql`](../database/migrations/047_populate_sage_contract_ids.sql) — SAGE contract IDs, payment terms, end dates (Section 18) + parent-child contract line hierarchy (Section 19)
 - [`database/migrations/049_pilot_project_data_population.sql`](../database/migrations/049_pilot_project_data_population.sql) — Pilot data: contract lines, tariffs, meter aggregates for KAS01, NBL01, LOI01 (Section 20)
-- [`contract-digitization/docs/DATA_POPULATION_WORKFLOW.md`](../contract-digitization/docs/DATA_POPULATION_WORKFLOW.md) — End-to-end data population workflow
+- [`CBE_data_extracts/CBE_DATA_POPULATION_WORKFLOW.md`](./CBE_DATA_POPULATION_WORKFLOW.md) — End-to-end CBE data population workflow (11-step pipeline, field authority matrix, discrepancy tracking)
+- [`python-backend/reports/cbe-population/step1_2026-03-07.json`](../python-backend/reports/cbe-population/step1_2026-03-07.json) — Step 1 dry-run report (23 discrepancies, 5/5 gates passed)
+- [`database/migrations/055_step4_billing_product_tariff_structure.sql`](../database/migrations/055_step4_billing_product_tariff_structure.sql) — Step 4: billing product linking, contract_billing_product junction, clause_tariff placeholders
+- [`python-backend/reports/cbe-population/step4_2026-03-08.json`](../python-backend/reports/cbe-population/step4_2026-03-08.json) — Step 4 report (5/5 gates passed)
+- [`database/migrations/056_billing_tax_rule_project_scope.sql`](../database/migrations/056_billing_tax_rule_project_scope.sql) — Migration 056: project_id column on billing_tax_rule (Section 28)
+- [`python-backend/scripts/step9_mrp_and_meter_population.py`](../python-backend/scripts/step9_mrp_and_meter_population.py) — Step 9 & 10: MRP formula OCR, meter readings, plant performance (Section 29)
+- [`python-backend/reports/cbe-population/step9_2026-03-09.json`](../python-backend/reports/cbe-population/step9_2026-03-09.json) — Step 9 run report
+- [`python-backend/reports/cbe-population/step8_2026-03-08.json`](../python-backend/reports/cbe-population/step8_2026-03-08.json) — Step 8 report: invoice calibration & tax rule extraction
+- [`python-backend/scripts/step10b_tariff_rate_population.py`](../python-backend/scripts/step10b_tariff_rate_population.py) — Step 10b: Tariff rate population (Section 30)
 
 ---
 
@@ -2308,3 +2317,770 @@ GROUP BY p.sage_id;
 - Prior sections in this document reference GRP terminology — those represent the historical state at time of writing
 - All new code and documentation should use "MRP" / "Market Reference Price"
 - The GRP → MRP formula is unchanged: `effective = MAX(floor_local, MIN(MRP × (1 - discount), ceiling_local))`
+
+---
+
+## 22. Step 1 Coverage Gaps & Discrepancy Log
+
+**Date:** 2026-03-07
+**Script:** `python-backend/scripts/orchestrate_cbe_population.py --step 1`
+**Source:** `CBE_data_extracts/Data Extracts/Customer summary.xlsx`
+**Report:** `python-backend/reports/cbe-population/step1_2026-03-07.json`
+
+### 22.1 Source Coverage Matrix
+
+| Metric | Count |
+|--------|-------|
+| Projects in Customer summary.xlsx | 30 |
+| Projects in FrontierMind DB | 32 |
+| Matched after alias resolution | 30/30 |
+
+**In DB but NOT in xlsx (PPA-only projects):**
+
+| sage_id | Reason |
+|---------|--------|
+| ABI01 | Sourced from contract PDFs only; no xlsx entry |
+| BNT01 | Sourced from contract PDFs only; no xlsx entry |
+
+**Alias resolution applied:**
+
+| xlsx Value | DB sage_id | Reason |
+|------------|-----------|--------|
+| GC001 | GC01 | Normalized to 2-digit suffix |
+| ZL01 | ZO01 | Disambiguated from ZL02 (different entity) |
+
+### 22.2 Orphan Sub-Rows (no sage_customer_id in xlsx)
+
+These xlsx rows have no `sage_customer_id` and cannot be matched to a DB project directly:
+
+| xlsx Row | Name | Likely Parent | Type |
+|----------|------|--------------|------|
+| 15 | Loisaba - BESS | LOI01 | Ancillary lease |
+| 26 | Ampersand - BESS | AMP01 | Ancillary lease |
+| 39 | Zoodlabs Group - O&M Fee | ZL02 | O&M service |
+
+### 22.3 Projects Missing Contracts in DB
+
+| sage_id | Issue | Next Step |
+|---------|-------|-----------|
+| TBC | iSAT Africa — no PPA, no SAGE data | Create contract in Step 2 |
+| ZL02 | Has SAGE contract lines but no FM contract record | Create contract in Step 2 |
+
+### 22.4 Full Discrepancy Table (23 items from Step 1 dry-run)
+
+| # | Severity | Project | Field | xlsx Value | DB Value | Recommended Action | Status |
+|---|----------|---------|-------|-----------|----------|-------------------|--------|
+| 1 | info | GC01 | project.country | Mauritius | Kenya | DB wins — xlsx shows legal entity country, DB shows site country | resolved |
+| 2 | warning | ZO01 | project.country | Mauritius | Sierra Leone | Review: xlsx shows legal entity jurisdiction, DB has site country | open |
+| 3 | warning | TBC | project.country | Mauritius | DRC | Review: xlsx shows legal entity jurisdiction, DB has site country | open |
+| 4 | warning | TBC | contract | xlsx project exists | NO CONTRACTS IN DB | Create contract in Step 2 | open |
+| 5 | warning | KAS01 | project.cod_date | 2024-05-03 | 2018-10-03 | Review: xlsx may show Phase 2 COD, DB has Phase 1 | open |
+| 6 | warning | MOH01 | project.cod_date | 2025-12-12 | 2025-09-01 | Review: check field authority matrix | open |
+| 7 | warning | LOI01 | project.name | Loisaba - Solar | Loisaba | Review: xlsx appends technology suffix | open |
+| 8 | warning | MF01 | counterparty.industry | Chemical | Manufacturing | Review: xlsx has specific sub-industry, DB has generic | open |
+| 9 | warning | MP02 | counterparty.industry | Paper | Manufacturing | Review: xlsx has specific sub-industry, DB has generic | open |
+| 10 | warning | MP01 | counterparty.industry | Paper | Manufacturing | Review: xlsx has specific sub-industry, DB has generic | open |
+| 11 | warning | NC02 | counterparty.industry | Cement/Concrete | Manufacturing | Review: xlsx has specific sub-industry, DB has generic | open |
+| 12 | warning | NC03 | project.name | National Cement\nNakuru | National Cement Nakuru | Review: xlsx has embedded newline | open |
+| 13 | warning | NC03 | counterparty.industry | Cement/Concrete | Manufacturing | Review: xlsx has specific sub-industry, DB has generic | open |
+| 14 | warning | AMP01 | project.name | Ampersand - Solar | Ampersand | Review: xlsx appends technology suffix | open |
+| 15 | warning | QMM01 | project.name | Rio Tinto QMM - Solar Expanded | Rio Tinto QMM | Review: xlsx includes expansion label | open |
+| 16 | info | QMM01 | project.country | Madagascar 1 | Madagascar | DB wins — xlsx has trailing suffix | resolved |
+| 17 | warning | QMM01 | project.installed_dc_capacity_kwp | 30,597.76 (summed) | 14,447.76 (original phase) | **Key review item**: xlsx sums both phases, DB has Phase 1 only | open |
+| 18 | warning | QMM01 | project.external_project_id | MG 22017 MG 22452 | MG 22017 | Review: xlsx concatenates both phase IDs | open |
+| 19 | warning | ERG | project.country | Madagascar 2 | Madagascar | Review: xlsx has trailing suffix "2" | open |
+| 20 | warning | NBL01 | project.external_project_id | NG 22016 NG 22051 | NG 22016 | Review: xlsx concatenates both phase IDs | open |
+| 21 | warning | NBL01 | counterparty.name | Heineken | CROSSBOUNDARY ENERGY NIGERIA LTD. | **Key review item**: xlsx shows offtaker, DB shows CBE SPV entity | open |
+| 22 | warning | ZL02 | project.name | Zoodlabs Group - Energy Services | Zoodlabs Energy Services | Review: minor naming difference | open |
+| 23 | warning | ZL02 | contract | xlsx project exists | NO CONTRACTS IN DB | Create contract in Step 2 | open |
+
+**Summary:** 0 critical, 21 warnings, 2 info. All warnings are open for review.
+
+### 22.5 Key Items Requiring Later Review
+
+1. **QMM01 capacity** (#17): xlsx=30,597.76 kWp (Phase 1 + Phase 2 summed) vs DB=14,447.76 kWp (Phase 1 only). Decision needed: update DB to expanded capacity, or keep phases separate.
+2. **NBL01 counterparty** (#21): "Heineken" (xlsx, offtaker) vs "CROSSBOUNDARY ENERGY NIGERIA LTD." (DB, CBE SPV). The `counterparty` table holds the contract counterparty (CBE entity), not the end offtaker. xlsx column may represent a different relationship.
+3. **Industry mismatches** (#8-11, #13): Devki subsidiaries (MF01, MP01, MP02, NC02, NC03) show specific sub-industries in xlsx (Chemical, Paper, Cement/Concrete) vs generic "Manufacturing" in DB. Consider adding `sub_industry` field or updating industry values.
+4. **Country column** (#2, #3): GC01, ZO01, TBC show legal entity jurisdiction (Mauritius) in xlsx, not physical project site. DB values (Kenya, Sierra Leone, DRC) are correct for project location.
+5. **Phase-concatenated IDs** (#18, #20): QMM01 and NBL01 xlsx rows concatenate multiple external project IDs. DB stores only the primary phase ID.
+
+### 22.6 Stage A Gate Results
+
+| Gate | Expected | Actual | Passed |
+|------|----------|--------|--------|
+| All projects have sage_id | 32/32 | 32/32 | Yes |
+| Contracts have external_contract_id | 27+ | 27 | Yes |
+| Contracts have payment_terms | 27+ | 27 | Yes |
+| Contracts have end_date | 27+ | 27 | Yes |
+| Multi-contract patterns flagged | XF-AB flagged | XF-AB: 1 project(s) | Yes |
+
+**All 5 gates passed.** Step 1 is clear to proceed with live gap-fill execution.
+
+---
+
+## 23. Step 2: SAGE CSV Cross-Check & XF-AB Split
+
+**Date:** 2026-03-08
+**Migration:** `database/migrations/054_sage_id_aliases_and_data_fixes.sql` (Step 2 appended)
+**Orchestrator:** `python-backend/scripts/orchestrate_cbe_population.py` — `step2_sage_crosscheck()`
+
+### 23.1 XF-AB Split
+
+**Governing rule:** Separate measurement + separate billing = separate FM projects (see MEMORY.md).
+
+XF-AB had 4 SAGE customers (XFAB, XFBV, XFL01, XFSS), 4 separate invoices, and 4 separate Plant Performance Workbook tabs. Per the project boundary rule, these must be 4 separate FM projects.
+
+| sage_id | Name | Contract | Terms | Start | End | Currency |
+|---------|------|----------|-------|-------|-----|----------|
+| XFAB | Xflora Africa Blooms | CONKEN00-2021-00003 | 30EOM | 2021-04-01 | 2047-05-31 | USD |
+| XFBV | Xflora Bloom Valley | CONKEN00-2021-00004 | 30NET | 2021-04-01 | 2047-05-31 | USD |
+| XFL01 | Xpressions Flora | CONKEN00-2021-00005 | 30NET | 2021-04-01 | 2047-05-31 | USD |
+| XFSS | Sojanmi Spring | CONKEN00-2021-00006 | 30EOM | 2021-04-01 | 2047-05-31 | USD |
+
+**Actions:**
+- Renamed `XF-AB` → `XFAB` (existing project, contract id=31 stays)
+- Updated counterparty: "XFlora Group" → "Xflora Africa Blooms"
+- Created 3 new projects with counterparties, contracts (with external IDs, payment terms, dates), and contract lines (metered + available)
+- Ancillary contracts (id=53,54) remain on XFAB
+- Total projects: 32 → 35
+
+### 23.2 ZL02 Contracts
+
+ZL02 existed as a project but had no contracts (flagged as discrepancy #23 in Step 1). Added 4 SAGE contracts:
+
+| Contract | Category | Currency | Terms | Start | End |
+|----------|----------|----------|-------|-------|-----|
+| CONCBCH0-2025-00002 | RENTAL | USD | 30NET | 2025-03-01 | 2035-11-30 |
+| CONCBCH0-2025-00003 | OM | USD | 30NET | 2025-03-01 | 2035-11-30 |
+| CONCBCH0-2025-00004 | RENTAL | USD | 30NET | 2025-06-01 | 2025-12-31 |
+| CONSLL02-2025-00003 | OM | SLE | 30NET | 2025-03-01 | 2035-11-30 |
+
+### 23.3 Parser Updates
+
+| File | Change |
+|------|--------|
+| `sage_csv_parser.py` | Removed XFlora alias entries (XFAB/XFBV/XFL01/XFSS pass through as-is) |
+| `customer_summary_parser.py` | `XFLORA_PREFIX` → maps to "XFAB" (only primary in xlsx) |
+| `plant_performance_parser.py` | `"XFlora"` → `"XFAB"` (was `"XF-AB"`) |
+| `tariff_type_overrides.yaml` | Replaced `XF-AB` with `XFAB, XFBV, XFL01, XFSS` in fixed list |
+| `sage_to_fm_ontology.yaml` | Removed XFlora aliases, updated cardinality to one-to-one |
+| `eval_exceptions.yaml` | Updated `XF-AB` → `XFAB` in EXC-002 |
+
+### 23.4 SAGE Cross-Check Validation
+
+Step 2 orchestrator (`step2_sage_crosscheck()`) compares all SAGE CSV projects against DB:
+
+| Field | SAGE Source | DB Target | Compare |
+|-------|-----------|-----------|---------|
+| Contract number | `primary_contract_number` | `contract.external_contract_id` | Exact match |
+| Payment terms | `payment_terms` | `contract.payment_terms` | Exact match |
+| Start date | `contract_start_date` | `contract.effective_date` | Date match |
+| End date | `contract_end_date` | `contract.end_date` | Date match |
+| Customer name | `customer_name` | `counterparty.name` | Fuzzy match |
+| Country | `country` | `project.country` | Exact match |
+| Active line count | len(active lines) | COUNT(contract_line) | Info-level |
+| CPI flag | `has_cpi_inflation` | — | Record for tariff |
+
+Gap-fill (COALESCE): `contract.effective_date`, `contract.payment_terms`, `contract.end_date`.
+
+### 23.5 Step 2 Gate Checks
+
+| Gate | Expected | Description |
+|------|----------|-------------|
+| All projects have sage_id | 35/35 | Was 32, +3 XFlora sub-farms |
+| Contracts have external_contract_id | 31+ | Was 27, +3 XFlora +1 ZL02 |
+| Contracts have payment_terms | 31+ | Updated threshold |
+| Contracts have end_date | 31+ | Updated threshold |
+| XFlora split verified | XFAB, XFBV, XFL01, XFSS | 4 separate projects |
+| ZL02 has contracts | 1+ | At least 1 contract |
+
+---
+
+## 24. Step 3: Contract Lines & Meter Cross-Check
+
+**Date:** 2026-03-08
+**Orchestrator:** `python-backend/scripts/orchestrate_cbe_population.py` — `step3_contract_lines_and_meter_crosscheck()`
+
+### 24.1 Overview
+
+Populates `contract_line` for all 31 SAGE-mapped projects from `dim_finance_contract_line.csv`. Deletes all existing contract_lines (and FK dependents: meter_aggregate, expected_invoice_line_item) then re-inserts from SAGE CSV source of truth.
+
+### 24.2 Results
+
+| Metric | Value |
+|--------|-------|
+| Contract lines inserted | 114 (87 active, 27 inactive) |
+| Projects with lines | 31 of 35 |
+| Auto-created contracts | 2 (IVL01 OM `CONEGY00-2025-00002`, TWG01 OM `CONMOZ00-2023-00002`) |
+| Meter readings matched | 601 / 604 |
+| Orphaned readings | 3 (CAL01 lines 1000/2000/3000 — SCD2-superseded) |
+| Deleted dependents | 189 meter_aggregate + 12 expected_invoice_line_item |
+
+### 24.3 Energy Category Mapping
+
+| SAGE `energy_category` (parser) | DB `energy_category` enum |
+|---------------------------------|---------------------------|
+| metered_energy | metered |
+| available_energy | available |
+| non_energy | test |
+
+### 24.4 Key Decisions
+
+- **Delete-and-reinsert** pattern: all existing contract_lines and FK dependents wiped, then fresh insert from CSV. Meter_aggregate and expected_invoice_line_item will be repopulated in later steps.
+- **Auto-create missing contracts**: Step 3 auto-creates contracts found in SAGE CSV but missing from DB (2 OM contracts for IVL01, TWG01).
+- **SCD2 orphans acceptable**: CAL01 meter readings reference lines 1000/2000/3000 which have `DIM_CURRENT_RECORD=0`. Only line 5000 is current. Gate allows ≤10 SCD2 orphans.
+- **4 projects without SAGE data**: ABI01, BNT01, TBC, ZL01 (PPA-only or no-data projects).
+
+### 24.5 Gate Checks
+
+| Gate | Expected | Actual | Passed |
+|------|----------|--------|--------|
+| All contract_lines resolve to a contract | 114/114 | 114/114 | Yes |
+| Contract_line count matches SAGE CSV | 114 from CSV | 114 in DB | Yes |
+| Active/inactive line breakdown | active > 0 | 87 active, 27 inactive | Yes |
+| Orphaned meter readings | ≤10 | 3 (SCD2-superseded) | Yes |
+| Projects with contract_lines | 25+ | 31 | Yes |
+
+## 25. Step 5: PPW Summary → Production Forecast Population
+
+**Date:** 2026-03-08
+**Script:** `python-backend/scripts/step5_ppw_summary.py`
+**Source:** Operations Plant Performance Workbook — "Summary - Performance" tab
+
+### 25.1 What Was Done
+
+Populated `production_forecast` table from the PPW Summary-Performance tab. Extracted monthly forecast data (energy kWh, GHI irradiance, POA irradiance, PR) for all projects with PPW tabs.
+
+### 25.2 Results
+
+| Metric | Value |
+|--------|-------|
+| Projects with forecasts | 25 |
+| Total forecast rows | 1,510 |
+| Projects without PPW data | 10 (ABI01, AR01, BNT01, TBC, TWG01, XFBV, XFL01, XFSS, ZL01, ZL02) |
+
+### 25.3 Bugs Fixed During Step 5
+
+1. **TOTAL row matching**: TOTAL/AGREGATED/WEIGHTED AVERAGE rows now skipped in block header detection
+2. **VARIANCE block leak**: VARIANCE blocks mapped to `None` → data rows skipped instead of leaking to previous field
+3. **Cross-check formula**: Uses AVG×12 (implied annual) instead of SUM (lifetime)
+4. **Batch INSERT**: `execute_values` + extended `statement_timeout` for Supabase
+5. **Removed `updated_at`**: Column doesn't exist on `projects` table
+
+### 25.4 Operating Year Backfill
+
+SQL formula computed `operating_year` for all 1,472 NULL rows across 29 projects:
+```
+operating_year = (year_diff × 12 + month_diff) / 12 + 1
+```
+Relative to each project's first `forecast_month`.
+
+### 25.5 Gate Checks
+
+| Gate | Expected | Actual | Passed |
+|------|----------|--------|--------|
+| Forecast rows inserted | > 0 | 1,510 | Yes |
+| All values positive, no duplicates | 0 violations | 0 | Yes |
+| Energy cross-check vs Summary tab | < 5% delta | All within tolerance | Yes |
+| Projects covered | ≥ 20 | 25 | Yes |
+
+## 26. Step 6: PPW Project Tabs → Forecast Enrichment
+
+**Date:** 2026-03-08
+**Script:** `python-backend/scripts/step6_project_tabs.py`
+**Source:** Operations Plant Performance Workbook — individual project tabs (32 tabs)
+
+### 26.1 What Was Done
+
+Enrichment-only step (no new rows created). Parsed each project's individual PPW tab and updated existing `production_forecast` rows with:
+- `source_metadata` JSONB merge (site_params, monthly allocation, tech model breakdown)
+- `degradation_factor` (computed from site_params.degradation_pct)
+- `forecast_poa_irradiance` (filled NULLs from project tab data)
+
+### 26.2 Results
+
+| Metric | Value |
+|--------|-------|
+| Projects processed | 34 (29 FM + 5 non-FM skipped) |
+| Forecast rows enriched | 1,772 |
+| Critical discrepancies | 0 |
+| Warnings | 12 |
+| Non-FM tabs skipped | 5 (ABB, AJJ, BM, BNTR, LTC) |
+
+### 26.3 Discrepancy Log
+
+#### Capacity Mismatches (PPW shows per-phase, DB has combined)
+
+| Project | PPW (kWp) | DB (kWp) | Likely Cause |
+|---------|-----------|----------|-------------|
+| IVL01 | 3,242.52 | 967.68 | PPW has combined, DB has single phase |
+| KAS01 | 904.8 | 1,305.24 | PPW picks Phase 2 only |
+| MB01 | 544.92 | 1,172.52 | Multi-phase |
+| MF01 | 118.5 | 674.0 | Multi-phase |
+| NBL01 | 2,511.0 | 3,173.0 | Multi-phase |
+| NC02 | 493.42 | 1,282.58 | Multi-phase |
+| QMM01 | 16,150.0 | 14,447.76 | PPW larger — may be nameplate vs installed |
+
+#### COD Mismatches
+
+| Project | PPW | DB | Note |
+|---------|-----|-----|------|
+| CAL01 | 2023-01-27 | 2025-04-15 | PPW may have #REF! errors |
+| KAS01 | 2018-10-17 | 2018-10-03 | 14-day difference |
+| NBL01 | 2021-02-22 | 2025-01-01 | PPW may have #REF! errors |
+
+#### Country Formatting
+
+| Project | PPW | DB | Note |
+|---------|-----|-----|------|
+| ERG | Madagascar 2 | Madagascar | Site identifier in PPW tab name |
+| QMM01 | Madagascar 1 | Madagascar | Site identifier in PPW tab name |
+
+### 26.4 Gate Checks
+
+| Gate | Expected | Actual | Passed |
+|------|----------|--------|--------|
+| All FM projects with PPW tabs resolved | All resolved | 5 non-FM tabs skipped | Yes |
+| Forecasts enriched with source_metadata | > 0 projects | 29 of 34 enriched | Yes |
+| No critical discrepancies | 0 critical | 0 critical | Yes |
+
+## 27. Step 7: Revenue Masterfile — Full Extraction
+
+**Date:** 2026-03-08
+**Script:** `python-backend/scripts/step7_revenue_masterfile.py`
+**Source:** CBE Asset Management Operating Revenue Masterfile - new.xlsb (10 tabs)
+
+### 27.1 What Was Done
+
+Extracted data from 7 Revenue Masterfile tabs:
+- **7a. Reporting Graphs** → `counterparty.industry` (all already populated — 0 updates)
+- **7b. PO Summary** → `project.technical_specs` JSONB (29 projects), `clause_tariff` fields (50 updates, 14 with base_rate)
+- **7c. Invoiced SAGE** → `exchange_rate` table (43 new GHS/KES/NGN monthly closing spot rates, 2024-2026)
+- **7d. Energy Sales** → cross-check only (informational)
+- **7e. Loans** → `project.technical_specs.loan_schedule` for ZL02 (199 rows) and GC001 (132 rows)
+- **7f. Rental/Ancillary** → `project.technical_specs.rental_schedule` for LOI01, AR01, QMM01, TWG01, AMP01
+- **7g. US CPI** → staging JSON (192 data points, 2010-2025, pending `price_index` migration)
+
+### 27.2 Results
+
+| Metric | Value |
+|--------|-------|
+| Project technical_specs enriched | 29 |
+| Tariff rows updated | 50 (14 with base_rate) |
+| Exchange rates inserted | 43 (GHS/KES/NGN, 2024-2026) |
+| Loan schedules stored | 2 (ZL02, GC001) |
+| Rental schedules stored | 5 (LOI01, AR01, QMM01, TWG01, AMP01) |
+| CPI data points staged | 192 (2010-2025) |
+| Discrepancies | 39 (0 critical) |
+
+### 27.3 Technical Specs Fields Populated
+
+Per project, the following JSONB fields were merged into `project.technical_specs`:
+
+| Field | Source Column | Description |
+|-------|-------------|-------------|
+| `revenue_type` | PO Summary col D | e.g., "PPA", "Finance Lease", "Loan - repayment based on Energy Output" |
+| `connection` | PO Summary col F | "Grid", "Off-Grid", "Generator" |
+| `capex_usd` | PO Summary col G | SAGE agreed CAPEX in USD |
+| `bess_kwh` | PO Summary col M | Battery storage capacity |
+| `thermal_kwe` | PO Summary col N | Thermal capacity |
+| `annual_specific_yield_kwh_kwp` | PO Summary col P | Contract Year 1 yield |
+| `degradation_pct_po_summary` | PO Summary col R | Annual degradation % |
+| `loan_fixed_payment` | PO Summary col AG | Monthly loan payment |
+| `lease_rental` | PO Summary col AH | Monthly rental amount |
+| `energy_fee` | PO Summary col AI | Energy fee |
+| `bess_charge` | PO Summary col AJ | BESS charge |
+| `om_fee` | PO Summary col AK | O&M fee |
+| `charge_indexation` | PO Summary col AL | Indexation method for charges |
+| `charge_comments` | PO Summary col AM | Context notes |
+| `oy_definition` | PO Summary col AN | Operating Year definition text |
+
+### 27.4 Tariff Fields Populated
+
+| Field | Target | Source |
+|-------|--------|--------|
+| `base_rate` | `clause_tariff.base_rate` | Fixed tariff or computed solar tariff |
+| `discount_percentage` | `logic_parameters.discount_percentage` | Grid/generator discount % |
+| `grid_discount_pct` | `logic_parameters.grid_discount_pct` | Grid+Generator type |
+| `generator_discount_pct` | `logic_parameters.generator_discount_pct` | Grid+Generator type |
+| `floor_rate` | `logic_parameters.floor_rate` | Min tariff |
+| `ceiling_rate` | `logic_parameters.ceiling_rate` | Max tariff |
+| `indexation_method` | `logic_parameters.indexation_method` | e.g., "US CPI" |
+| `first_indexation_date` | `logic_parameters.first_indexation_date` | ISO date |
+| `indexation_context` | `logic_parameters.indexation_context` | Comments from col AF |
+| `contract_term_years_po` | `logic_parameters.contract_term_years_po` | Term from PO Summary |
+| `contract_end_date_po` | `logic_parameters.contract_end_date_po` | COD End from PO Summary |
+
+### 27.5 Discrepancy Log
+
+#### COD Mismatches (PO Summary vs DB)
+
+| Project | PO Summary | DB | Note |
+|---------|-----------|-----|------|
+| KAS01 (Phase 1) | 2018-10-17 | 2018-10-03 | 14-day difference |
+| KAS01 (Phase 2) | 2024-05-03 | 2018-10-03 | Phase 2 COD, DB has Phase 1 |
+| LOI01 | 2019-10-31 | 2019-03-01 | 8-month difference |
+| IVL01 (Phase 2) | 2026-03-16 | 2023-10-02 | Construction phase, DB has Phase 1 |
+| TWG01 | 2026-02-01 | 2025-12-01 | 2-month difference |
+| ZL02 (multiple) | 2024-04-01 / 2025-07-01 / 2026-01-01 | 2025-03-01 | Multiple phases |
+
+#### Capacity Cross-Checks (info-level)
+
+| Project | PO Summary (kWp) | DB (kWp) | Note |
+|---------|-----------------|----------|------|
+| KAS01 P1/P2 | 400.44 / 904.8 | 1,305.24 | Per-phase vs combined |
+| XFAB | 424.32 | 141.45 | PO Summary has combined XFlora |
+| MP02 | 1,386.0 | 693.0 | PO Summary may include extension |
+| IVL01 P2 | 2,270.0 | 967.68 | Phase 2 capacity |
+
+#### FX Rate Differences (26 info-level)
+
+RevMasterfile closing spot rates differ from xe.com rates already in DB. This is expected — RevMasterfile rates are SAGE invoicing rates, xe.com are market mid-rates. Both retained.
+
+### 27.6 Gate Checks
+
+| Gate | Expected | Actual | Passed |
+|------|----------|--------|--------|
+| PO Summary projects resolved | > 0 projects | 29 projects enriched | Yes |
+| Tariff base_rate populated | Tariffs enriched | 14 tariffs got base_rate, 50 total | Yes |
+| Exchange rates extracted | > 0 rates | 43 new rates inserted | Yes |
+| No critical discrepancies | 0 critical | 0 critical | Yes |
+
+---
+
+## 28. Step 8 — Invoice Calibration & Tax Rule Extraction
+
+**Script:** `python-backend/scripts/step8_invoice_calibration.py`
+**Report:** `python-backend/reports/cbe-population/step8_2026-03-08.json`
+**Migration:** `database/migrations/056_billing_tax_rule_project_scope.sql`
+**Date:** 2026-03-08
+
+### 28.1 Purpose
+
+Two-phase step that uses OCR'd invoice PDFs as the authoritative source for:
+- **Phase A:** Tax/levy/WHT formula extraction → populate `billing_tax_rule` per country and per project
+- **Phase B:** Validate extracted invoice values against DB state → discrepancy report with 8 validation checks
+
+### 28.2 Migration 056: billing_tax_rule Project Scoping
+
+Added `project_id BIGINT REFERENCES project(id)` to `billing_tax_rule`:
+- `NULL project_id` = country-level default rule
+- Non-NULL `project_id` = project-specific override (e.g., different WHT rate)
+
+GiST exclusion constraint updated to include `COALESCE(project_id, 0)` so project overrides coexist with country defaults without constraint violations.
+
+### 28.3 Pipeline
+
+```
+For each invoice PDF/EML:
+  1. Extract sage_id from filename (SAGE_ID_LOOKUP + progressive digit fallback)
+  2. OCR via LlamaParse (disk-cached at reports/cbe-population/step8_ocr_cache/)
+  3. Claude structured extraction → InvoiceExtraction Pydantic model
+  4. Phase A: Collect tax structure per country/project
+  5. Phase B: Run 8 validation checks against DB
+
+After all invoices:
+  6. Deduplicate tax structures per country (majority = default)
+  7. INSERT billing_tax_rule rows (country defaults + project overrides)
+  8. Write JSON report
+```
+
+### 28.4 Source Data
+
+| Source | Location | Count |
+|--------|----------|-------|
+| Invoice PDFs | `CBE_data_extracts/Invoice samples/*.pdf` | 27 standalone |
+| Invoice EMLs | `CBE_data_extracts/Invoice samples/*.eml` (PDF attachments) | 6 |
+| **Total** | | **33 invoices, 27 projects** |
+
+### 28.5 Tax Rules Created
+
+**17 rows** in `billing_tax_rule` (1 pre-existing Ghana default + 16 new):
+
+#### Country Defaults (project_id = NULL)
+
+| Country | Code | VAT | Levies | Withholdings | Source Invoices |
+|---------|------|-----|--------|-------------|----------------|
+| Ghana | GH | 15% (on subtotal_after_levies) | NHIL 2.5%, GETFUND 2.5%, COVID 1.0% | WHT 3%, WHVAT 7% | Pre-existing |
+| Kenya | KE | 16% | — | WHVAT 2% | LOI01, MP02, NC02, UTK01, XF*, AR01, MB01, MF01, MP01, NC03, TBM01 |
+| Egypt | EG | 0% | — | WHT 3% | IVL01 |
+| Madagascar | MG | 20% | — | — | ERG |
+| Nigeria | NG | 7.5% | — | WHT 2% | NBL01, NBL02 |
+| Sierra Leone | SL | 15% (levy labeled OTHER) | — | — | MIR01 (default pattern) |
+| Zimbabwe | ZW | 15% | — | — | CAL01 |
+
+#### Project-Specific Overrides
+
+| Country | Project | Override Reason | Key Difference |
+|---------|---------|----------------|----------------|
+| GH | KAS01 (id=53) | Higher WHT | WHT 7.5% (vs country default 3%) |
+| KE | GC001 (id=48) | VAT-exempt | VAT 0% (vs 16%) |
+| KE | MP02 (id=59) | No WHVAT | VAT 16%, no withholdings |
+| KE | NC02 (id=61) | No WHVAT | VAT 16%, no withholdings |
+| KE | UTK01 (id=64) | No WHVAT | VAT 16%, no withholdings |
+| KE | XFSS (id=115) | No WHVAT | VAT 16%, no withholdings |
+| KE | AMP01 (id=66) | No WHVAT | VAT 16%, no withholdings |
+| MG | QMM01 (id=67) | VAT-exempt | VAT 0% (vs 20%) |
+| SL | MIR01 (id=72) | VAT + WHT | VAT 15%, WHT 6.5% |
+| SL | ZL02 (id=73) | VAT + WHT | VAT 15%, WHT 6.5% |
+
+### 28.6 Countries Without Tax Rules (No Invoice Samples)
+
+| Country | Code | Projects | Note |
+|---------|------|----------|------|
+| DRC | CD | 1 | No invoice PDF provided |
+| Mozambique | MZ | 1 | No invoice PDF provided |
+| Rwanda | RW | 1 | No invoice PDF provided |
+| Somalia | SO | 1 | No invoice PDF provided |
+
+### 28.7 Validation Checks (Phase B)
+
+| # | Check | DB Table(s) | Severity | Description |
+|---|-------|-------------|----------|-------------|
+| 1 | Line items → billing_product | contract_line, billing_product | warning | Verify energy lines match DB products |
+| 2 | Quantity kWh vs meter_aggregate | meter_aggregate | info | Compare invoice kWh to DB meter data |
+| 3 | Currency reference | clause_tariff, currency | info | Invoice billing currency vs tariff reference currency (floor/ceiling in USD is not a billing mismatch) |
+| 4 | Tax rates vs billing_tax_rule | billing_tax_rule | warning | Compare extracted rates to DB rules |
+| 5 | FX rate vs exchange_rate | exchange_rate | warning | 0.5% tolerance; skip when FX=1.0 (same-currency) |
+| 6 | Tariff box vs clause_tariff | clause_tariff, reference_price | warning | Compare discount, floor, ceiling, solar tariff |
+| 7 | Loan/rental vs technical_specs | project.technical_specs | warning | Verify loan/rental line items |
+| 8 | Grand total self-consistency | (self-check) | critical | subtotal + non-WHT taxes = grand_total (5% + $10 tolerance) |
+
+### 28.8 Discrepancy Summary
+
+| Severity | Count | Categories |
+|----------|-------|-----------|
+| Critical | 1 | Grand total self-consistency failure (AMP01: 81% diff — EML extraction quality, flagged for manual review) |
+| Warning | 44 | billing_product gaps (most projects), tariff rate differences, FX rate variances |
+| Info | 33 | Sparse meter data (27), currency reference notes (6 — invoice in local currency, tariff reference in USD) |
+
+### 28.9 Key Observations
+
+1. **Currency reference vs billing currency:** Many Kenya and Sierra Leone projects have `clause_tariff.currency_id` pointing to USD (for floor/ceiling rates) but invoice in local currency (KES/SLE). This is expected — the contractual tariff formula references USD for bounds but billing is in local currency.
+
+2. **billing_product gaps:** Most projects show "energy line(s) but no billing_products in DB" — this is expected pre-Step 9 (billing product population).
+
+3. **Sparse meter_aggregate data:** 27 of 33 invoices show kWh with no corresponding `meter_aggregate` row — meter data ingestion is a separate pipeline.
+
+4. **OCR quality:** 25/33 (76%) high confidence, 8/33 medium confidence. One invoice (AMP01) has a grand total self-consistency failure due to EML extraction quality — flagged for manual review.
+
+5. **Ghana KAS01 WHT:** Invoice shows WHT 7.5% vs the country default of 3%. This is a legitimate project-specific override, now captured as a project-scoped `billing_tax_rule` row.
+
+### 28.10 Gate Checks
+
+| Gate | Expected | Actual | Passed |
+|------|----------|--------|--------|
+| Invoices parsed successfully | > 0 invoices parsed | 33/33 invoices parsed | Yes |
+| Tax rules created | > 0 tax rules created | 16 tax rules created | Yes |
+| No critical validation failures | 0 critical checks | 1 critical (OCR quality) | No* |
+| Extraction confidence acceptable | >= 50% high confidence | 25/33 high confidence (76%) | Yes |
+
+\*Gate 3 failed due to EML extraction quality on AMP01, not a data integrity problem. Flagged for manual review.
+
+---
+
+## Section 29: MRP + Meter Population & Plant Performance (Steps 9 & 10)
+
+**Run date:** 2026-03-09
+**Script:** `python-backend/scripts/step9_mrp_and_meter_population.py`
+**Report:** `python-backend/reports/cbe-population/step9_2026-03-09.json`
+**Mode:** LIVE (3 sequential phases)
+
+### 29.1 Phase A — Meter Readings CSV → meter_aggregate
+
+**Source:** `CBE_data_extracts/Data Extracts/FrontierMind Extracts_meter readings.csv`
+
+| Metric | Value |
+|--------|-------|
+| CSV rows parsed | 604 |
+| Rows inserted | 600 |
+| FK resolution rate | 99.5% |
+| Projects covered | 28 |
+| Unresolved rows | 3 (CAL01 — external_line_id not in contract_line) |
+
+**Column mapping:**
+
+| CSV Column | DB Column | Transform |
+|------------|-----------|-----------|
+| BILL_DATE | billing_period_id | Parse YYYY/MM/DD → first-of-month → lookup billing_period |
+| CONTRACT_LINE_UNIQUE_ID | contract_line_id | Lookup via contract_line.external_line_id |
+| OPENING_READING | opening_reading | Direct |
+| CLOSING_READING | closing_reading | Direct |
+| UTILIZED_READING | utilized_reading | Direct |
+| DISCOUNT_READING | discount_reading | Direct |
+| SOURCED_ENERGY | sourced_energy | Direct |
+| METERED_AVAILABLE | routing | metered → total_production/energy_kwh; available → available_energy_kwh |
+| (computed) | total_production | utilized - discount - sourced |
+
+All rows use `source_system = 'snowflake'`, `period_type = 'monthly'`, `unit = 'kWh'`, `organization_id = 1`.
+
+### 29.2 Phase B — MRP Formula OCR + Monthly Data
+
+**Source:** `CBE_data_extracts/MRP/Sage Contract Extracts market Ref pricing data.xlsx`
+
+#### B1: Formula Screenshot OCR
+
+Extracted **60+ embedded images** from 9 project tabs using openpyxl `ws._images`. Each image sent to Claude vision (claude-sonnet-4-20250514) for structured extraction of:
+- MRP method (utility_variable_charges_tou, utility_total_charges, generator_cost, blended_grid_generator)
+- Included/excluded tariff components
+- VAT/demand exclusion flags
+- MRP currency (local utility currency)
+- Floor/ceiling currency and escalation mechanism
+
+OCR results cached by SHA256 hash in `reports/cbe-population/step9_ocr_cache/`.
+
+#### B2: clause_tariff Updates
+
+Updated **7 clause_tariff rows** (UTK01, UGL01, TBM01, GBL01, JAB01, NBL01, NBL02):
+- `logic_parameters.mrp_method` — set from OCR interpretation
+- `logic_parameters.mrp_clause_text` — OCR'd formula text
+- `logic_parameters.mrp_included_components` — list of included charges
+- `logic_parameters.mrp_excluded_components` — list of excluded charges
+- `logic_parameters.mrp_exclude_vat` — boolean
+- `logic_parameters.mrp_exclude_demand_charges` — boolean
+- `market_ref_currency_id` — resolved from country (GHS, KES, NGN)
+
+KAS01 + MOH01 cross-validated against existing data — no discrepancies.
+
+**Final clause_tariff MRP state (all 9 projects):**
+
+| Project | ct.id | mrp_method | MRP Currency |
+|---------|-------|-----------|-------------|
+| KAS01 | 11 | utility_variable_charges_tou | GHS |
+| MOH01 | 2 | utility_variable_charges_tou | GHS |
+| UTK01 | 42 | utility_total_charges | KES |
+| UGL01 | 53 | utility_total_charges | GHS |
+| TBM01 | 49 | utility_variable_charges_tou | KES |
+| GBL01 | 28 | utility_variable_charges_tou | GHS |
+| JAB01 | 52 | blended_grid_generator | NGN |
+| NBL01 | 12 | utility_variable_charges_tou | NGN |
+| NBL02 | 40 | generator_cost | NGN |
+
+#### B3: Monthly MRP Observations → reference_price
+
+Inserted **287 new rows** (353 total) across 9 projects.
+
+**Sheet layout handling:**
+- **Single section** (UTK01, UGL01, TBM01, KAS01): One ZDAT header, data rows below
+- **Side-by-side dual section** (GBL01, JAB01): Grid cols A-E + Generator cols G-L in same rows. Grid MRP stored as primary `calculated_mrp_per_kwh`; generator total stored in `source_metadata`
+- **Dual generator** (NBL01, NBL02): Two generator sections side-by-side, first section as primary
+- **Multi-entity** (MOH001): 4 parallel billing entity sections, deduped by project+period
+
+**reference_price row shape:**
+```json
+{
+  "project_id": "<resolved>",
+  "organization_id": 1,
+  "operating_year": "<from COD>",
+  "period_start": "YYYY-MM-01",
+  "period_end": "YYYY-MM-last",
+  "calculated_mrp_per_kwh": "<total from ZPRITOT>",
+  "currency_id": "<MRP currency>",
+  "verification_status": "estimated",
+  "observation_type": "monthly",
+  "source_metadata": {
+    "source_file": "Sage Contract Extracts market Ref pricing data.xlsx",
+    "sheet_name": "<tab>",
+    "mrp_type": "grid|generator",
+    "tariff_components": {"energy_charge": X, "levy": Y, ...},
+    "extraction_date": "2026-03-09"
+  }
+}
+```
+
+### 29.3 Phase C — Plant Performance Enrichment (Step 10 partial)
+
+| Metric | Value |
+|--------|-------|
+| Rows inserted | 292 |
+| Rows updated | 13 |
+| Total plant_performance | 381 |
+| Projects covered | 28 |
+
+**Computed:** `energy_comparison = SUM(metered total_production) / forecast_energy_kwh` per project per billing_month.
+
+**Not computed (irradiance gap):**
+- `irr_comparison` — requires `meter_aggregate.ghi_irradiance_wm2` (not in CSV)
+- `pr_comparison` — requires `actual_pr` computation (needs GHI + capacity)
+- `actual_pr` — requires irradiance data from Plant Performance Workbook project tabs
+
+### 29.4 Remaining Gaps
+
+| Gap | Blocked By | Resolution Path |
+|-----|-----------|----------------|
+| `irr_comparison` NULL | No GHI irradiance in meter readings CSV | Import from PPW project tabs → `meter_aggregate.ghi_irradiance_wm2` |
+| `pr_comparison` NULL | Depends on `actual_pr` | Compute after irradiance import |
+| `actual_pr` NULL | Depends on GHI irradiance | `total_energy * 1000 / (actual_ghi * capacity)` |
+| CAL01 3 unresolved meter rows | `external_line_id` not in `contract_line` | Verify CAL01 contract_line data; may need additional migration |
+| JAB01 utility PDFs | 17 monthly PDFs not parsed | Could enrich MRP observations with per-line-item detail |
+
+### 29.5 Gate Checks
+
+| Gate | Expected | Actual | Passed |
+|------|----------|--------|--------|
+| Meter readings inserted | > 550 of 604 | 600 | Yes |
+| FK resolution rate | > 95% | 99.5% | Yes |
+| MRP formula OCR'd | >= 7 project tabs | 9 | Yes |
+| MRP rules in clause_tariff | >= 7 tariffs | 9 (7 new + 2 existing) | Yes |
+| MRP observations inserted | >= 300 total | 353 | Yes |
+| KAS01/MOH01 consistency | < 5% diff | 0 discrepancies | Yes |
+| Plant performance enriched | > 0 rows | 305 (292 new + 13 updated) | Yes |
+| No critical discrepancies | 0 | 0 | Yes |
+
+---
+
+## 30. Step 10b — Tariff Rate Population (2026-03-09)
+
+**Script:** [`python-backend/scripts/step10b_tariff_rate_population.py`](../python-backend/scripts/step10b_tariff_rate_population.py)
+
+Populates `tariff_rate` rows for all `clause_tariff` entries that have a `base_rate` but no computed rate schedule. Creates annual rate period rows showing the standing/escalated rate per contract year, and monthly FX tracking rows for local-currency tariffs.
+
+### 30.1 Pre-requisites
+
+- Step 4 completed (clause_tariff records exist with base_rate, currency, escalation type)
+- Exchange rate table populated (xe.com + revenue_masterfile sources)
+- Pipeline notes cleaned (internal "Step N" strings NULLed from contract_billing_product.notes)
+
+### 30.2 What It Does
+
+1. **Sets `valid_from`** on clause_tariff from `cod_date` → `effective_date` → `end_date - term` fallback
+2. **Inserts annual `tariff_rate` rows** — Year 1 for flat tariffs; Years 1..N for PERCENTAGE escalation
+3. **Inserts monthly `tariff_rate` rows** — for local-currency tariffs, one per exchange_rate month with FX-converted USD rate
+4. **Skips** REBASED_MARKET_PRICE tariffs (handled by `RebasedMarketPriceEngine`)
+
+### 30.3 Coverage Summary
+
+| Project | Currency | Annual Rows | Monthly FX Rows | Escalation | Current Year |
+|---------|----------|-------------|-----------------|------------|--------------|
+| AMP01 | USD | 1 | — | flat | 1 |
+| CAL01 | USD | 1 | — | US_CPI (flat until CPI data) | 1 |
+| ERG | MGA | 1 | 14 | flat | 3 |
+| IVL01 | USD | 1 | — | flat | 3 |
+| JAB01 | NGN | 1 | 26 | flat | 6 |
+| MB01 | USD | 3 | — | PERCENTAGE 1% | 2 |
+| MF01 | USD | 4 | — | PERCENTAGE 1% | 3 |
+| MIR01 | SLE | 1 | 14 | flat | 3 |
+| MP01 | USD | 3 | — | PERCENTAGE 1% | 2 |
+| MP02 | USD | 3 | — | PERCENTAGE 1% | 2 |
+| UGL01 | GHS | 7 | 25 | PERCENTAGE 2% | 6 |
+| UNSOS | USD | 3 | — | PERCENTAGE 2.5% | 2 |
+| XFAB | KES | 1 | 26 | US_CPI (fixed 10 yrs) | 6 |
+| **Totals** | | **30** | **105** | | |
+
+**Previously populated (reference projects):** KAS01 (1 annual + 4 monthly), MOH01 (1 annual + 5 monthly) — populated by `RebasedMarketPriceEngine`.
+
+### 30.4 Unpopulated Tariffs (Pending PPA Parsing)
+
+~26 tariffs remain without `tariff_rate` rows because they have NULL `base_rate`. These require Step 11 (PPA contract parsing) or manual entry:
+
+ABI01, AR01, BNT01, GBL01, GC001, IVL01 (OM), LOI01 (×2), NBL01, NBL02, NC02, NC03, QMM01 (×2), TBM01, TWG01 (×2), UTK01, XFBV, XFL01, XFSS, ZL01, ZL02 (×4).
+
+### 30.5 Frontend Changes
+
+- **Monthly FX tracking** expanded from REBASED_MARKET_PRICE-only to all tariff types with monthly data
+- **Period column** aligned to always show contractual date range (no more mixed "As of" display)
+- **Rate column** consistently shows the annual contractual rate; monthly FX breakdown in expandable sub-rows
+
+### 30.6 Dashboard Audit Fix (same session)
+
+- Cleared 72 `contract_billing_product.notes` rows containing internal pipeline string `"Step 4 auto-derived from contract_line"` — set to NULL so they no longer display on Pricing & Tariffs tab

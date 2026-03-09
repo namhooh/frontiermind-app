@@ -465,14 +465,18 @@ function BillingProductCard({ pw, pid, rate_periods, monthly_rates, contractLine
   const isAvailableEnergy = /available/i.test(String(bp.product_name ?? ''))
 
   // Contract lines and meters associated with this billing product
-  const { productMeters, productLineNumbers } = useMemo(() => {
+  const { productMeters, productLineNumbers, phaseCodDates } = useMemo(() => {
     const bpId = bp.billing_product_id
-    if (bpId == null) return { productMeters: [], productLineNumbers: [] as number[] }
+    if (bpId == null) return { productMeters: [], productLineNumbers: [] as number[], phaseCodDates: [] as { lineNumber: number; desc: string; codDate: string }[] }
     const meterMap = new Map<number, { meter_id: number; meter_name: string; energy_category: string; lineNumbers: number[] }>()
     const headerLines: number[] = []
     const parentLineIds = new Set<number>()
+    const codDates: { lineNumber: number; desc: string; codDate: string }[] = []
     for (const cl of contractLines) {
       if (cl.billing_product_id === bpId) {
+        if (cl.phase_cod_date != null) {
+          codDates.push({ lineNumber: cl.contract_line_number as number, desc: String(cl.product_desc ?? ''), codDate: String(cl.phase_cod_date) })
+        }
         if (cl.meter_id != null) {
           const mid = cl.meter_id as number
           let entry = meterMap.get(mid)
@@ -503,7 +507,9 @@ function BillingProductCard({ pw, pid, rate_periods, monthly_rates, contractLine
     const meters = [...meterMap.values()]
     for (const m of meters) m.lineNumbers.sort((a, b) => a - b)
     headerLines.sort((a, b) => a - b)
-    return { productMeters: meters, productLineNumbers: headerLines }
+    // Deduplicate phase COD dates by date value
+    const uniqueCods = codDates.filter((v, i, a) => a.findIndex(x => x.codDate === v.codDate) === i)
+    return { productMeters: meters, productLineNumbers: headerLines, phaseCodDates: uniqueCods }
   }, [contractLines, bp.billing_product_id])
 
   return (
@@ -558,6 +564,19 @@ function BillingProductCard({ pw, pid, rate_periods, monthly_rates, contractLine
               {m.lineNumbers.length > 0 && (
                 <span className="text-slate-400 font-mono ml-1">({m.lineNumbers.join(', ')})</span>
               )}
+            </span>
+          ))}
+        </div>
+      )}
+
+      {/* Phase COD dates — visible when contract lines have phase-specific CODs */}
+      {phaseCodDates.length > 0 && (
+        <div className="px-4 py-2 border-t border-slate-100 bg-slate-50/50">
+          <span className="text-xs text-slate-400 mr-2">Phase COD:</span>
+          {phaseCodDates.map((p, i) => (
+            <span key={p.codDate} className="text-xs text-slate-600">
+              {i > 0 && <span className="text-slate-300 mx-1">&middot;</span>}
+              {p.desc ? `${p.desc}: ` : ''}{p.codDate}
             </span>
           ))}
         </div>
@@ -835,12 +854,11 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                 .filter((rp) => rp.clause_tariff_id === t.id)
                 .sort((a, b) => Number(a.contract_year) - Number(b.contract_year))
               const isRebasedTariffHeader = String(t.escalation_type_code ?? '') === 'REBASED_MARKET_PRICE'
-              const tariffMonthlyRates = isRebasedTariffHeader
-                ? (monthly_rates ?? [])
+              const tariffMonthlyRates = (monthly_rates ?? [])
                     .filter((mr: R) => mr.clause_tariff_id === t.id)
                     .sort((a: R, b: R) => String(b.billing_month ?? '').localeCompare(String(a.billing_month ?? '')))
-                : []
-              const latestMonthLabel = tariffMonthlyRates.length > 0
+              const hasMonthlyTracking = tariffMonthlyRates.length > 0
+              const latestMonthLabel = isRebasedTariffHeader && tariffMonthlyRates.length > 0
                 ? formatBillingMonth(tariffMonthlyRates[0].billing_month)
                 : null
               return (
@@ -880,7 +898,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-slate-200">
-                            {isRebasedTariff && <th className="w-6" />}
+                            {hasMonthlyTracking && <th className="w-6" />}
                             <th className="text-left px-3 py-1.5 text-xs font-medium text-slate-500">Year</th>
                             <th className="text-left px-3 py-1.5 text-xs font-medium text-slate-500">Period</th>
                             <th className="text-right px-3 py-1.5 text-xs font-medium text-slate-500">Rate</th>
@@ -890,8 +908,14 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                           </tr>
                         </thead>
                         <tbody>
-                          {periods.map((rp, j) => {
-                            const periodMonthlyRates = isRebasedTariff
+                          {(() => {
+                            const currentPeriod = periods.find((rp) => rp.is_current === true) ?? periods[0]
+                            const historicalPeriods = periods.filter((rp) => rp !== currentPeriod)
+                            const historyKey = `history-${t.id}`
+                            const showHistory = expandedPeriods.has(historyKey)
+
+                            const renderPeriodRow = (rp: R, j: number) => {
+                            const periodMonthlyRates = hasMonthlyTracking
                               ? (monthly_rates ?? [])
                                   .filter((mr: R) => mr.clause_tariff_id === rp.clause_tariff_id && mr.contract_year === rp.contract_year)
                                   .sort((a: R, b: R) => String(b.billing_month ?? '').localeCompare(String(a.billing_month ?? '')))
@@ -900,10 +924,10 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                             return (
                               <Fragment key={j}>
                               <tr
-                                className={`border-b border-slate-50 ${rp.is_current ? 'bg-blue-50/40' : 'hover:bg-slate-50'} ${isRebasedTariff && periodMonthlyRates.length > 0 ? 'cursor-pointer' : ''}`}
-                                onClick={isRebasedTariff && periodMonthlyRates.length > 0 ? () => togglePeriod(rp.id) : undefined}
+                                className={`border-b border-slate-50 ${rp.is_current ? 'bg-blue-50/40' : 'hover:bg-slate-50'} ${periodMonthlyRates.length > 0 ? 'cursor-pointer' : ''}`}
+                                onClick={periodMonthlyRates.length > 0 ? () => togglePeriod(rp.id) : undefined}
                               >
-                                {isRebasedTariff && (
+                                {hasMonthlyTracking && (
                                   <td className="pl-2 py-1.5 w-6">
                                     {periodMonthlyRates.length > 0 && (
                                       <ChevronRight className={`h-3.5 w-3.5 text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
@@ -916,27 +940,14 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                                   ) : str(rp.contract_year)}
                                 </td>
                                 <td className="px-3 py-1.5 text-slate-600 text-xs tabular-nums">
-                                  {isRebasedTariff && periodMonthlyRates.length > 0
-                                    ? `As of ${formatBillingMonth(periodMonthlyRates[0].billing_month)}`
-                                    : `${str(rp.period_start)}${rp.period_end ? ` — ${str(rp.period_end)}` : ''}`}
+                                  {`${str(rp.period_start)}${rp.period_end ? ` — ${str(rp.period_end)}` : ''}`}
                                 </td>
                                 <td className="px-3 py-1.5 text-right text-slate-700 tabular-nums font-medium">
                                   {editMode && rp.id != null ? (
                                     <EditableCell value={rp.effective_rate_contract_ccy} fieldKey="effective_rate_contract_ccy" entity="rate-periods" entityId={rp.id as number} type="number" editMode onSaved={onSaved} />
-                                  ) : (() => {
-                                    if (isRebasedTariff && periodMonthlyRates.length > 0) {
-                                      const latestMr = periodMonthlyRates[0]
-                                      const latestRate = latestMr.effective_tariff_local != null ? Number(latestMr.effective_tariff_local) : null
-                                      return latestRate != null ? (
-                                        <span title={`Latest: ${formatBillingMonth(latestMr.billing_month)}`}>
-                                          {latestRate.toFixed(6)}
-                                        </span>
-                                      ) : str(rp.effective_rate_contract_ccy)
-                                    }
-                                    return str(rp.effective_rate_contract_ccy)
-                                  })()}
+                                  ) : str(rp.effective_rate_contract_ccy)}
                                 </td>
-                                <td className="px-3 py-1.5 text-slate-500 text-xs">{isRebasedTariff && periodMonthlyRates.length > 0 ? str(billingCurrencyCode ?? rp.currency_code) : str(rp.currency_code)}</td>
+                                <td className="px-3 py-1.5 text-slate-500 text-xs">{str(rp.currency_code)}</td>
                                 <td className="px-3 py-1.5 text-slate-500 text-xs whitespace-pre-line max-w-[160px] break-words">
                                   {editMode && rp.id != null ? (
                                     <EditableCell value={rp.calculation_basis} fieldKey="calculation_basis" entity="rate-periods" entityId={rp.id as number} type="text" editMode onSaved={onSaved} />
@@ -988,7 +999,28 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                               })}
                               </Fragment>
                             )
-                          })}
+                            }
+
+                            return (
+                              <>
+                                {currentPeriod && renderPeriodRow(currentPeriod, 0)}
+                                {historicalPeriods.length > 0 && (
+                                  <tr
+                                    className="border-b border-slate-100 cursor-pointer hover:bg-slate-50/80"
+                                    onClick={() => togglePeriod(historyKey)}
+                                  >
+                                    <td colSpan={hasMonthlyTracking ? 7 : 6} className="px-3 py-1.5">
+                                      <div className="flex items-center gap-1.5 text-xs text-slate-400">
+                                        <ChevronRight className={`h-3 w-3 transition-transform ${showHistory ? 'rotate-90' : ''}`} />
+                                        <span>{showHistory ? 'Hide' : 'Show'} {historicalPeriods.length} historical year{historicalPeriods.length !== 1 ? 's' : ''}</span>
+                                      </div>
+                                    </td>
+                                  </tr>
+                                )}
+                                {showHistory && historicalPeriods.map((rp, j) => renderPeriodRow(rp, j + 1))}
+                              </>
+                            )
+                          })()}
                         </tbody>
                       </table>
                     </div>
@@ -1001,17 +1033,33 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
         )}
       </CollapsibleSection>
 
-      {/* Exchange Rates — filtered to project's currency */}
+      {/* Exchange Rates — filtered to project's currency, grouped by year */}
       {(() => {
         const filteredRates = projectFxCurrency
           ? (exchange_rates ?? []).filter((er) => er.currency_code === projectFxCurrency)
           : (exchange_rates ?? [])
-        return filteredRates.length > 0 && (
+        if (filteredRates.length === 0) return null
+
+        const sorted = [...filteredRates].sort(
+          (a, b) => String(b.rate_date ?? '').localeCompare(String(a.rate_date ?? ''))
+        )
+        // Group by year (descending)
+        const byYear = new Map<number, typeof sorted>()
+        for (const er of sorted) {
+          const y = new Date(String(er.rate_date)).getFullYear()
+          if (!byYear.has(y)) byYear.set(y, [])
+          byYear.get(y)!.push(er)
+        }
+        const years = [...byYear.keys()].sort((a, b) => b - a)
+        const latestYear = years[0]
+
+        return (
         <CollapsibleSection title={`Exchange Rates${projectFxCurrency ? ` (USD → ${projectFxCurrency})` : ''}`}>
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200">
+                  <th className="w-6" />
                   <th className="text-left px-3 py-1.5 text-xs font-medium text-slate-500">Date</th>
                   <th className="text-left px-3 py-1.5 text-xs font-medium text-slate-500">Currency</th>
                   <th className="text-right px-3 py-1.5 text-xs font-medium text-slate-500">Rate (USD → Local)</th>
@@ -1020,60 +1068,77 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                 </tr>
               </thead>
               <tbody>
-                {(() => {
-                  const sorted = [...filteredRates].sort(
-                    (a, b) => String(b.rate_date ?? '').localeCompare(String(a.rate_date ?? ''))
-                  )
-                  return sorted.map((er, idx) => {
-                    const rate = Number(er.rate)
-                    const prevRate = idx < sorted.length - 1 ? Number(sorted[idx + 1].rate) : null
-                    const momChange = prevRate != null && prevRate !== 0
-                      ? ((rate - prevRate) / prevRate) * 100
-                      : null
-                    return (
-                      <tr key={er.id as number} className={`border-b border-slate-50 ${idx === 0 ? 'bg-blue-50/40' : 'hover:bg-slate-50'}`}>
-                        <td className="px-3 py-1.5 text-slate-700 tabular-nums">{formatBillingMonth(er.rate_date)}</td>
-                        <td className="px-3 py-1.5 text-slate-500 text-xs">{str(er.currency_code)}</td>
-                        <td className="px-3 py-1.5 text-right text-slate-700 tabular-nums font-medium">
-                          {editMode ? (
-                            <EditableCell
-                              value={er.rate}
-                              fieldKey="rate"
-                              entity="exchange-rates"
-                              entityId={er.id as number}
-                              type="number"
-                              editMode={true}
-                              onSaved={onSaved}
-                              formatDisplay={(v) => v != null ? Number(v).toFixed(2) : '—'}
-                            />
-                          ) : rate.toFixed(2)}
+                {years.map((year) => {
+                  const yearRates = byYear.get(year)!
+                  const yearKey = `fx-${year}`
+                  const isYearExpanded = year === latestYear || expandedPeriods.has(yearKey)
+                  return (
+                    <Fragment key={year}>
+                      <tr
+                        className="border-b border-slate-100 bg-slate-50/80 cursor-pointer hover:bg-slate-100/80"
+                        onClick={() => togglePeriod(yearKey)}
+                      >
+                        <td className="pl-2 py-1.5 w-6">
+                          <ChevronRight className={`h-3.5 w-3.5 text-slate-400 transition-transform ${isYearExpanded ? 'rotate-90' : ''}`} />
                         </td>
-                        <td className="px-3 py-1.5 text-right tabular-nums">
-                          {momChange != null ? (
-                            <span className={momChange > 0 ? 'text-red-600' : momChange < 0 ? 'text-green-600' : 'text-slate-400'}>
-                              {momChange > 0 ? '+' : ''}{momChange.toFixed(2)}%
-                            </span>
-                          ) : (
-                            <span className="text-slate-300">—</span>
-                          )}
-                        </td>
-                        <td className="px-3 py-1.5 text-slate-500 text-xs">
-                          {editMode ? (
-                            <EditableCell
-                              value={er.source}
-                              fieldKey="source"
-                              entity="exchange-rates"
-                              entityId={er.id as number}
-                              type="text"
-                              editMode={true}
-                              onSaved={onSaved}
-                            />
-                          ) : str(er.source)}
+                        <td colSpan={5} className="px-3 py-1.5 text-xs font-semibold text-slate-600">
+                          {year}
+                          <span className="ml-2 text-slate-400 font-normal">({yearRates.length} {yearRates.length === 1 ? 'month' : 'months'})</span>
                         </td>
                       </tr>
-                    )
-                  })
-                })()}
+                      {isYearExpanded && yearRates.map((er, idx) => {
+                        const rate = Number(er.rate)
+                        const prevRate = idx < yearRates.length - 1 ? Number(yearRates[idx + 1].rate) : null
+                        const momChange = prevRate != null && prevRate !== 0
+                          ? ((rate - prevRate) / prevRate) * 100
+                          : null
+                        return (
+                          <tr key={er.id as number} className={`border-b border-slate-50 ${idx === 0 && year === latestYear ? 'bg-blue-50/40' : 'hover:bg-slate-50'}`}>
+                            <td />
+                            <td className="px-3 py-1.5 text-slate-700 tabular-nums">{formatBillingMonth(er.rate_date)}</td>
+                            <td className="px-3 py-1.5 text-slate-500 text-xs">{str(er.currency_code)}</td>
+                            <td className="px-3 py-1.5 text-right text-slate-700 tabular-nums font-medium">
+                              {editMode ? (
+                                <EditableCell
+                                  value={er.rate}
+                                  fieldKey="rate"
+                                  entity="exchange-rates"
+                                  entityId={er.id as number}
+                                  type="number"
+                                  editMode={true}
+                                  onSaved={onSaved}
+                                  formatDisplay={(v) => v != null ? Number(v).toFixed(2) : '—'}
+                                />
+                              ) : rate.toFixed(2)}
+                            </td>
+                            <td className="px-3 py-1.5 text-right tabular-nums">
+                              {momChange != null ? (
+                                <span className={momChange > 0 ? 'text-red-600' : momChange < 0 ? 'text-green-600' : 'text-slate-400'}>
+                                  {momChange > 0 ? '+' : ''}{momChange.toFixed(2)}%
+                                </span>
+                              ) : (
+                                <span className="text-slate-300">—</span>
+                              )}
+                            </td>
+                            <td className="px-3 py-1.5 text-slate-500 text-xs">
+                              {editMode ? (
+                                <EditableCell
+                                  value={er.source}
+                                  fieldKey="source"
+                                  entity="exchange-rates"
+                                  entityId={er.id as number}
+                                  type="text"
+                                  editMode={true}
+                                  onSaved={onSaved}
+                                />
+                              ) : str(er.source)}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                    </Fragment>
+                  )
+                })}
               </tbody>
             </table>
           </div>

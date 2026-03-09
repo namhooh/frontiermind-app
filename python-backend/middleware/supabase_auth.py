@@ -118,6 +118,15 @@ class SupabaseAuth:
         Raises:
             HTTPException 401/403 on failure.
         """
+        # Dev auth bypass – skip JWT validation entirely (never in production)
+        if os.getenv("DEV_AUTH_BYPASS") == "true" and os.getenv("ENVIRONMENT") != "production":
+            org_id = _get_org_id_from_header(request)
+            return {
+                "user_id": os.getenv("DEV_USER_ID", "dev-user"),
+                "organization_id": org_id,
+                "role": "admin",
+            }
+
         if credentials is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,

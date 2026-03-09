@@ -1,0 +1,20 @@
+{
+  "mrp_method": "utility_total_charges",
+  "mrp_included_components": [
+    "energy_charge",
+    "subsidy",
+    "streetlight_levy"
+  ],
+  "mrp_excluded_components": [
+    "VAT"
+  ],
+  "mrp_exclude_vat": true,
+  "mrp_exclude_demand_charges": false,
+  "mrp_currency": null,
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "\"Market Reference Price\" is equal to the total per kWh charges in the Reference Bill divided by the sum of the total kWh consumed in the Reference Bill. The per kWh charges shall include energy charge, subsidy, streetlight levy and any other per kWh charge excluding VAT. If by reason of changes to the presentation or categorization of component charges reflected in the Reference Bill is no longer an adequate and reasonable means for ascertaining per kWh charges payable, then either party may refer determination of the Market Reference Price to Dispute Resolution to determine an appropriate Market Reference Price.",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "Formula includes provision for dispute resolution if utility bill format changes make MRP calculation inadequate"
+}

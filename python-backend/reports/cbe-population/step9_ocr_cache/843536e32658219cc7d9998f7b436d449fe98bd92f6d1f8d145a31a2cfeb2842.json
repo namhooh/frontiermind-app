@@ -1,0 +1,17 @@
+{
+  "mrp_method": "utility_variable_charges_tou",
+  "mrp_included_components": [],
+  "mrp_excluded_components": [
+    "Current Grid Tariff (Year-1)",
+    "Discounted Solar Tariff (Year-1)"
+  ],
+  "mrp_exclude_vat": null,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": null,
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "SSA Amendments. Unless expressly specified otherwise, the following amendments to the SSA shall be effective from the Second Amendment Effective Date: 2.1. Financing of Reinforcement Works. The Customer's existing buildings require structural reinforcement to accommodate the installation of solar PV on the roofs. The parties herby agree to carry out the reinforcement works in accordance with the terms set out in Annexure J. 2.2. Revised Fixed Solar Discount. CBE Ghana has agreed to finance Customer's portion of the cost for the reinforcement works by adjusting the Fixed Solar Discount. The value of the Fixed Solar Discount set forth in Part I of the SSA is hereby amended from 19.5% and restated as 19.2%. The Current Grid Tariff (Year-1) and Discounted Solar Tariff (Year-1) set forth in Part I of the SSA along with their corresponding values are hereby deleted in their entirety. 2.3. Liability for Reinforcement Works. Customer indemnifies CBE Ghana against any claim of whatsoever nature brought in respect of the Structural Reinforcement Works. 2.4. Annexures: The following annexure is affixed to this Agreement and is agreed by the Parties effective as from the Second Amendment Effective Date.",
+  "tou_windows": [],
+  "discount_percentage": 0.192,
+  "notes": "This is an amendment document that revises the Fixed Solar Discount from 19.5% to 19.2% and removes previous tariff references. The document relates to financing arrangements for structural reinforcement works rather than defining an MRP formula."
+}

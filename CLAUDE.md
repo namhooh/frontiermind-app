@@ -17,6 +17,7 @@ Contract Compliance & Invoicing Verification Engine for renewable energy project
 | **FRONTEND_ARCHITECTURE_GUIDE.md** | Frontend structure, components, state, API clients, Vercel deployment, Figma MCP |
 | **DATABASE_GUIDE.md** | Database schema and migrations |
 | **IMPLEMENTATION_GUIDE_REPORT_GENERATION.md** | Report generation system |
+| **IMPLEMENTATION_GUIDE_EMAIL_NOTIFICATIONS.md** | Email & notification engine, inbound ingestion, dev auth bypass |
 | **.claude/skills/sync-figma.md** | Detailed Figma-to-code workflow |
 
 ## Commands
@@ -26,6 +27,10 @@ npm run dev      # Start Next.js dev server
 npm run build    # Production build
 npm run lint     # ESLint
 ```
+
+### Dev Auth Bypass
+
+Backend endpoints behind `require_supabase_auth` need a valid JWT. For local dev, set `DEV_AUTH_BYPASS=true` in `python-backend/.env` to skip JWT validation (blocked in production by `ENVIRONMENT != production` guard). The frontend auto-falls back to `organizationId=1` when `NODE_ENV=development`. See **IMPLEMENTATION_GUIDE_EMAIL_NOTIFICATIONS.md § Local Development** for details.
 
 ## Project Structure
 

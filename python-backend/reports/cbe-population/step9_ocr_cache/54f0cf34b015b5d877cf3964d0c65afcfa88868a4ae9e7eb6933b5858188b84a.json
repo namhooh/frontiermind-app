@@ -1,0 +1,22 @@
+{
+  "mrp_method": "utility_total_charges",
+  "mrp_included_components": [
+    "energy_charge",
+    "fuel_surcharge",
+    "subsidy",
+    "streetlight_levy"
+  ],
+  "mrp_excluded_components": [
+    "VAT",
+    "demand_charge"
+  ],
+  "mrp_exclude_vat": true,
+  "mrp_exclude_demand_charges": true,
+  "mrp_currency": "GHS",
+  "floor_ceiling_currency": "USD",
+  "floor_ceiling_escalation": "2.5% annual",
+  "mrp_clause_text": "Current Grid Tariff (Year-1): 0.8187 GHS/kWh\nFixed Solar Discount: 18.5%\nDiscounted Solar Tariff (Year-1): 0.6672 GHS/kWh\nFloor Solar Tariff (Year-1): 0.1199 USD/kWh\nAnnual Floor Solar Tariff escalation: 2.5%\n\nAdditional notes:\n\u2022 Customer agrees to share with the Developer its electricity bill one month prior to the annual anniversary of the Commercial Operation Date for each Operating Year of the Agreement. Said bill will act as the Reference Bill in determining the Solar Tariff for the subsequent Operating Year.\n\u2022 The Developer agrees to outline the determined Current Grid Tariff to the Customer which will be equal to the sum of the all rates in the Reference Bill for the given Operating Year which vary according to kWh consumption by the Customer (including energy charge, subsidy, streetlight levy or otherwise).\n\u2022 The Discounted Solar Tariff will be denominated in GHS and is determined by applying the Fixed Solar Discount to the Current Grid Tariff; The Discounted Solar Tariff rate will be re-calculated and outlined within 60 days of the anniversary of the Commercial Operation Date for each Operating Year of the Agreement.\n\u2022 The Floor Solar Tariff will be denominated in USD and represents the lowest tariff payable by the Customer at any point in the Agreement.\n\u2022 All Demand Charge savings associated with the solar system are excluded from the tariff-setting mechanism. All Payments stated are exclusive of Taxes.",
+  "tou_windows": [],
+  "discount_percentage": 0.185,
+  "notes": "Contract uses annual reference bill mechanism with fixed 18.5% discount applied to variable charges only. USD floor price provides downside protection for developer. Demand charge savings explicitly excluded from customer payments."
+}

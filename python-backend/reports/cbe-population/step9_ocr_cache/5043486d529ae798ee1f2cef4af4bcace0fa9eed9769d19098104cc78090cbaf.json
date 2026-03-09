@@ -1,0 +1,17 @@
+{
+  "mrp_method": "generator_cost",
+  "mrp_included_components": [
+    "energy_charge",
+    "fuel_cost"
+  ],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": null,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": "NGN",
+  "floor_ceiling_currency": "USD",
+  "floor_ceiling_escalation": "1.5% annual",
+  "mrp_clause_text": "Energy Purchase Rates\n\nDuring periods where the grid is the primary source of (non-solar) electricity for the site (as determined based on the Seller's solar monitoring system), each kilowatt-hour of Energy Output available during said periods will be priced at the Solar Discount to the Grid Reference Rate. The Grid Reference Rate will be stated in Naira.\n\nDuring periods where the Buyer's generators are the primary source of (non-solar) electricity for the site (as determined based on the Seller's solar monitoring system), each kilowatt-hour of Energy Output available during said periods will be priced at the Solar Discount to the Buyer's Generator Reference Rate. The Generator Reference Rate will be stated in Naira.\n\nThe Minimum Solar Price is equal to 0.0799 USD per kilowatt-hour for the first Operating Year of the Agreement and the Minimum Solar Price will escalate by 1.5% at the beginning of the second Operating Year and each anniversary thereof. In all instances, the average Price for any Month shall not fall below the Minimum Solar Price, which will be calculated into its Naira value on a monthly basis at the Agreed Exchange Rate.\n\nThe Maximum Solar Price is equal to 0.210 USD per kilowatt-hour for the full Term of the Agreement.\n\nThe following formula will be used to calculate the total amount due from the Buyer to the Seller at the end of each month:\n\nScenario 1 (Not Connected to the Grid):\nThis formula for calculating the monthly payment is only applicable when the Buyer's primary source of electricity is their onsite diesel/natural gas generators.\n\nPayment = (1 \u2013 Solar Discount) \u00d7 Energy Output_Generator \u00d7 Generator Reference Price\n\nScenario 2 (Grid connected):\nThis formula for calculating the monthly payment is only applicable when the Buyer's primary source of electricity is the grid. The Buyer is not currently connected to the grid, but this provision has been included in the PPA to accommodate a potential future scenario where the Buyer's facility may one day connect to the national grid.\n\nPayment = (1 \u2013 Solar Discount) \u00d7 Energy Output_Grid \u00d7 Grid Reference Price\n\nMinimum and Maximum Solar Price (Solar Tariff):\nThe tariff charged by Seller for the term of the PPA will always fall in between the agreed Minimum and Maximum thresholds.\n\nIf the calculated Solar Price (solar tariff) for a given month is higher than the Maximum Solar Price, then the Payments due to the Seller for that Month will be recalculated by the Parties using the Maximum Solar Price. If the calculated Solar Price (solar tariff) for a given month is lower than the Minimum Solar Price (when the Buyer is operating in Scenario 1 or Scenario 2):",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "Contract has dual scenarios - generator-based pricing when off-grid (Scenario 1) and grid-based pricing when connected (Scenario 2). Currently operating under Scenario 1 with diesel/natural gas generators. Floor price of $0.0799/kWh escalating at 1.5% annually, ceiling of $0.21/kWh. Solar discount percentage not specified in visible text."
+}

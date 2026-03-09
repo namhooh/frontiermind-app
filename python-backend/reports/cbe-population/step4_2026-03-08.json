@@ -1,0 +1,75 @@
+{
+  "step": 4,
+  "name": "Billing Product & Tariff Structure",
+  "date": "2026-03-08",
+  "migration": "055_step4_billing_product_tariff_structure.sql",
+  "summary": {
+    "billing_products_verified": 108,
+    "contract_lines_linked": 114,
+    "contract_billing_products_inserted": 72,
+    "contract_billing_products_total": 82,
+    "primary_billing_products_set": 36,
+    "clause_tariffs_inserted": 36,
+    "clause_tariffs_total": 42,
+    "contract_type_fixes": 9,
+    "gates_passed": "5/5"
+  },
+  "sections": {
+    "A_contract_type_fixes": {
+      "description": "Fixed NULL contract_type_id on 9 contracts",
+      "contracts_fixed": [
+        {"id": 36, "sage_id": "NBL01", "set_to": "PPA"},
+        {"id": 22, "sage_id": "LOI01", "set_to": "ESA"},
+        {"id": 100, "sage_id": "IVL01", "contract": "CONEGY00-2025-00002", "set_to": "OTHER"},
+        {"id": 101, "sage_id": "TWG01", "contract": "CONMOZ00-2023-00002", "set_to": "OTHER"},
+        {"id": 93, "sage_id": "XFBV", "set_to": "PPA"},
+        {"id": 94, "sage_id": "XFL01", "set_to": "PPA"},
+        {"id": 95, "sage_id": "XFSS", "set_to": "PPA"},
+        {"id": 96, "sage_id": "ZL02", "contract": "CONCBCH0-2025-00002", "set_to": "LEASE"},
+        {"id": 97, "sage_id": "ZL02", "contract": "CONCBCH0-2025-00003", "set_to": "OTHER"},
+        {"id": 98, "sage_id": "ZL02", "contract": "CONCBCH0-2025-00004", "set_to": "OTHER"},
+        {"id": 99, "sage_id": "ZL02", "contract": "CONSLL02-2025-00003", "set_to": "OTHER"}
+      ]
+    },
+    "B_billing_product_linking": {
+      "description": "Linked all 114 contract_lines to canonical billing_product entries",
+      "product_code_prefixes_used": {
+        "GHREVS/GHREV": "Ghana energy (GBL01, KAS01, UGL01)",
+        "KEREVS": "Kenya energy (GC001, LOI01, MB01, MF01, MP01, MP02, NC02, NC03, TBM01, UTK01, XFAB, XFBV, XFL01, XFSS, AMP01, AR01)",
+        "NIREVS": "Nigeria energy (JAB01, NBL01, NBL02)",
+        "EGREVS": "Egypt energy (IVL01)",
+        "ENER": "Generic energy (CAL01, ERG, MIR01, MOH01, QMM01, UNSOS, ZL02)",
+        "MOREVS": "Mozambique service (TWG01, ZL02)",
+        "MAREVS003": "BESS capacity (LOI01, QMM01)"
+      }
+    },
+    "C_contract_billing_product": {
+      "description": "72 new junction records inserted (10 pre-existing from pilot)",
+      "total_contracts_covered": 36,
+      "primary_billing_products": 36,
+      "post_insert_fix": "QMM01 primary corrected from ENER001 (Early Operating) to ENER002 (Metered Energy)"
+    },
+    "D_clause_tariff": {
+      "description": "36 new clause_tariff placeholders inserted (6 pre-existing from pilot)",
+      "energy_sale_type_breakdown": {
+        "FIXED_SOLAR": 20,
+        "NOT_ENERGY_SALES": 10,
+        "FLOATING_GRID": 5,
+        "FLOATING_GRID_GENERATOR": 1,
+        "FLOATING_GENERATOR": 1,
+        "NULL_placeholder": 5
+      },
+      "base_rate_populated": "Only pilot entries (KAS01, MOH01). All new entries have base_rate=NULL per workflow — populated in Step 7/9",
+      "escalation_populated": ["MB01 1%", "MF01 1%", "MP01 1%", "MP02 1%", "NC02 1%", "NC03 1%", "UGL01 2%", "NBL02 2.5%", "UNSOS 2.5%"],
+      "placeholders_no_sage_data": ["ABI01", "BNT01"]
+    }
+  },
+  "gates": {
+    "gate_1": {"name": "All contract_lines have billing_product_id", "result": "PASSED", "null_count": 0},
+    "gate_2": {"name": "All contracts with lines have contract_billing_product", "result": "PASSED", "missing": 0},
+    "gate_3": {"name": "Every contract has exactly one primary billing product", "result": "PASSED"},
+    "gate_4": {"name": "All primary contracts have clause_tariff", "result": "PASSED", "excluded": ["TBC (iSAT - no contract data)"]},
+    "gate_5": {"name": "No NULL contract_type_id on contracts with lines", "result": "PASSED", "null_count": 0}
+  },
+  "next_step": "Step 5: Plant Performance Workbook — Summary Tabs (production_forecast, meter_aggregate validation)"
+}

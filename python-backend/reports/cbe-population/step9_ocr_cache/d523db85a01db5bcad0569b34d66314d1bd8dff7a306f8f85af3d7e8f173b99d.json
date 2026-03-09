@@ -1,0 +1,23 @@
+{
+  "mrp_method": "utility_total_charges",
+  "mrp_included_components": [
+    "energy_charge",
+    "fuel_surcharge",
+    "regulatory_levy",
+    "environmental_levy",
+    "system_service_charge",
+    "renewable_energy_levy"
+  ],
+  "mrp_excluded_components": [
+    "VAT"
+  ],
+  "mrp_exclude_vat": true,
+  "mrp_exclude_demand_charges": true,
+  "mrp_currency": "KES",
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "May 2024\n\nConsumption 20.58 KSh/kWh\nFCC 3.52\nFERFA 0.97\nIA 0.33\nWARMA 0.02\nERC 0.08\nREP 1.03\nVAT 3.86\nTotal 30.38",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "This appears to be a Kenyan utility bill breakdown showing various tariff components. FCC likely refers to Fuel Cost Charge, FERFA to Foreign Exchange Rate Fluctuation Adjustment, IA to Inflation Adjustment, WARMA to Water Resources Management Authority levy, ERC to Energy and Petroleum Regulatory Authority levy, and REP to Renewable Energy Power levy. VAT is shown separately at 3.86 KSh/kWh and appears to be excluded from the MRP calculation."
+}

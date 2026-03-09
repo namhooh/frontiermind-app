@@ -1,0 +1,1346 @@
+[
+  {
+    "year": 2010,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 216.687,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2010,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 216.741,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2010,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 217.631,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2010,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 218.009,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2010,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 218.178,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2010,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 217.965,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2010,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 218.011,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2010,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 218.312,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2010,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 218.439,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2010,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 218.711,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2010,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 218.803,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2010,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 219.179,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2011,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 220.223,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2011,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 221.309,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2011,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 223.467,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2011,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 224.906,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2011,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 225.964,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2011,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 225.722,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2011,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 225.922,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2011,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 226.545,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2011,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 226.889,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2011,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 226.421,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2011,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 226.23,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2011,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 225.672,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2012,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 226.665,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2012,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 227.663,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2012,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 229.392,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2012,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 230.085,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2012,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 229.815,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2012,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 229.478,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2012,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 229.104,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2012,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 230.379,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2012,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 231.407,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2012,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 231.317,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2012,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 230.221,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2012,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 229.601,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2013,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 230.28,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2013,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 232.166,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2013,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 232.773,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2013,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 232.531,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2013,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 232.945,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2013,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 233.504,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2013,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 233.596,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2013,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 233.877,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2013,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 234.149,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2013,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 233.546,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2013,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 233.069,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2013,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 233.049,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2014,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 233.916,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2014,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 234.781,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2014,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 236.293,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2014,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 237.072,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2014,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 237.9,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2014,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 238.343,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2014,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 238.25,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2014,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 237.852,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2014,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 238.031,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2014,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 237.433,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2014,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 236.151,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2014,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 234.812,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2015,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 233.707,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2015,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 234.722,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2015,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 236.119,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2015,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 236.599,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2015,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 237.805,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2015,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 238.638,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2015,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 238.654,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2015,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 238.316,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2015,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 237.945,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2015,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 237.838,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2015,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 237.336,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2015,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 236.525,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2016,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 236.916,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2016,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 237.111,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2016,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 238.132,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2016,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 239.261,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2016,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 240.229,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2016,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 241.018,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2016,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 240.628,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2016,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 240.849,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2016,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 241.428,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2016,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 241.729,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2016,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 241.353,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2016,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 241.432,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2017,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 242.839,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2017,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 243.603,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2017,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 243.801,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2017,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 244.524,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2017,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 244.733,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2017,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 244.955,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2017,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 244.786,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2017,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 245.519,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2017,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 246.819,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2017,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 246.663,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2017,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 246.669,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2017,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 246.524,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2018,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 247.867,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2018,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 248.991,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2018,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 249.554,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2018,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 250.546,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2018,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 251.588,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2018,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 251.989,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2018,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 252.006,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2018,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 252.146,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2018,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 252.439,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2018,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 252.885,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2018,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 252.038,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2018,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 251.233,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2019,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 251.712,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2019,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 252.776,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2019,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 254.202,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2019,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 255.548,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2019,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 256.092,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2019,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 256.143,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2019,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 256.571,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2019,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 256.558,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2019,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 256.759,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2019,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 257.346,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2019,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 257.208,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2019,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 256.974,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2020,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 257.971,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2020,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 258.678,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2020,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 258.115,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2020,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 256.389,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2020,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 256.394,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2020,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 257.797,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2020,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 259.101,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2020,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 259.918,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2020,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 260.28,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2020,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 260.388,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2020,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 260.229,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2020,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 260.474,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2021,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 261.582,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2021,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 263.014,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2021,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 264.877,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2021,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 267.054,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2021,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 269.195,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2021,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 271.696,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2021,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 273.003,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2021,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 273.567,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2021,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 274.31,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2021,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 276.589,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2021,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 277.948,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2021,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 278.802,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2022,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 281.149,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2022,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 283.716,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2022,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 287.504,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2022,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 289.109,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2022,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 292.296,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2022,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 296.311,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2022,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 296.276,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2022,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 296.171,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2022,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 296.808,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2022,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 298.012,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2022,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 297.711,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2022,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 296.797,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2023,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 299.17,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2023,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 300.84,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2023,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 301.836,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2023,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 303.363,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2023,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 304.127,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2023,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 305.109,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2023,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 305.691,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2023,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 307.026,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2023,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 307.789,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2023,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 307.671,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2023,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 307.051,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2023,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 306.746,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2024,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 308.417,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2024,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 310.326,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2024,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 312.332,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2024,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 313.548,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2024,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 314.069,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2024,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 314.175,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2024,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 314.54,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2024,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 314.796,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2024,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 315.301,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2024,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 315.664,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2024,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 315.493,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2024,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 315.605,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2025,
+    "month": 1,
+    "month_name": "Jan",
+    "cpi_value": 317.671,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2025,
+    "month": 2,
+    "month_name": "Feb",
+    "cpi_value": 319.082,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2025,
+    "month": 3,
+    "month_name": "Mar",
+    "cpi_value": 319.799,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2025,
+    "month": 4,
+    "month_name": "Apr",
+    "cpi_value": 320.795,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2025,
+    "month": 5,
+    "month_name": "May",
+    "cpi_value": 321.465,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2025,
+    "month": 6,
+    "month_name": "Jun",
+    "cpi_value": 322.561,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2025,
+    "month": 7,
+    "month_name": "Jul",
+    "cpi_value": 323.048,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2025,
+    "month": 8,
+    "month_name": "Aug",
+    "cpi_value": 323.976,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2025,
+    "month": 9,
+    "month_name": "Sep",
+    "cpi_value": 324.8,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2025,
+    "month": 10,
+    "month_name": "Oct",
+    "cpi_value": 324.388,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2025,
+    "month": 11,
+    "month_name": "Nov",
+    "cpi_value": 324.122,
+    "series": "CUUR0000SA0"
+  },
+  {
+    "year": 2025,
+    "month": 12,
+    "month_name": "Dec",
+    "cpi_value": 324.054,
+    "series": "CUUR0000SA0"
+  }
+]

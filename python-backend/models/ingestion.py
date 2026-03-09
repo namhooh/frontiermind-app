@@ -7,7 +7,7 @@ Includes models for:
 - Meter reading canonical model
 """
 
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Dict, List, Optional
@@ -18,6 +18,13 @@ from pydantic import BaseModel, Field
 # =====================================================
 # Enums
 # =====================================================
+
+class IngestionScope(str, Enum):
+    """Allowed scopes for org-scoped API keys."""
+    METER_DATA = "meter_data"
+    FX_RATES = "fx_rates"
+    BILLING_READS = "billing_reads"
+
 
 class SourceType(str, Enum):
     """Supported data source types."""
@@ -86,13 +93,14 @@ SOURCE_TYPE_TO_DS_ID = {
 
 class IntegrationCredentialCreate(BaseModel):
     """Model for creating an integration credential."""
-    data_source_id: int = Field(..., description="FK to data_source table")
+    data_source_id: Optional[int] = Field(None, description="FK to data_source table. NULL = org-scoped key.")
     auth_type: AuthType
     credentials: Dict[str, str] = Field(
         ..., description="Credential secrets: {'api_key': '...'} or {'access_token': '...', 'refresh_token': '...', 'scope': '...'}"
     )
     token_expires_at: Optional[datetime] = None
     label: Optional[str] = None
+    scopes: Optional[List[IngestionScope]] = Field(None, description="Scope restrictions. NULL = all scopes allowed.")
 
 
 class IntegrationCredentialUpdate(BaseModel):
@@ -107,7 +115,7 @@ class IntegrationCredentialResponse(BaseModel):
     """Response model for integration credential (without sensitive data)."""
     id: int
     organization_id: int
-    data_source_id: int
+    data_source_id: Optional[int] = None
     auth_type: str
     label: Optional[str] = None
     is_active: bool
@@ -115,6 +123,7 @@ class IntegrationCredentialResponse(BaseModel):
     last_error: Optional[str] = None
     error_count: int = 0
     token_expires_at: Optional[datetime] = None
+    scopes: Optional[List[str]] = None
     created_at: datetime
     updated_at: datetime
 
@@ -339,17 +348,19 @@ class BillingReadsBatchRequest(BaseModel):
 
 class GenerateAPIKeyRequest(BaseModel):
     """Request body for POST /api/ingest/credentials/generate-key."""
-    data_source_id: int = Field(..., description="FK to data_source table")
+    data_source_id: Optional[int] = Field(None, description="FK to data_source table. NULL = org-scoped key.")
     label: Optional[str] = Field(None, description="Human-readable label for the key")
+    scopes: Optional[List[IngestionScope]] = Field(None, description="Scope restrictions. NULL = all scopes allowed.")
 
 
 class GenerateAPIKeyResponse(BaseModel):
     """Response for generate-key (includes plaintext key shown only once)."""
     credential_id: int
     organization_id: int
-    data_source_id: int
+    data_source_id: Optional[int] = None
     api_key: str = Field(..., description="Plaintext API key (shown only once)")
     label: Optional[str] = None
+    scopes: Optional[List[str]] = None
     created_at: datetime
 
 
@@ -364,3 +375,34 @@ class IngestionResultResponse(BaseModel):
     data_start: Optional[datetime] = Field(None, description="Earliest reading timestamp")
     data_end: Optional[datetime] = Field(None, description="Latest reading timestamp")
     message: Optional[str] = Field(None, description="Human-readable status message")
+
+
+# =====================================================
+# FX Rate Ingestion Models
+# =====================================================
+
+class FXRateEntry(BaseModel):
+    """Single FX rate entry in an API push request."""
+    currency_code: str = Field(..., description="ISO 4217 currency code, e.g. ZAR")
+    rate_date: date = Field(..., description="Date the rate applies to")
+    rate: Decimal = Field(..., description="Exchange rate value")
+
+
+class FXRateBatchRequest(BaseModel):
+    """Request body for POST /api/ingest/fx-rates."""
+    rates: List[FXRateEntry] = Field(
+        ...,
+        min_length=1,
+        max_length=5000,
+        description="Array of FX rate entries (max 5,000 per batch)",
+    )
+    source: str = Field("api", description="Source label for audit trail")
+
+
+class FXRateBatchResponse(BaseModel):
+    """Response for FX rate batch ingestion."""
+    success: bool = True
+    inserted: int = 0
+    updated: int = 0
+    rejected: int = 0
+    errors: Optional[List[Dict[str, Any]]] = None

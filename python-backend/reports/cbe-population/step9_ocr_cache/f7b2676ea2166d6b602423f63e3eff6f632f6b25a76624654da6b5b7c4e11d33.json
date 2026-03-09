@@ -1,0 +1,24 @@
+{
+  "mrp_method": "utility_total_charges",
+  "mrp_included_components": [
+    "energy_charge",
+    "fuel_surcharge",
+    "regulatory_levy",
+    "interconnection_charge",
+    "renewable_energy_charge",
+    "emergency_power_charge",
+    "rural_electrification_levy"
+  ],
+  "mrp_excluded_components": [
+    "VAT"
+  ],
+  "mrp_exclude_vat": true,
+  "mrp_exclude_demand_charges": false,
+  "mrp_currency": "KES",
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "August 2023\nKSh / kWh\nConsumption 20.58\nFCC 4.46\nFERFA 1.71\nIA 0.23\nWARMA 0.01\nERC 0.08\nREP 1.03\nVAT 4.01\nTotal 32.11",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "This appears to be a Kenyan utility bill breakdown showing various tariff components. VAT is listed separately at 4.01 KSh/kWh but appears to be excluded from the MRP calculation based on typical solar PPA structures. Components include consumption charge, fuel cost charge (FCC), foreign exchange rate fluctuation adjustment (FERFA), inflation adjustment (IA), WARMA levy, ERC levy, and rural electrification program (REP) charge."
+}

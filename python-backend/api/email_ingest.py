@@ -4,7 +4,7 @@ Inbound Email Ingestion API Endpoints.
 Prefix: /api/inbound-email
 
 - SNS webhook (unauthenticated — SNS signature verified)
-- Admin endpoints for message review (API key + org header)
+- Admin endpoints for message review (Supabase JWT + org header)
 """
 
 import json
@@ -18,11 +18,14 @@ from pydantic import BaseModel
 
 from db.database import init_connection_pool
 from db.ingest_repository import IngestRepository
-from middleware.api_key_auth import require_api_key
+from middleware.supabase_auth import require_supabase_auth
 from models.email_ingest import (
+    ApproveMessageResponse,
+    AttachmentProcessingResponse,
     InboundAttachmentResponse,
     InboundMessageListResponse,
     InboundMessageResponse,
+    ProcessAttachmentRequest,
     ReviewAction,
 )
 
@@ -71,15 +74,8 @@ def get_org_id(request: Request) -> int:
 
 
 def validate_org_access(request: Request, auth: dict) -> int:
-    """Ensure API key org matches X-Organization-ID header."""
-    org_id = get_org_id(request)
-    key_org_id = auth.get("organization_id")
-    if key_org_id and key_org_id != org_id:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={"success": False, "message": "API key organization mismatch"},
-        )
-    return org_id
+    """Extract validated organization_id from auth context."""
+    return auth["organization_id"]
 
 
 def require_repo():
@@ -144,27 +140,38 @@ async def list_messages(
     request: Request,
     channel: Optional[str] = Query(None),
     status_filter: Optional[str] = Query(None, alias="inbound_message_status"),
+    project_id: Optional[int] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    auth: dict = Depends(require_api_key),
+    auth: dict = Depends(require_supabase_auth),
 ) -> InboundMessageListResponse:
     require_repo()
     org_id = validate_org_access(request, auth)
 
-    messages, total = ingest_repo.list_inbound_messages(
-        org_id=org_id,
-        channel=channel,
-        inbound_message_status=status_filter,
-        limit=limit,
-        offset=offset,
-    )
+    try:
+        messages, total = ingest_repo.list_inbound_messages(
+            org_id=org_id,
+            channel=channel,
+            inbound_message_status=status_filter,
+            project_id=project_id,
+            limit=limit,
+            offset=offset,
+        )
 
-    return InboundMessageListResponse(
-        messages=[InboundMessageResponse(**m) for m in messages],
-        total=total,
-        limit=limit,
-        offset=offset,
-    )
+        return InboundMessageListResponse(
+            messages=[InboundMessageResponse(**m) for m in messages],
+            total=total,
+            limit=limit,
+            offset=offset,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in list_messages: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "message": str(e)},
+        )
 
 
 @router.get(
@@ -175,20 +182,29 @@ async def list_messages(
 async def get_message(
     request: Request,
     message_id: int,
-    auth: dict = Depends(require_api_key),
+    auth: dict = Depends(require_supabase_auth),
 ) -> InboundMessageResponse:
     require_repo()
     org_id = validate_org_access(request, auth)
 
-    msg = ingest_repo.get_inbound_message(message_id, org_id)
-    if not msg:
-        raise HTTPException(status_code=404, detail={"success": False, "message": "Message not found"})
+    try:
+        msg = ingest_repo.get_inbound_message(message_id, org_id)
+        if not msg:
+            raise HTTPException(status_code=404, detail={"success": False, "message": "Message not found"})
 
-    attachments = [
-        InboundAttachmentResponse(**a)
-        for a in msg.get("attachments", [])
-    ]
-    return InboundMessageResponse(**{**msg, "attachments": attachments})
+        attachments = [
+            InboundAttachmentResponse(**a)
+            for a in msg.get("attachments", [])
+        ]
+        return InboundMessageResponse(**{**msg, "attachments": attachments})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_message: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "message": str(e)},
+        )
 
 
 # =============================================================================
@@ -197,28 +213,67 @@ async def get_message(
 
 @router.post(
     "/messages/{message_id}/approve",
-    response_model=SuccessResponse,
-    summary="Approve an inbound message",
+    response_model=ApproveMessageResponse,
+    summary="Approve an inbound message and trigger attachment extraction",
 )
 async def approve_message(
     request: Request,
     message_id: int,
     body: ReviewAction = ReviewAction(),
-    auth: dict = Depends(require_api_key),
-) -> SuccessResponse:
+    auth: dict = Depends(require_supabase_auth),
+) -> ApproveMessageResponse:
     require_repo()
     org_id = validate_org_access(request, auth)
 
-    updated = ingest_repo.update_inbound_message_status(
-        message_id=message_id,
-        org_id=org_id,
-        inbound_message_status="approved",
-        reason=body.reason or "admin approved",
-    )
-    if not updated:
-        raise HTTPException(status_code=404, detail={"success": False, "message": "Message not found"})
+    try:
+        updated = ingest_repo.update_inbound_message_status(
+            message_id=message_id,
+            org_id=org_id,
+            inbound_message_status="approved",
+            reason=body.reason or "admin approved",
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail={"success": False, "message": "Message not found"})
 
-    return SuccessResponse(message="Message approved")
+        # Trigger extraction on all pending attachments
+        attachments = ingest_repo.list_attachments_for_message(message_id)
+        pending = [a for a in attachments if a.get("attachment_processing_status") == "pending"]
+
+        extraction_results: list[AttachmentProcessingResponse] = []
+        if pending:
+            from services.ingest.attachment_processing_service import AttachmentProcessingService
+
+            service = AttachmentProcessingService(ingest_repo)
+            for att in pending:
+                result = service.process_attachment(
+                    attachment_id=att["id"],
+                    org_id=org_id,
+                    project_id=body.project_id,
+                    billing_month=body.billing_month,
+                )
+                extraction_results.append(AttachmentProcessingResponse(
+                    success=result.get("success", False),
+                    message="Extraction complete" if result.get("success") else "Extraction failed",
+                    status=result.get("status", "failed"),
+                    observation_id=result.get("observation_id"),
+                    mrp_per_kwh=result.get("mrp_per_kwh"),
+                    confidence=result.get("confidence"),
+                    billing_month=result.get("billing_month"),
+                    failed_reason=result.get("failed_reason"),
+                ))
+
+        return ApproveMessageResponse(
+            message="Message approved",
+            extraction_results=extraction_results,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in approve_message: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "message": str(e)},
+        )
 
 
 @router.post(
@@ -230,21 +285,30 @@ async def reject_message(
     request: Request,
     message_id: int,
     body: ReviewAction = ReviewAction(),
-    auth: dict = Depends(require_api_key),
+    auth: dict = Depends(require_supabase_auth),
 ) -> SuccessResponse:
     require_repo()
     org_id = validate_org_access(request, auth)
 
-    updated = ingest_repo.update_inbound_message_status(
-        message_id=message_id,
-        org_id=org_id,
-        inbound_message_status="rejected",
-        reason=body.reason or "admin rejected",
-    )
-    if not updated:
-        raise HTTPException(status_code=404, detail={"success": False, "message": "Message not found"})
+    try:
+        updated = ingest_repo.update_inbound_message_status(
+            message_id=message_id,
+            org_id=org_id,
+            inbound_message_status="rejected",
+            reason=body.reason or "admin rejected",
+        )
+        if not updated:
+            raise HTTPException(status_code=404, detail={"success": False, "message": "Message not found"})
 
-    return SuccessResponse(message="Message rejected")
+        return SuccessResponse(message="Message rejected")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in reject_message: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "message": str(e)},
+        )
 
 
 @router.post(
@@ -255,30 +319,39 @@ async def reject_message(
 async def reprocess_message(
     request: Request,
     message_id: int,
-    auth: dict = Depends(require_api_key),
+    auth: dict = Depends(require_supabase_auth),
 ) -> SuccessResponse:
     require_repo()
     org_id = validate_org_access(request, auth)
 
-    msg = ingest_repo.get_inbound_message(message_id, org_id)
-    if not msg:
-        raise HTTPException(status_code=404, detail={"success": False, "message": "Message not found"})
+    try:
+        msg = ingest_repo.get_inbound_message(message_id, org_id)
+        if not msg:
+            raise HTTPException(status_code=404, detail={"success": False, "message": "Message not found"})
 
-    if msg["channel"] != "email":
-        raise HTTPException(status_code=400, detail={"success": False, "message": "Reprocessing only supported for email channel"})
+        if msg["channel"] != "email":
+            raise HTTPException(status_code=400, detail={"success": False, "message": "Reprocessing only supported for email channel"})
 
-    if not msg.get("s3_raw_path"):
-        raise HTTPException(status_code=400, detail={"success": False, "message": "No raw email path available"})
+        if not msg.get("s3_raw_path"):
+            raise HTTPException(status_code=400, detail={"success": False, "message": "No raw email path available"})
 
-    # Reset status to received and delete old record so it can be reprocessed
-    ingest_repo.update_inbound_message_status(
-        message_id=message_id,
-        org_id=org_id,
-        inbound_message_status="received",
-        reason="reprocessing triggered",
-    )
+        # Reset status to received and delete old record so it can be reprocessed
+        ingest_repo.update_inbound_message_status(
+            message_id=message_id,
+            org_id=org_id,
+            inbound_message_status="received",
+            reason="reprocessing triggered",
+        )
 
-    return SuccessResponse(message="Reprocessing initiated")
+        return SuccessResponse(message="Reprocessing initiated")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in reprocess_message: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "message": str(e)},
+        )
 
 
 # =============================================================================
@@ -293,67 +366,102 @@ async def reprocess_message(
 async def get_attachment_download(
     request: Request,
     attachment_id: int,
-    auth: dict = Depends(require_api_key),
+    auth: dict = Depends(require_supabase_auth),
 ) -> PresignedUrlResponse:
     require_repo()
     org_id = validate_org_access(request, auth)
 
-    att = ingest_repo.get_attachment(attachment_id)
-    if not att:
-        raise HTTPException(status_code=404, detail={"success": False, "message": "Attachment not found"})
-
-    # Verify the attachment belongs to a message in this org
-    msg = ingest_repo.get_inbound_message(att["inbound_message_id"], org_id)
-    if not msg:
-        raise HTTPException(status_code=403, detail={"success": False, "message": "Access denied"})
-
-    # Generate presigned URL
-    s3_path = att["s3_path"]
-    if s3_path.startswith("s3://"):
-        parts = s3_path[5:].split("/", 1)
-        bucket = parts[0]
-        key = parts[1] if len(parts) > 1 else ""
-    else:
-        bucket = os.getenv("EMAIL_INGEST_S3_BUCKET", "frontiermind-email-ingest")
-        key = s3_path
-
     try:
-        import boto3
-        s3_client = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
-        url = s3_client.generate_presigned_url(
-            "get_object",
-            Params={"Bucket": bucket, "Key": key},
-            ExpiresIn=3600,
-        )
-    except Exception as e:
-        logger.error(f"Failed to generate presigned URL: {e}")
-        raise HTTPException(status_code=500, detail={"success": False, "message": "Failed to generate download URL"})
+        att = ingest_repo.get_attachment(attachment_id)
+        if not att:
+            raise HTTPException(status_code=404, detail={"success": False, "message": "Attachment not found"})
 
-    return PresignedUrlResponse(url=url, filename=att.get("filename"))
+        # Verify the attachment belongs to a message in this org
+        msg = ingest_repo.get_inbound_message(att["inbound_message_id"], org_id)
+        if not msg:
+            raise HTTPException(status_code=403, detail={"success": False, "message": "Access denied"})
+
+        # Generate presigned URL
+        s3_path = att["s3_path"]
+        if s3_path.startswith("s3://"):
+            parts = s3_path[5:].split("/", 1)
+            bucket = parts[0]
+            key = parts[1] if len(parts) > 1 else ""
+        else:
+            bucket = os.getenv("EMAIL_INGEST_S3_BUCKET", "frontiermind-email-ingest")
+            key = s3_path
+
+        try:
+            import boto3
+            s3_client = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))
+            url = s3_client.generate_presigned_url(
+                "get_object",
+                Params={"Bucket": bucket, "Key": key},
+                ExpiresIn=3600,
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate presigned URL: {e}")
+            raise HTTPException(status_code=500, detail={"success": False, "message": "Failed to generate download URL"})
+
+        return PresignedUrlResponse(url=url, filename=att.get("filename"))
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in get_attachment_download: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "message": str(e)},
+        )
 
 
 @router.post(
     "/attachments/{attachment_id}/process",
-    response_model=SuccessResponse,
-    summary="Trigger extraction for a specific attachment",
+    response_model=AttachmentProcessingResponse,
+    summary="Trigger MRP extraction for a specific attachment",
 )
 async def process_attachment(
     request: Request,
     attachment_id: int,
-    auth: dict = Depends(require_api_key),
-) -> SuccessResponse:
+    body: ProcessAttachmentRequest = ProcessAttachmentRequest(),
+    auth: dict = Depends(require_supabase_auth),
+) -> AttachmentProcessingResponse:
     require_repo()
     org_id = validate_org_access(request, auth)
 
-    att = ingest_repo.get_attachment(attachment_id)
-    if not att:
-        raise HTTPException(status_code=404, detail={"success": False, "message": "Attachment not found"})
+    try:
+        att = ingest_repo.get_attachment(attachment_id)
+        if not att:
+            raise HTTPException(status_code=404, detail={"success": False, "message": "Attachment not found"})
 
-    msg = ingest_repo.get_inbound_message(att["inbound_message_id"], org_id)
-    if not msg:
-        raise HTTPException(status_code=403, detail={"success": False, "message": "Access denied"})
+        msg = ingest_repo.get_inbound_message(att["inbound_message_id"], org_id)
+        if not msg:
+            raise HTTPException(status_code=403, detail={"success": False, "message": "Access denied"})
 
-    # Mark as processing
-    ingest_repo.update_attachment_status(attachment_id, "processing")
+        from services.ingest.attachment_processing_service import AttachmentProcessingService
 
-    return SuccessResponse(message=f"Processing triggered for attachment {attachment_id}")
+        service = AttachmentProcessingService(ingest_repo)
+        result = service.process_attachment(
+            attachment_id=attachment_id,
+            org_id=org_id,
+            project_id=body.project_id,
+            billing_month=body.billing_month,
+        )
+
+        return AttachmentProcessingResponse(
+            success=result.get("success", False),
+            message="Extraction complete" if result.get("success") else "Extraction failed",
+            status=result.get("status", "failed"),
+            observation_id=result.get("observation_id"),
+            mrp_per_kwh=result.get("mrp_per_kwh"),
+            confidence=result.get("confidence"),
+            billing_month=result.get("billing_month"),
+            failed_reason=result.get("failed_reason"),
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error in process_attachment: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail={"success": False, "message": str(e)},
+        )

@@ -74,14 +74,44 @@ class EmailIngestService:
         return {"action": "subscription_confirmed"}
 
     def _handle_notification(self, sns_body: dict) -> Dict[str, Any]:
-        """Parse the SES notification and process the email."""
+        """Parse the SNS notification and process the email.
+
+        Supports two notification sources:
+        - S3 event notification (triggered when SES stores the raw email in S3)
+        - Legacy SES SNS action (direct SES → SNS with email content inline)
+        """
         message_json = sns_body.get("Message", "{}")
         try:
-            ses_notification = json.loads(message_json)
+            notification = json.loads(message_json)
         except json.JSONDecodeError:
             raise ValueError("SNS Message is not valid JSON")
 
-        # SES notification contains mail metadata and receipt info
+        # Detect S3 event notification format
+        records = notification.get("Records", [])
+        if records and records[0].get("eventSource") == "aws:s3":
+            return self._handle_s3_event(records[0])
+
+        # Legacy: SES notification format
+        return self._handle_ses_notification(notification)
+
+    def _handle_s3_event(self, record: dict) -> Dict[str, Any]:
+        """Handle S3 event notification — SES stored raw email in S3."""
+        s3_info = record.get("s3", {})
+        bucket = s3_info.get("bucket", {}).get("name", "")
+        s3_key = s3_info.get("object", {}).get("key", "")
+
+        if not bucket or not s3_key:
+            raise ValueError("S3 event missing bucket or key")
+
+        # URL-decode the key (S3 events URL-encode keys with special chars)
+        from urllib.parse import unquote_plus
+        s3_key = unquote_plus(s3_key)
+
+        s3_raw_path = f"s3://{bucket}/{s3_key}"
+        return self.process_inbound_email(s3_raw_path, bucket, s3_key)
+
+    def _handle_ses_notification(self, ses_notification: dict) -> Dict[str, Any]:
+        """Handle legacy SES SNS action notification."""
         mail_info = ses_notification.get("mail", {})
         receipt = ses_notification.get("receipt", {})
 
@@ -94,7 +124,6 @@ class EmailIngestService:
 
         # If no explicit S3 action, construct path from notification content
         if not s3_action:
-            # SES stores in the bucket with the message ID as key
             bucket = os.getenv("EMAIL_INGEST_S3_BUCKET", "frontiermind-email-ingest")
             message_id = mail_info.get("messageId", "")
             if not message_id:
@@ -108,7 +137,6 @@ class EmailIngestService:
             raise ValueError("Cannot determine S3 key from SES notification")
 
         s3_raw_path = f"s3://{bucket}/{s3_key}"
-
         return self.process_inbound_email(s3_raw_path, bucket, s3_key)
 
     # =========================================================================
@@ -240,12 +268,73 @@ class EmailIngestService:
             f"org={org_id}, status={sender_status}, attachments={len(attachment_ids)}"
         )
 
+        # 12. Auto-trigger extraction for known contacts
+        if contact_id and attachment_ids:
+            self._auto_extract_attachments(
+                attachment_ids, org_id, msg_id, counterparty_id, project_id
+            )
+
         return {
             "action": "processed",
             "message_id": msg_id,
             "inbound_message_status": sender_status,
             "attachment_count": len(attachment_ids),
         }
+
+    # =========================================================================
+    # AUTO-EXTRACTION
+    # =========================================================================
+
+    def _auto_extract_attachments(
+        self,
+        attachment_ids: list,
+        org_id: int,
+        message_id: int,
+        counterparty_id: Optional[int],
+        project_id: Optional[int],
+    ) -> None:
+        """
+        Auto-trigger MRP extraction for attachments from known contacts.
+
+        Failures here never fail the email ingestion — they are logged and
+        the attachment stays in 'failed' status for manual retry.
+        """
+        from services.ingest.attachment_processing_service import AttachmentProcessingService
+
+        service = AttachmentProcessingService(self.repo)
+        any_success = False
+
+        for att_id in attachment_ids:
+            try:
+                result = service.process_attachment(
+                    attachment_id=att_id,
+                    org_id=org_id,
+                    project_id=project_id,
+                )
+                if result.get("success"):
+                    any_success = True
+                    logger.info(
+                        f"Auto-extraction succeeded: attachment={att_id}, "
+                        f"observation_id={result.get('observation_id')}"
+                    )
+                else:
+                    logger.warning(
+                        f"Auto-extraction skipped/failed: attachment={att_id}, "
+                        f"reason={result.get('failed_reason')}"
+                    )
+            except Exception as e:
+                logger.warning(
+                    f"Auto-extraction error for attachment {att_id}: {e}",
+                    exc_info=True,
+                )
+
+        if any_success:
+            self.repo.update_inbound_message_status(
+                message_id=message_id,
+                org_id=org_id,
+                inbound_message_status="auto_processed",
+                reason="attachments auto-extracted",
+            )
 
     # =========================================================================
     # HELPERS

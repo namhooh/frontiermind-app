@@ -1,0 +1,16 @@
+{
+  "mrp_method": "utility_total_charges",
+  "mrp_included_components": [
+    "energy_charge"
+  ],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": null,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": null,
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "\"Reference Bill\" For each year of the Agreement, (a) the average of the electric utility bill or bills for UL's factory in Jamiji for the consecutive 12 month period immediately prior to the commencement of such year of the Agreement is the \"Jamiji Reference Bill\" and (b) the average of the electric utility bill or bills for UL's factory in Kimari for the consecutive 12 month period immediately prior to the commencement of such year of the Agreement is the \"Kimari Reference Bill\" and the weighted average, based on kWh consumption at each factory, of the Kimari Reference Bill and the Jamiji Reference Bill is the \"Reference Bill\" for the applicable year of the Agreement.",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "MRP is based on weighted average of historical utility bills from two factory locations (Jamiji and Kimari) over 12-month periods prior to each agreement year. Weighting is based on kWh consumption at each factory. No specific tariff components, exclusions, or currency mentioned."
+}

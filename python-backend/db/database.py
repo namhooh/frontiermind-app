@@ -133,9 +133,10 @@ def get_db_connection(dict_cursor: bool = True):
             _connection_pool.putconn(conn, close=True)
             conn = _connection_pool.getconn()
 
-        # Set cursor factory for dict results if requested
+        # Always save and restore cursor factory to prevent leaking
+        # RealDictCursor across pooled connections
+        original_factory = conn.cursor_factory
         if dict_cursor:
-            original_factory = conn.cursor_factory
             conn.cursor_factory = RealDictCursor
 
         yield conn
@@ -150,10 +151,8 @@ def get_db_connection(dict_cursor: bool = True):
         raise
 
     finally:
-        if dict_cursor and conn:
-            conn.cursor_factory = original_factory
-
         if conn:
+            conn.cursor_factory = original_factory
             _connection_pool.putconn(conn)
 
 

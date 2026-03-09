@@ -1,0 +1,14 @@
+{
+  "mrp_method": "generator_cost",
+  "mrp_included_components": [],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": null,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": null,
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "If in any Operating Year, the Customer shifts a material portion of its power supply to an alternative power source that is not anticipated in Payment formula above (i.e. power not generated from solar, grid, or diesel generator), the Parties shall agree on an applicable reference price and rate-setting methodology for the alternative power source which shall result in expected Payments that are comparable to the Payments expected hereunder, and in the subsequent Operating Year, the Developer shall apply the Payment formula to the alternative power source as agreed.",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "This clause addresses alternative power sources not covered in the main payment formula (excluding solar, grid, or diesel generator). It establishes a process for agreeing on reference pricing for new power sources to maintain payment comparability. This is a contingency clause rather than a specific MRP formula."
+}

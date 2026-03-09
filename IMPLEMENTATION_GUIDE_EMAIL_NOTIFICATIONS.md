@@ -370,7 +370,7 @@ Data submitted by counterparties via token links.
 
 | Enum | Values |
 |------|--------|
-| `email_schedule_type` | `invoice_reminder`, `invoice_initial`, `invoice_escalation`, `compliance_alert`, `meter_data_missing`, `report_ready`, `custom` |
+| `email_schedule_type` | `invoice_reminder`, `invoice_initial`, `compliance_alert`, `custom` |
 | `email_status` | `pending`, `sending`, `delivered`, `bounced`, `failed`, `suppressed` |
 | `submission_token_status` | `active`, `used`, `expired`, `revoked` |
 
@@ -379,8 +379,7 @@ Data submitted by counterparties via token links.
 4 system templates seeded per organization:
 1. **Invoice Delivery** (`invoice_initial`) — Initial invoice notification
 2. **Payment Reminder** (`invoice_reminder`) — Overdue payment reminder
-3. **Invoice Escalation** (`invoice_escalation`) — Escalation to senior contacts
-4. **Compliance Alert** (`compliance_alert`) — Contract compliance breach
+3. **Compliance Alert** (`compliance_alert`) — Contract compliance breach
 
 ---
 
@@ -413,9 +412,7 @@ python-backend/
 │   │       ├── base_email.html
 │   │       ├── invoice_initial.html
 │   │       ├── invoice_reminder.html
-│   │       ├── invoice_escalation.html
-│   │       ├── compliance_alert.html
-│   │       └── report_ready.html  # Scheduled report delivery notification
+│   │       └── compliance_alert.html
 │   └── ingest/                    # Inbound email processing (new)
 │       ├── __init__.py
 │       ├── email_ingest_service.py # MIME parsing, attachment extraction, routing
@@ -532,7 +529,7 @@ async def lifespan(app: FastAPI):
 ```
 app/
 ├── notifications/
-│   └── page.tsx              # Admin dashboard (4 tabs)
+│   └── page.tsx              # Admin dashboard (5 tabs + compose)
 └── submit/
     └── [token]/
         └── page.tsx          # Public submission form (no auth)
@@ -543,14 +540,26 @@ lib/api/
 
 ### Notifications Page (`/notifications`)
 
-Four-tab dashboard:
+Six-tab dashboard plus compose action:
 
-| Tab | Content |
-|-----|---------|
-| **Schedules** | List active/inactive schedules with pause/resume/trigger controls |
-| **Email History** | Paginated table of sent emails with status badges (delivered/bounced/failed) |
-| **Templates** | View system and custom email templates |
-| **Submissions** | View data submitted by counterparties via token links |
+| Tab/Action | Frontend Function | API Client Method | API Endpoint | Primary DB Table(s) | Supporting Tables |
+|-----------|-------------------|-------------------|--------------|---------------------|-------------------|
+| **Inbox** | `loadInbox()` | `InboundClient.listMessages()` | `GET /api/inbound-email/messages` | `inbound_message`, `inbound_attachment` | — |
+| **Schedules** | `loadSchedules()` | `NotificationsClient.listSchedules()` | `GET /api/notifications/schedules` | `email_notification_schedule` | — |
+| **Email History** | `loadEmailLogs()` | `NotificationsClient.listOutboundMessages()` | `GET /api/notifications/outbound-messages` | `outbound_message` | `invoice_header`, `submission_token`, `email_notification_schedule` |
+| **Templates** | `loadTemplates()` | `NotificationsClient.listTemplates()` | `GET /api/notifications/templates` | `email_template` | — |
+| **Submissions** | `loadSubmissions()` | `NotificationsClient.listSubmissions()` | `GET /api/notifications/submissions` | `inbound_message` (filtered: `channel IN ('token_form', 'token_upload')`) | — |
+| **Compose** | `ComposeEmailDialog` | `NotificationsClient.sendEmail()` | `POST /api/notifications/send` | `outbound_message` (INSERT) | `email_template` (read for rendering) |
+
+#### Inbox Actions
+
+| Action | API Endpoint | Effect |
+|--------|-------------|--------|
+| **Approve** | `POST /api/inbound-email/messages/{id}/approve` | Updates `inbound_message` status |
+| **Reject** | `POST /api/inbound-email/messages/{id}/reject` | Updates `inbound_message` status |
+| **Download attachment** | `GET /api/inbound-email/attachments/{id}` | Queries `inbound_attachment` for S3 presigned URL |
+
+> **Note:** The Submissions tab reads from `inbound_message` with a channel filter (`token_form`, `token_upload`), not a separate table. These are submission-type inbound messages distinguished by their `channel` value.
 
 ### Public Submission Page (`/submit/[token]`)
 
@@ -619,6 +628,46 @@ Before sending/receiving emails, the subdomain must be verified in SES:
 3. Create receipt rule set with S3 + SNS actions
 4. Request production access (exit SES sandbox) for outbound sending
 5. Create SNS subscription pointing to ECS backend `/api/ingest/email`
+
+---
+
+## Local Development
+
+### Dev Auth Bypass
+
+All notification/inbound endpoints require Supabase JWT auth (`require_supabase_auth` dependency). In local dev there is no valid Supabase session, so a bypass is available.
+
+**How it works:**
+
+1. **Backend** (`python-backend/middleware/supabase_auth.py`): When `DEV_AUTH_BYPASS=true` **and** `ENVIRONMENT != production`, JWT validation is skipped entirely. A hardcoded dev user (`DEV_USER_ID` or `"dev-user"`) with `admin` role is returned. The `X-Organization-ID` header is still required.
+
+2. **Frontend** (`app/notifications/page.tsx`): When `NODE_ENV === 'development'` and no Supabase session is found, `organizationId` falls back to `1`. The API clients skip the `getAuthToken` call (return `null`), so no `Authorization` header is sent — the backend bypass doesn't check it.
+
+**Safety guards:**
+- Backend requires `ENVIRONMENT != production` — even if `DEV_AUTH_BYPASS` is accidentally set in prod, it's blocked
+- Frontend checks `NODE_ENV === 'development'` — Next.js sets this to `production` in prod builds, so the fallback is dead code in production
+
+### Setup
+
+**Backend** (`python-backend/.env`):
+```
+DEV_AUTH_BYPASS=true
+# DEV_USER_ID=<your-supabase-user-id>  # optional, defaults to "dev-user"
+```
+
+**No frontend env vars needed** — the org ID fallback (`1`) is hardcoded for dev.
+
+### Running Locally
+
+```bash
+# Terminal 1: Backend
+cd python-backend && python -m uvicorn main:app --reload --port 8000
+
+# Terminal 2: Frontend
+npm run dev
+```
+
+Visit `http://localhost:3000/notifications` — all tabs should load data.
 
 ---
 
@@ -728,7 +777,7 @@ quota = client.check_sending_quota()
 | Limitation | Impact | Mitigation |
 |------------|--------|------------|
 | **Auth model: header-only `X-Organization-ID`** | All notification endpoints rely on a client-supplied header with no server-side ownership check. A user with a valid JWT could pass any org ID. | Systemic issue shared with all routers (reports, contracts, etc.). Fix globally when RLS-backed org scoping is added to the API layer. |
-| **Non-invoice schedule types not implemented** | `compliance_alert`, `meter_data_missing`, `report_ready`, and `custom` schedule types are defined in the enum but `_process_single_schedule()` only handles invoice types (`invoice_reminder`, `invoice_initial`, `invoice_escalation`). Unsupported types are silently skipped with a debug log. | Extend `_process_single_schedule()` with type-specific handlers when these features are needed. |
+| **Non-invoice schedule types not implemented** | `compliance_alert` and `custom` schedule types are defined in the enum but `_process_single_schedule()` only handles invoice types (`invoice_reminder`, `invoice_initial`). Unsupported types are silently skipped with a debug log. | Extend `_process_single_schedule()` with type-specific handlers when these features are needed. |
 | **Inbound email ingestion not yet implemented** | `ingest_email`, `org_email_address` tables, `IngestService`, SNS webhook, and review queue are planned but not yet built. | Implement as next phase — DNS + SES setup, then backend, then frontend review UI. |
 | **No test coverage** | No unit or integration tests for the notification system. | Add tests as a separate PR. |
 | **`invoice_direction` now in report GET responses** | Fixed — `invoice_direction` is now returned in `GET /api/reports/generated` and `GET /api/reports/generated/{id}` responses. | Fixed (Round 2 remediation) |

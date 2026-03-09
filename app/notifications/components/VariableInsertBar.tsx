@@ -19,11 +19,10 @@ export function VariableInsertBar({ variables, targetRef, onInsert }: VariableIn
       const end = el.selectionEnd ?? start
       const before = el.value.slice(0, start)
       const after = el.value.slice(end)
-      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLTextAreaElement.prototype, 'value'
-      )?.set || Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype, 'value'
-      )?.set
+      const proto = el instanceof HTMLTextAreaElement
+        ? window.HTMLTextAreaElement.prototype
+        : window.HTMLInputElement.prototype
+      const nativeInputValueSetter = Object.getOwnPropertyDescriptor(proto, 'value')?.set
       if (nativeInputValueSetter) {
         nativeInputValueSetter.call(el, before + tag + after)
         el.dispatchEvent(new Event('input', { bubbles: true }))

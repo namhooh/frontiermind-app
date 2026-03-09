@@ -10,15 +10,11 @@ identity_keys:
   customer:
     sage_field: CUSTOMER_NUMBER
     fm_field: project.sage_id
-    cardinality: "many_sage_to_one_fm"  # XFlora: 4 SAGE → 1 FM
+    cardinality: "one_to_one"  # XFlora split: 4 SAGE → 4 FM (migration 054 Step 2)
     aliases:
-      GC001: GC01
+      GC001: GC001  # Identity — no alias needed (migration 054)
       TWG: TWG01
-      ZL01: ZO01
-      XFAB: XF-AB
-      XFBV: XF-AB
-      XFL01: XF-AB
-      XFSS: XF-AB
+      # XFAB, XFBV, XFL01, XFSS — no aliases, pass through as-is (separate projects)
     exclusions:  # SAGE customers NOT in FM (intentional)
       - KGM01   # Rwanda, not in portfolio
       - IA01    # Different ID than TBC
@@ -91,7 +87,7 @@ commercial:
     sage_field: CONTRACT_CURRENCY
     fm_field: "contract billing_currency (invoice-level)"
     known_mismatches:  # SAGE=USD, FM=local tariff currency -- different domains
-      - {sage_id: XF-AB, sage_currency: USD, fm_currency: KES}
+      - {sage_id: XFAB, sage_currency: USD, fm_currency: KES}
       - {sage_id: QMM01, sage_currency: USD, fm_currency: MGA}
       - {sage_id: ERG, sage_currency: USD, fm_currency: MGA}
       - {sage_id: MIR01, sage_currency: USD, fm_currency: SLE}

@@ -75,6 +75,7 @@ export function ProjectOverviewTab({ data, contractColumns, projectId, onSaved, 
           return (
             <FieldGrid onSaved={onSaved} editMode={editMode} fields={[
               ['Project ID', project.external_project_id, { fieldKey: 'external_project_id', entity: 'projects', entityId: pid, type: 'text' }],
+              ...((project.additional_external_ids as string[] | null)?.length ? [['Additional Project IDs', (project.additional_external_ids as string[]).join(', ')] as FieldDef] : []),
               ['Contract ID', primaryContract?.external_contract_id, ...(cid != null ? [{ fieldKey: 'external_contract_id', entity: 'contracts' as const, entityId: cid, projectId: pid, type: 'text' as const }] : [])],
               ['Project Name', project.name, { fieldKey: 'name', entity: 'projects', entityId: pid, type: 'text' }],
               ...(cid != null ? [['Contract Type', primaryContract?.contract_type_name, { fieldKey: 'contract_type_id', entity: 'contracts' as const, entityId: cid, projectId: pid, type: 'select' as const, options: contractTypeOpts, selectValue: primaryContract?.contract_type_id }] as FieldDef] : []),
@@ -96,9 +97,23 @@ export function ProjectOverviewTab({ data, contractColumns, projectId, onSaved, 
           const primaryContract = contracts[0] as Record<string, unknown> | undefined
           const cid = primaryContract?.id as number | undefined
           const primaryTariff = tariffs[0] as Record<string, unknown> | undefined
+          // Collect distinct phase COD dates from contract lines
+          const contractLines = (data.contract_lines ?? []) as Record<string, unknown>[]
+          const phaseCods = contractLines
+            .filter(cl => cl.phase_cod_date != null)
+            .map(cl => {
+              const desc = String(cl.product_desc ?? '')
+              // Extract "Phase N" from product_desc, e.g. "Metered Energy - Phase 1" → "Phase 1 COD"
+              const phaseMatch = desc.match(/phase\s*\d+/i)
+              const label = phaseMatch ? `${phaseMatch[0]} COD` : (desc || 'Phase COD')
+              return { label, date: String(cl.phase_cod_date) }
+            })
+            .filter((v, i, a) => a.findIndex(x => x.date === v.date) === i)
           return (
             <FieldGrid onSaved={onSaved} editMode={editMode} fields={[
-              ['COD', project.cod_date, { fieldKey: 'cod_date', entity: 'projects' as const, entityId: pid, type: 'date' as const }],
+              ...(phaseCods.length > 0
+                ? phaseCods.map(p => [p.label, p.date] as FieldDef)
+                : [['COD', project.cod_date, { fieldKey: 'cod_date', entity: 'projects' as const, entityId: pid, type: 'date' as const }] as FieldDef]),
               ...(cid != null ? [['Contract Term (years)', primaryContract?.contract_term_years, { fieldKey: 'contract_term_years', entity: 'contracts' as const, entityId: cid, projectId: pid, type: 'number' as const }] as FieldDef] : []),
               ['Installed Capacity (kWp)', project.installed_dc_capacity_kwp, { fieldKey: 'installed_dc_capacity_kwp', entity: 'projects' as const, entityId: pid, type: 'number' as const }],
               ['Energy Sales Type', primaryTariff?.energy_sale_type_name],

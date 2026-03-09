@@ -1,0 +1,14 @@
+{
+  "mrp_method": null,
+  "mrp_included_components": [],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": null,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": "NGN",
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "6.2 All amounts payable by the Buyer for Energy Output (which shall include, for the avoidance of doubt, Curtailed Energy and energy that was available but was not delivered as a result of an Outage except for Outages of the Buyer's Property caused by the Seller) under this Agreement shall be invoiced and payable in Naira, plus applicable VAT and any other charges and taxes attributable to each Party.\n\n6.3 The Early Termination Payment or any FX Loss/Gain Amount that may become due under this Agreement shall be paid in Naira at the Agreed Exchange Rate.",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "This appears to be a payment terms section rather than an MRP formula. It specifies that payments for energy output shall be made in Nigerian Naira plus applicable VAT and other charges. No MRP calculation methodology is visible in this excerpt."
+}

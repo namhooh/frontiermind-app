@@ -1,0 +1,23 @@
+{
+  "mrp_method": "utility_total_charges",
+  "mrp_included_components": [
+    "energy_charge",
+    "fuel_surcharge",
+    "lighting_levy",
+    "subsidy"
+  ],
+  "mrp_excluded_components": [
+    "VAT",
+    "demand_charge",
+    "fixed_charge"
+  ],
+  "mrp_exclude_vat": true,
+  "mrp_exclude_demand_charges": true,
+  "mrp_currency": "NGN",
+  "floor_ceiling_currency": "NGN",
+  "floor_ceiling_escalation": "none",
+  "mrp_clause_text": "Grid Reference Price = Equal to the sum of the total variable charges (levied per kWh) in the Utility Reference Bills, as defined below, divided by the sum of the total kWh invoiced in the Utility Reference invoices, provided that, in the event that the amount of some or all of the variable charges in the Utility Reference invoices vary depending on time of use, the calculation of the Grid Reference Rate shall only be based on the charges levied and the kWh invoiced during the equivalent period.",
+  "tou_windows": [],
+  "discount_percentage": 0.23,
+  "notes": "Document shows two payment scenarios (grid connected vs not connected) with Maximum vs Minimum Solar Price. Solar Discount of 23.20% is noted to be finalized at PPA amendment signature and applies from COD for the entire duration. Payment formulas use Energy Output multiplied by either Maximum or Minimum Solar Price depending on scenario and price comparison."
+}

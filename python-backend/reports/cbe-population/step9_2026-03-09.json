@@ -1,0 +1,47 @@
+{
+  "step": 9,
+  "step_name": "MRP + Meter Population & Plant Performance",
+  "mode": "LIVE",
+  "status": "pass",
+  "run_date": "2026-03-09",
+  "phases": {
+    "C": {
+      "phase": "C",
+      "rows_updated": 13,
+      "rows_inserted": 292,
+      "projects_covered": [
+        "AMP01",
+        "CAL01",
+        "ERG",
+        "GBL01",
+        "GC001",
+        "IVL01",
+        "JAB01",
+        "KAS01",
+        "LOI01",
+        "MB01",
+        "MF01",
+        "MIR01",
+        "MOH01",
+        "MP01",
+        "MP02",
+        "NBL01",
+        "NBL02",
+        "NC02",
+        "NC03",
+        "QMM01",
+        "TBM01",
+        "UGL01",
+        "UNSOS",
+        "UTK01",
+        "XFAB",
+        "XFBV",
+        "XFL01",
+        "XFSS"
+      ],
+      "info_gaps": [],
+      "errors": []
+    }
+  },
+  "gate_checks": []
+}

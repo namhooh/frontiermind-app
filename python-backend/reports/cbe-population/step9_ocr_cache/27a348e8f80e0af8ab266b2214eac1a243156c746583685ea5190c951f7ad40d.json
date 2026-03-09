@@ -1,0 +1,18 @@
+{
+  "mrp_method": "utility_total_charges",
+  "mrp_included_components": [
+    "energy_charge",
+    "subsidy",
+    "streetlight_levy"
+  ],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": false,
+  "mrp_exclude_demand_charges": false,
+  "mrp_currency": "KES",
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "\"Market Reference Price\" is equal to the sum of (a) the total per kWh charges in the Jamji Reference Bill and (b) the total per kWh charges in the Kimari Reference Bill divided by (c) the sum of the total kWh consumed in the Jamji Reference Bill and the total kWh consumed in the Kimari Reference Bill. The per kWh charges shall include energy charge, subsidy, streetlight levy and any other per kWh charge excluding VAT. If by reason of changes to the presentation or categorization of component charges reflected in the Reference Bill is no longer an adequate and reasonable means for determining per kWh charges payable, then either party may refer determination of the Market Reference Price to Dispute Resolution to determine an appropriate Market Reference Price. An example determination of the Market Reference Price is contained in schedule 15 (Example methodology and approach for calculating market reference price from UL reference bills).",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "MRP calculated as weighted average of two reference bills (Jamji and Kimari). VAT is explicitly excluded. References Schedule 15 for calculation methodology example."
+}

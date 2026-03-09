@@ -14,13 +14,17 @@ import { Button } from '@/app/components/ui/button'
 import { Input } from '@/app/components/ui/input'
 import { Label } from '@/app/components/ui/label'
 import {
-  AdminClient,
+  adminClient,
   type DataSourceResponse,
   type GenerateAPIKeyResponse,
 } from '@/lib/api/adminClient'
-import { OnboardingSummary, API_ENDPOINT } from './OnboardingSummary'
+import { OnboardingSummary, API_ENDPOINT, buildOnboardingSections } from './OnboardingSummary'
 
-const client = new AdminClient()
+const AVAILABLE_SCOPES = [
+  { value: 'meter_data', label: 'Meter Data' },
+  { value: 'fx_rates', label: 'FX Rates' },
+  { value: 'billing_reads', label: 'Billing Reads' },
+] as const
 
 interface GenerateAPIKeyDialogProps {
   open: boolean
@@ -37,7 +41,9 @@ export function GenerateAPIKeyDialog({
   dataSources,
   onCreated,
 }: GenerateAPIKeyDialogProps) {
+  const [keyType, setKeyType] = useState<'source' | 'org'>('source')
   const [dataSourceId, setDataSourceId] = useState<string>('')
+  const [selectedScopes, setSelectedScopes] = useState<string[]>([])
   const [label, setLabel] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -45,7 +51,9 @@ export function GenerateAPIKeyDialog({
   const [keyCopied, setKeyCopied] = useState(false)
 
   function reset() {
+    setKeyType('source')
     setDataSourceId('')
+    setSelectedScopes([])
     setLabel('')
     setSubmitting(false)
     setError(null)
@@ -58,17 +66,26 @@ export function GenerateAPIKeyDialog({
     onOpenChange(isOpen)
   }
 
+  function toggleScope(scope: string) {
+    setSelectedScopes((prev) =>
+      prev.includes(scope) ? prev.filter((s) => s !== scope) : [...prev, scope]
+    )
+  }
+
+  const canSubmit = keyType === 'org' || dataSourceId
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!dataSourceId) return
+    if (!canSubmit) return
 
     setSubmitting(true)
     setError(null)
 
     try {
-      const res = await client.generateAPIKey(organizationId, {
-        data_source_id: Number(dataSourceId),
+      const res = await adminClient.generateAPIKey(organizationId, {
+        data_source_id: keyType === 'source' ? Number(dataSourceId) : null,
         label: label.trim() || undefined,
+        scopes: keyType === 'org' && selectedScopes.length > 0 ? selectedScopes : null,
       })
       setResult(res)
       onCreated()
@@ -88,28 +105,14 @@ export function GenerateAPIKeyDialog({
 
   function handleDownload() {
     if (!result) return
-    const text = [
-      '=== FrontierMind API Onboarding ===',
-      '',
-      `Organization ID: ${result.organization_id}`,
-      `API Key: ${result.api_key}`,
-      `API Endpoint: ${API_ENDPOINT}`,
-      '',
-      '--- Quick Start ---',
-      '',
-      'Push meter data:',
-      `  curl -X POST ${API_ENDPOINT}/api/ingest/meter-data \\`,
-      `    -H "Authorization: Bearer ${result.api_key}" \\`,
-      '    -H "Content-Type: application/json" \\',
-      '    -d \'{"readings": [...]}\'',
-      '',
-      'Upload a file (CSV/JSON):',
-      `  curl -X POST ${API_ENDPOINT}/api/ingest/upload \\`,
-      `    -H "Authorization: Bearer ${result.api_key}" \\`,
-      '    -F "file=@meter_data.csv"',
-    ].join('\n')
-
-    const blob = new Blob([text], { type: 'text/plain' })
+    const content = buildOnboardingSections({
+      endpoint: API_ENDPOINT,
+      apiKey: result.api_key,
+      organizationId: result.organization_id,
+      scopes: result.scopes,
+      dataSourceId: result.data_source_id,
+    })
+    const blob = new Blob([content], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
@@ -134,23 +137,78 @@ export function GenerateAPIKeyDialog({
 
         {!result ? (
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Key type selector */}
             <div className="space-y-2">
-              <Label htmlFor="ds-select">Data Source *</Label>
-              <select
-                id="ds-select"
-                value={dataSourceId}
-                onChange={(e) => setDataSourceId(e.target.value)}
-                required
-                className="flex h-9 w-full rounded-md border border-slate-200 bg-white px-3 py-1 text-sm outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
-              >
-                <option value="">Select a data source</option>
-                {dataSources.map((ds) => (
-                  <option key={ds.id} value={ds.id}>
-                    {ds.name}
-                  </option>
-                ))}
-              </select>
+              <Label>Key Type</Label>
+              <div className="flex gap-2">
+                <button
+                  type="button"
+                  onClick={() => setKeyType('source')}
+                  className={`px-3 py-1.5 text-sm rounded-md border ${
+                    keyType === 'source'
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  Data Source
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setKeyType('org')}
+                  className={`px-3 py-1.5 text-sm rounded-md border ${
+                    keyType === 'org'
+                      ? 'border-slate-900 bg-slate-900 text-white'
+                      : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                  }`}
+                >
+                  Organization-wide
+                </button>
+              </div>
             </div>
+
+            {keyType === 'source' ? (
+              <div className="space-y-2">
+                <Label htmlFor="ds-select">Data Source *</Label>
+                <select
+                  id="ds-select"
+                  value={dataSourceId}
+                  onChange={(e) => setDataSourceId(e.target.value)}
+                  required
+                  className="flex h-9 w-full rounded-md border border-slate-200 bg-white px-3 py-1 text-sm outline-none focus:border-slate-400 focus:ring-1 focus:ring-slate-400"
+                >
+                  <option value="">Select a data source</option>
+                  {dataSources.map((ds) => (
+                    <option key={ds.id} value={ds.id}>
+                      {ds.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                <Label>Scopes <span className="text-slate-400 font-normal">(optional — leave unchecked for all)</span></Label>
+                <div className="flex flex-wrap gap-2">
+                  {AVAILABLE_SCOPES.map((scope) => (
+                    <label
+                      key={scope.value}
+                      className="flex items-center gap-1.5 rounded-md border border-slate-200 px-3 py-1.5 text-sm cursor-pointer hover:bg-slate-50"
+                    >
+                      <input
+                        type="checkbox"
+                        checked={selectedScopes.includes(scope.value)}
+                        onChange={() => toggleScope(scope.value)}
+                        className="rounded border-slate-300"
+                      />
+                      {scope.label}
+                    </label>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-500">
+                  When no scopes are selected, the key has access to all data types.
+                </p>
+              </div>
+            )}
+
             <div className="space-y-2">
               <Label htmlFor="key-label">Label</Label>
               <Input
@@ -171,7 +229,7 @@ export function GenerateAPIKeyDialog({
               >
                 Cancel
               </Button>
-              <Button type="submit" disabled={submitting || !dataSourceId}>
+              <Button type="submit" disabled={submitting || !canSubmit}>
                 {submitting ? 'Generating...' : 'Generate Key'}
               </Button>
             </DialogFooter>
@@ -204,6 +262,8 @@ export function GenerateAPIKeyDialog({
             <OnboardingSummary
               organizationId={result.organization_id}
               apiKey={result.api_key}
+              scopes={result.scopes}
+              dataSourceId={result.data_source_id}
             />
 
             <DialogFooter>

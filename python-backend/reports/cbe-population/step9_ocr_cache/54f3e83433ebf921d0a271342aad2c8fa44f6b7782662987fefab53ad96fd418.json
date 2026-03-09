@@ -1,0 +1,26 @@
+{
+  "mrp_method": "utility_variable_charges_tou",
+  "mrp_included_components": [
+    "energy_charge",
+    "variable_charges"
+  ],
+  "mrp_excluded_components": [
+    "VAT",
+    "demand_charge"
+  ],
+  "mrp_exclude_vat": true,
+  "mrp_exclude_demand_charges": true,
+  "mrp_currency": "GHC",
+  "floor_ceiling_currency": "USD",
+  "floor_ceiling_escalation": "2.5% annual",
+  "mrp_clause_text": "Grid Reference Price = Equal to the sum of the total variable charges (levied per kWh) in the Utility Reference Invoices, as defined below, divided by the sum of the total kWh invoiced in the Utility Reference Invoices, provided that, in the event that the amount of some or all of the variable charges in the Utility Reference Invoices vary depending on time of use, the calculation of the Grid Reference Price shall only be based on the charges levied and the kWh invoiced related to consumption between 6am and 6pm. VAT and any demand charge savings associated with the System are excluded from the calculation of the Grid Reference Price.",
+  "tou_windows": [
+    {
+      "name": "reference_consumption",
+      "start": "06:00",
+      "end": "18:00"
+    }
+  ],
+  "discount_percentage": 0.21,
+  "notes": "Formula uses Grid Reference Price with 21% solar discount. Payment calculation has minimum floor price of 0.079 USD/kWh (escalating 2.5% annually) and maximum ceiling of 0.210 USD/kWh. Customer must provide utility invoices 15 days before each operating year anniversary. If invoices not provided, developer can use publicly available sources."
+}

@@ -1,0 +1,16 @@
+{
+  "mrp_method": "blended_grid_generator",
+  "mrp_included_components": [
+    "energy_charge"
+  ],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": false,
+  "mrp_exclude_demand_charges": false,
+  "mrp_currency": "NGN",
+  "floor_ceiling_currency": "USD",
+  "floor_ceiling_escalation": "2.5% annual",
+  "mrp_clause_text": "Energy Purchase Rates\n\nDuring periods where the grid is the primary source of (non-solar) electricity for the site (as determined based on the Seller's solar monitoring system), each kilowatt-hour of Energy Output available during said periods will be priced at a 10% discount to the Grid Reference Rate. The Grid Reference Rate will be stated in Naira.\n\nDuring periods where the Buyer's generators are the primary source of (non-solar) electricity for the site (as determined based on the Seller's solar monitoring system), each kilowatt-hour of Energy Output available during said periods will be priced at a 10% discount to the Generator Reference Rate. The Generator Reference Rate will be stated in Naira.\n\nThe Minimum Solar Price is equal to 0.0799 USD per kilowatt-hour for the first Operating Year of the Agreement and the Minimum Solar Price will escalate by 2.5% at the beginning of the second Operating Year and each anniversary thereof. In all instances, the average Price for any Month shall not fall below the Minimum Solar Price, which will be calculated into its Naira value on a monthly basis at the Agreed Exchange Rate.\n\nThe Maximum Solar Price is equal to 0.242 USD per kilowatt-hour for the full Term of the Agreement.\n\nThe following formula will be used to calculate the total amount due from the Buyer to the Seller at the end of each month:\n\nPayment = (1 - Solar Discount) \u00d7 Energy Output_Grid \u00d7 Grid Reference Price\n+ (1 - Solar Discount) \u00d7 Energy Output_Generator \u00d7 Generator Reference Price\n\nor, if higher\n\nPayment = (Energy Output_Grid + Energy Output_Generator) \u00d7 Minimum Solar Price\n\nbut not exceeding\n\nPayment = (Energy Output_Grid + Energy Output_Generator) \u00d7 Maximum Solar Price",
+  "tou_windows": [],
+  "discount_percentage": 0.1,
+  "notes": "Contract uses dynamic pricing based on whether grid or generator is primary source. Grid Reference Rate and Generator Reference Rate both stated in Naira. Solar discount of 10% applies to both grid and generator rates. Floor price of $0.0799/kWh escalating at 2.5% annually, ceiling of $0.242/kWh fixed."
+}

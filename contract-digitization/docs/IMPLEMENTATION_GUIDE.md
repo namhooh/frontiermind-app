@@ -3130,4 +3130,15 @@ ORDER BY eili.sort_order;
 
 ---
 
+## Section 14: CBE-Specific Data Population
+
+For CBE (CrossBoundary Energy) — the first client adapter — the full data population workflow, source document inventory, field authority matrix, and discrepancy tracking are documented in dedicated CBE-specific guides:
+
+- [`CBE_data_extracts/CBE_DATA_POPULATION_WORKFLOW.md`](../../CBE_data_extracts/CBE_DATA_POPULATION_WORKFLOW.md) — 11-step population pipeline, field authority matrix, tab-by-tab workbook extraction, validation gates, discrepancy tracking
+- [`CBE_data_extracts/CBE_TO_FRONTIERMIND_MAPPING.md`](../../CBE_data_extracts/CBE_TO_FRONTIERMIND_MAPPING.md) — Field-level schema mapping (CBE source fields → FM canonical tables)
+
+This generic IMPLEMENTATION_GUIDE covers the contract digitization pipeline (OCR, PII, clause extraction, ontology) that applies across all clients. The CBE-specific guides cover source document ingestion, cross-source validation, and the complete population sequence for CBE's data warehouse, workbooks, invoices, and contracts.
+
+---
+
 **This guide provides everything Claude Code needs to implement the complete contract digitization workflow. Share it as context for any implementation tasks.**

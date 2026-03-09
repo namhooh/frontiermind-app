@@ -476,6 +476,27 @@ class RevenueMasterfileData(BaseModel):
     )
 
 
+class SummaryPerformanceRow(BaseModel):
+    """One project-month from the PPW Summary-Performance tab."""
+    sage_id: str
+    month: date
+    actual_invoiced_energy_kwh: Optional[float] = None
+    expected_output_kwh: Optional[float] = None
+    actual_irradiance_wm2: Optional[float] = None
+    expected_irradiance_wm2: Optional[float] = None
+    plant_availability_pct: Optional[float] = None
+    expected_pr_pct: Optional[float] = None
+
+
+class WaterfallRow(BaseModel):
+    """One project row from the PPW Project Waterfall tab."""
+    sage_id: str
+    installed_capacity_kwp: Optional[float] = None
+    expected_energy_kwh: Optional[float] = None
+    actual_energy_kwh: Optional[float] = None
+    tariff_rate_per_kwh: Optional[float] = None
+
+
 class PlantPerformanceMonthly(BaseModel):
     """Monthly performance data from the Plant Performance Workbook."""
     month: date

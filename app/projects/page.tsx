@@ -3,7 +3,7 @@
 import { useState, useCallback, useEffect, useMemo, Suspense } from 'react'
 import { useSearchParams } from 'next/navigation'
 import Link from 'next/link'
-import { ArrowLeft, Loader2, Pencil, PencilOff } from 'lucide-react'
+import { ArrowLeft, Loader2, Pencil, PencilOff, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { IS_DEMO } from '@/lib/demoMode'
 import { toast } from 'sonner'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/app/components/ui/tabs'
@@ -19,7 +19,6 @@ import { TechnicalTab } from './components/TechnicalTab'
 import { MonthlyBillingTab } from './components/MonthlyBillingTab'
 import { PlantPerformanceTab } from './components/PlantPerformanceTab'
 import { PortfolioHome } from './components/PortfolioHome'
-import { CommunicationsTab } from './components/CommunicationsTab'
 // import { SpreadsheetTab } from './components/SpreadsheetTab'
 
 export default function ProjectsPage() {
@@ -40,6 +39,7 @@ function ProjectsPageContent() {
   const [mrpMonthly, setMrpMonthly] = useState<MRPObservation[]>([])
   const [mrpAnnual, setMrpAnnual] = useState<MRPObservation[]>([])
   const [mrpTokens, setMrpTokens] = useState<SubmissionTokenItem[]>([])
+  const [sidebarOpen, setSidebarOpen] = useState(true)
 
   /** Fetch MRP post-COD data for a given project + org */
   const fetchMrpData = useCallback(async (pid: number, orgId: number) => {
@@ -157,6 +157,7 @@ function ProjectsPageContent() {
   const fmtPR = (v: unknown) => v == null ? '—' : (Number(v) * 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
   const forecastColumns: Column[] = [
+    { key: 'operating_year', label: 'Op. Year', editable: false, type: 'number' },
     { key: 'forecast_month', label: 'Month', editable: true, type: 'date', editKey: 'forecast_month', format: fmtMonth },
     { key: 'forecast_energy_kwh', label: 'Energy (kWh)', editable: true, type: 'number', format: fmtNum2 },
     { key: 'forecast_ghi_irradiance', label: 'GHI Irradiance', editable: true, type: 'number', format: fmtNum2 },
@@ -251,14 +252,35 @@ function ProjectsPageContent() {
         {/* Layout: Sidebar + Main Content */}
         <div className="flex gap-6">
           {/* Sidebar */}
-          <div className="w-64 shrink-0">
-            <div className="bg-white rounded-lg border border-slate-200 p-3">
-              <ProjectSidebar
-                selectedProjectId={selectedProjectId}
-                onSelectProject={handleSelectProject}
-                onSelectHome={handleSelectHome}
-              />
-            </div>
+          <div className={`shrink-0 transition-all duration-300 ${sidebarOpen ? 'w-64' : 'w-10'}`}>
+            {sidebarOpen ? (
+              <div className="w-64 bg-white rounded-lg border border-slate-200 p-3">
+                <div className="flex justify-end mb-1">
+                  <button
+                    type="button"
+                    onClick={() => setSidebarOpen(false)}
+                    className="p-1 rounded-md text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors"
+                    title="Hide sidebar"
+                  >
+                    <PanelLeftClose className="h-4 w-4" />
+                  </button>
+                </div>
+                <ProjectSidebar
+                  selectedProjectId={selectedProjectId}
+                  onSelectProject={handleSelectProject}
+                  onSelectHome={handleSelectHome}
+                />
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setSidebarOpen(true)}
+                className="p-1.5 rounded-md border border-slate-200 bg-white text-slate-500 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+                title="Show sidebar"
+              >
+                <PanelLeftOpen className="h-4 w-4" />
+              </button>
+            )}
           </div>
 
           {/* Main Content */}
@@ -287,7 +309,6 @@ function ProjectsPageContent() {
                   <TabsTrigger value="technical">Technical</TabsTrigger>
                   <TabsTrigger value="performance">Performance</TabsTrigger>
                   <TabsTrigger value="monthly-billing">Billing</TabsTrigger>
-                  <TabsTrigger value="communications">Communications</TabsTrigger>
                 </TabsList>
 
                 <div className="mt-4 bg-white rounded-lg border border-slate-200 p-6">
@@ -344,13 +365,6 @@ function ProjectsPageContent() {
                     <MonthlyBillingTab projectId={projectId} editMode={editMode} />
                   </TabsContent>
 
-                  <TabsContent value="communications">
-                    <CommunicationsTab
-                      projectId={projectId}
-                      organizationId={dashboard?.project.organization_id as number | undefined}
-                      editMode={editMode}
-                    />
-                  </TabsContent>
 
                 </div>
               </Tabs>

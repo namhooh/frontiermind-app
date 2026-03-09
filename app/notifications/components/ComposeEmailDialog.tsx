@@ -29,7 +29,6 @@ export function ComposeEmailDialog({ open, onOpenChange, client, projectId, onSe
   const [recipients, setRecipients] = useState<string[]>([])
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [selectedTemplateId, setSelectedTemplateId] = useState<number | ''>('')
-  const [includeSubmissionLink, setIncludeSubmissionLink] = useState(false)
   const [previewHtml, setPreviewHtml] = useState('')
   const [previewLoading, setPreviewLoading] = useState(false)
   const [sending, setSending] = useState(false)
@@ -41,7 +40,6 @@ export function ComposeEmailDialog({ open, onOpenChange, client, projectId, onSe
       client.listTemplates().then(setTemplates).catch(() => {})
       setRecipients([])
       setSelectedTemplateId('')
-      setIncludeSubmissionLink(false)
       setPreviewHtml('')
       setError(null)
     }
@@ -77,7 +75,7 @@ export function ComposeEmailDialog({ open, onOpenChange, client, projectId, onSe
       const result = await client.sendEmail({
         template_id: Number(selectedTemplateId),
         recipient_emails: recipients,
-        include_submission_link: includeSubmissionLink,
+        include_submission_link: false,
       })
       onOpenChange(false)
       onSent?.()
@@ -91,7 +89,7 @@ export function ComposeEmailDialog({ open, onOpenChange, client, projectId, onSe
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[90vh] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle>Compose Email</DialogTitle>
         </DialogHeader>
@@ -100,7 +98,7 @@ export function ComposeEmailDialog({ open, onOpenChange, client, projectId, onSe
           <div className="p-2 text-sm text-red-600 bg-red-50 rounded border border-red-200">{error}</div>
         )}
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 flex-1 min-h-0">
           {/* Left: Form */}
           <div className="space-y-4">
             <div>
@@ -127,21 +125,14 @@ export function ComposeEmailDialog({ open, onOpenChange, client, projectId, onSe
               </select>
             </div>
 
-            <label className="flex items-center gap-2 text-sm text-slate-700 cursor-pointer">
-              <input
-                type="checkbox"
-                checked={includeSubmissionLink}
-                onChange={(e) => setIncludeSubmissionLink(e.target.checked)}
-                className="rounded border-slate-300 text-blue-600 focus:ring-blue-500"
-              />
-              Include submission link
-            </label>
           </div>
 
           {/* Right: Preview */}
-          <div>
+          <div className="flex flex-col min-h-[400px]">
             <label className="block text-sm font-medium text-slate-700 mb-1">Preview</label>
-            <TemplatePreview html={previewHtml} loading={previewLoading} />
+            <div className="flex-1 min-h-0">
+              <TemplatePreview html={previewHtml} loading={previewLoading} />
+            </div>
           </div>
         </div>
 

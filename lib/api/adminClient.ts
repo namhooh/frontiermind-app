@@ -38,7 +38,7 @@ export interface DataSourceResponse {
 export interface CredentialResponse {
   id: number
   organization_id: number
-  data_source_id: number
+  data_source_id: number | null
   auth_type: string
   label: string | null
   is_active: boolean
@@ -46,21 +46,24 @@ export interface CredentialResponse {
   last_error: string | null
   error_count: number
   token_expires_at: string | null
+  scopes: string[] | null
   created_at: string
   updated_at: string
 }
 
 export interface GenerateAPIKeyRequest {
-  data_source_id: number
+  data_source_id?: number | null
   label?: string
+  scopes?: string[] | null
 }
 
 export interface GenerateAPIKeyResponse {
   credential_id: number
   organization_id: number
-  data_source_id: number
+  data_source_id: number | null
   api_key: string
   label: string | null
+  scopes: string[] | null
   created_at: string
 }
 
@@ -530,6 +533,7 @@ export class AdminAPIError extends Error {
 export interface AdminClientConfig {
   baseUrl?: string
   enableLogging?: boolean
+  getAuthToken?: () => Promise<string | null>
 }
 
 // ============================================================================
@@ -539,10 +543,22 @@ export interface AdminClientConfig {
 export class AdminClient {
   private baseUrl: string
   private enableLogging: boolean
+  private getAuthToken?: () => Promise<string | null>
 
   constructor(config: AdminClientConfig = {}) {
     this.baseUrl = config.baseUrl || API_BASE_URL
     this.enableLogging = config.enableLogging ?? false
+    this.getAuthToken = config.getAuthToken
+  }
+
+  private async getAuthHeaders(orgId?: number): Promise<Record<string, string>> {
+    const headers: Record<string, string> = {}
+    if (orgId != null) headers['X-Organization-ID'] = String(orgId)
+    if (this.getAuthToken) {
+      const token = await this.getAuthToken()
+      if (token) headers['Authorization'] = `Bearer ${token}`
+    }
+    return headers
   }
 
   private log(message: string, data?: unknown): void {
@@ -602,8 +618,10 @@ export class AdminClient {
 
   async listCredentials(organizationId: number): Promise<CredentialResponse[]> {
     this.log('Listing credentials', { organizationId })
+    const headers = await this.getAuthHeaders(organizationId)
     const response = await fetch(
-      `${this.baseUrl}/api/ingest/credentials?organization_id=${organizationId}`
+      `${this.baseUrl}/api/ingest/credentials`,
+      { headers }
     )
     return this.handleResponse<CredentialResponse[]>(response)
   }
@@ -613,11 +631,13 @@ export class AdminClient {
     request: GenerateAPIKeyRequest
   ): Promise<GenerateAPIKeyResponse> {
     this.log('Generating API key', { organizationId, request })
+    const headers = await this.getAuthHeaders(organizationId)
+    headers['Content-Type'] = 'application/json'
     const response = await fetch(
-      `${this.baseUrl}/api/ingest/credentials/generate-key?organization_id=${organizationId}`,
+      `${this.baseUrl}/api/ingest/credentials/generate-key`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(request),
       }
     )
@@ -630,11 +650,13 @@ export class AdminClient {
     request: UpdateCredentialRequest
   ): Promise<CredentialResponse> {
     this.log('Updating credential', { credentialId, organizationId, request })
+    const headers = await this.getAuthHeaders(organizationId)
+    headers['Content-Type'] = 'application/json'
     const response = await fetch(
-      `${this.baseUrl}/api/ingest/credentials/${credentialId}?organization_id=${organizationId}`,
+      `${this.baseUrl}/api/ingest/credentials/${credentialId}`,
       {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(request),
       }
     )
@@ -668,9 +690,10 @@ export class AdminClient {
 
   async deleteCredential(credentialId: number, organizationId: number): Promise<void> {
     this.log('Deleting credential', { credentialId, organizationId })
+    const headers = await this.getAuthHeaders(organizationId)
     const response = await fetch(
-      `${this.baseUrl}/api/ingest/credentials/${credentialId}?organization_id=${organizationId}`,
-      { method: 'DELETE' }
+      `${this.baseUrl}/api/ingest/credentials/${credentialId}`,
+      { method: 'DELETE', headers }
     )
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({}))
@@ -855,15 +878,14 @@ export class AdminClient {
     body: { project_id: number; operating_year: number; max_uses?: number }
   ): Promise<MRPCollectionResponse> {
     this.log('Generating MRP collection token', { orgId, body })
+    const headers = await this.getAuthHeaders(orgId)
+    headers['Content-Type'] = 'application/json'
+    headers['X-Frontend-URL'] = typeof window !== 'undefined' ? window.location.origin : ''
     const response = await fetch(
       `${this.baseUrl}/api/notifications/mrp-collection`,
       {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'X-Organization-ID': String(orgId),
-          'X-Frontend-URL': typeof window !== 'undefined' ? window.location.origin : '',
-        },
+        headers,
         body: JSON.stringify(body),
       }
     )
@@ -909,11 +931,12 @@ export class AdminClient {
     tokenId: number
   ): Promise<{ success: boolean; message: string }> {
     this.log('Revoking submission token', { orgId, tokenId })
+    const headers = await this.getAuthHeaders(orgId)
     const response = await fetch(
       `${this.baseUrl}/api/notifications/tokens/${tokenId}/revoke`,
       {
         method: 'POST',
-        headers: { 'X-Organization-ID': String(orgId) },
+        headers,
       }
     )
     return this.handleResponse<{ success: boolean; message: string }>(response)
@@ -929,9 +952,10 @@ export class AdminClient {
     if (params?.submission_type) searchParams.set('submission_type', params.submission_type)
     if (params?.include_expired) searchParams.set('include_expired', 'true')
     const qs = searchParams.toString()
+    const headers = await this.getAuthHeaders(orgId)
     const response = await fetch(
       `${this.baseUrl}/api/notifications/tokens${qs ? `?${qs}` : ''}`,
-      { headers: { 'X-Organization-ID': String(orgId) } }
+      { headers }
     )
     return this.handleResponse<SubmissionTokenListResponse>(response)
   }
@@ -1134,4 +1158,12 @@ export class AdminClient {
 // Default Instance
 // ============================================================================
 
-export const adminClient = new AdminClient()
+export const adminClient = new AdminClient({
+  getAuthToken: async () => {
+    if (typeof window === 'undefined') return null
+    const { createClient } = await import('@/lib/supabase/client')
+    const supabase = createClient()
+    const { data: { session } } = await supabase.auth.getSession()
+    return session?.access_token ?? null
+  },
+})

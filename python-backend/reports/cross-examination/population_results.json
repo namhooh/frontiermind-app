@@ -1,0 +1,19 @@
+{
+  "KAS01": {
+    "sage_id": "KAS01",
+    "project_id": 53,
+    "contract_id": 19,
+    "counts": {
+      "contract_line": 3,
+      "clause_tariff": 4,
+      "tariff_rate_year1": 4
+    },
+    "clause_tariff_ids": [
+      21,
+      22,
+      23,
+      24
+    ],
+    "dry_run": false
+  }
+}

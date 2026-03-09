@@ -1,0 +1,24 @@
+{
+  "mrp_method": "utility_total_charges",
+  "mrp_included_components": [
+    "energy_charge",
+    "fuel_surcharge",
+    "rural_electrification_levy",
+    "inflation_adjustment",
+    "water_resource_management",
+    "exchange_rate_fluctuation",
+    "renewable_energy_premium"
+  ],
+  "mrp_excluded_components": [
+    "VAT"
+  ],
+  "mrp_exclude_vat": true,
+  "mrp_exclude_demand_charges": true,
+  "mrp_currency": "KES",
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "June 2023 KSh/kWh Consumption 20.97 FCC 4.49 FERFA 2.06 IA 0.85 WARMA 0.01 ERC 0.03 REP 1.05 VAT 4.07 Total 33.54",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "Kenya utility bill breakdown showing various regulatory charges and levies. VAT is listed separately at bottom but excluded from MRP calculation basis. Components include Fuel Cost Charge (FCC), Foreign Exchange Rate Fluctuation Adjustment (FERFA), Inflation Adjustment (IA), Water Resource Management Authority (WARMA), Energy Regulatory Commission (ERC), and Renewable Energy Premium (REP)."
+}

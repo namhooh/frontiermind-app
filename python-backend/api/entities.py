@@ -9,13 +9,14 @@ import logging
 import json
 from datetime import date, datetime
 from decimal import Decimal
-from fastapi import APIRouter, HTTPException, status, Query, Path
+from fastapi import APIRouter, HTTPException, Response, status, Query, Path
 from pydantic import BaseModel, Field
 from typing import Any, List, Optional
 
 from psycopg2 import sql
 
 from db.database import get_db_connection, init_connection_pool
+from db.integration_repository import IntegrationRepository
 
 logger = logging.getLogger(__name__)
 
@@ -835,7 +836,8 @@ async def get_project_dashboard(
                         SELECT cl.id, cl.contract_id, cl.billing_product_id,
                                cl.meter_id, m.name AS meter_name,
                                cl.contract_line_number, cl.energy_category::text AS energy_category,
-                               cl.parent_contract_line_id
+                               cl.parent_contract_line_id,
+                               cl.phase_cod_date, cl.product_desc
                         FROM contract_line cl
                         JOIN contract c ON c.id = cl.contract_id
                         LEFT JOIN meter m ON m.id = cl.meter_id
@@ -1535,7 +1537,13 @@ class ExchangeRateBulkResponse(BaseModel):
 )
 async def bulk_store_exchange_rates(
     body: ExchangeRateBulkInput,
+    response: Response,
 ) -> ExchangeRateBulkResponse:
+    # Deprecated: Use POST /api/ingest/fx-rates instead
+    response.headers["Deprecation"] = "true"
+    response.headers["Sunset"] = "2026-09-01"
+    response.headers["Link"] = '</api/ingest/fx-rates>; rel="successor-version"'
+
     if not USE_DATABASE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1543,53 +1551,25 @@ async def bulk_store_exchange_rates(
         )
 
     try:
-        with get_db_connection() as conn:
-            conn.autocommit = False
-            try:
-                with conn.cursor() as cur:
-                    # Resolve currency_code → currency_id
-                    cur.execute(
-                        "SELECT id FROM currency WHERE code = %s",
-                        (body.currency_code,),
-                    )
-                    row = cur.fetchone()
-                    if not row:
-                        raise HTTPException(
-                            status_code=status.HTTP_400_BAD_REQUEST,
-                            detail={"success": False, "error": "InvalidCurrency", "message": f"Currency code not found: {body.currency_code}"},
-                        )
-                    currency_id = row["id"]
+        repo = IntegrationRepository()
+        code_to_id = repo.resolve_currency_codes([body.currency_code])
+        if body.currency_code not in code_to_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"success": False, "error": "InvalidCurrency", "message": f"Currency code not found: {body.currency_code}"},
+            )
 
-                    inserted = 0
-                    updated = 0
-
-                    for rate_entry in body.rates:
-                        cur.execute(
-                            """
-                            INSERT INTO exchange_rate
-                                (organization_id, currency_id, rate_date, rate, source)
-                            VALUES (%s, %s, %s, %s, 'bulk_api')
-                            ON CONFLICT (organization_id, currency_id, rate_date)
-                            DO UPDATE SET rate = EXCLUDED.rate, source = EXCLUDED.source
-                            RETURNING (xmax = 0) AS is_insert
-                            """,
-                            (body.organization_id, currency_id, rate_entry.rate_date, rate_entry.fx_rate),
-                        )
-                        result_row = cur.fetchone()
-                        if result_row["is_insert"]:
-                            inserted += 1
-                        else:
-                            updated += 1
-
-                conn.commit()
-                return ExchangeRateBulkResponse(success=True, inserted=inserted, updated=updated)
-
-            except HTTPException:
-                conn.rollback()
-                raise
-            except Exception:
-                conn.rollback()
-                raise
+        currency_id = code_to_id[body.currency_code]
+        rates = [
+            {"currency_id": currency_id, "rate_date": r.rate_date, "rate": float(r.fx_rate)}
+            for r in body.rates
+        ]
+        inserted, updated = repo.upsert_exchange_rates(
+            organization_id=body.organization_id,
+            rates=rates,
+            source="bulk_api",
+        )
+        return ExchangeRateBulkResponse(success=True, inserted=inserted, updated=updated)
 
     except HTTPException:
         raise

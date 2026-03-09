@@ -152,8 +152,8 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject, onSelectHom
             onClick={onSelectHome}
             className={`w-full flex items-center gap-2.5 px-3 py-2.5 rounded-xl text-sm font-medium transition-colors ${
               selectedProjectId === null
-                ? 'bg-blue-700/70 text-white'
-                : 'bg-blue-100 text-slate-700 hover:bg-blue-200'
+                ? 'bg-slate-50 text-slate-600 hover:bg-slate-100'
+                : 'bg-slate-50 text-slate-600 hover:bg-slate-100'
             }`}
           >
             <BarChart3 className="h-4 w-4 shrink-0" />

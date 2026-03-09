@@ -1,0 +1,20 @@
+{
+  "mrp_method": "utility_variable_charges_tou",
+  "mrp_included_components": [
+    "variable_charges"
+  ],
+  "mrp_excluded_components": [
+    "demand_charge",
+    "fixed_charge",
+    "VAT"
+  ],
+  "mrp_exclude_vat": true,
+  "mrp_exclude_demand_charges": true,
+  "mrp_currency": "NGN",
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "Where: Payment = Monthly payment due to Seller for Energy Output, denominated in Naira. Solar Discount = 10%. Energy Output_Grid = Quantity of Energy Output (in kWh) for supply to Buyer's private distribution network available to displace demand for an equivalent quantity of energy supplied by the Utility during the given period. Energy Output_Gen = Quantity of Energy Output (in kWh) for supply to Buyer's private distribution network available to displace demand for an equivalent quantity of energy supplied by the Buyer's Generator Equipment during the given period. Grid Reference Price = Equal to the sum of the total variable charges (levied per kWh) in the Utility Reference Bills, as defined below, divided by the sum of the total kWh invoiced in the Utility Reference Invoices, provided that, in the event that the amount of some or all of the variable charges in the Utility Reference Invoices vary depending on time of use, the 1/1",
+  "tou_windows": null,
+  "discount_percentage": 0.1,
+  "notes": "Formula references both grid displacement and generator displacement components. Text appears to be cut off at the end (1/1). Solar discount of 10% is explicitly stated."
+}

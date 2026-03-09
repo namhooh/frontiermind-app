@@ -9,8 +9,8 @@ Database Reference: migration 032_email_notification_engine.sql
 
 from enum import Enum
 from datetime import datetime, time
-from typing import List, Dict, Optional, Any
-from pydantic import BaseModel, Field, ConfigDict
+from typing import ClassVar, List, Dict, Optional, Any
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 
 # =============================================================================
@@ -20,10 +20,7 @@ from pydantic import BaseModel, Field, ConfigDict
 class EmailScheduleType(str, Enum):
     INVOICE_REMINDER = "invoice_reminder"
     INVOICE_INITIAL = "invoice_initial"
-    INVOICE_ESCALATION = "invoice_escalation"
     COMPLIANCE_ALERT = "compliance_alert"
-    METER_DATA_MISSING = "meter_data_missing"
-    REPORT_READY = "report_ready"
     CUSTOM = "custom"
 
 
@@ -95,12 +92,20 @@ class UpdateEmailTemplateRequest(BaseModel):
     is_active: Optional[bool] = None
 
 
+class DueDateRelativeConfig(BaseModel):
+    """Configuration for due-date-relative invoice reminder timing."""
+    days_before: Optional[int] = Field(None, ge=1, description="Send N days before due date")
+    on_due_date: bool = Field(False, description="Send on the due date")
+    days_after_start: Optional[int] = Field(None, ge=1, description="Start sending N days after due date")
+    days_after_interval: Optional[int] = Field(None, ge=1, description="Repeat every N days after start")
+
+
 class CreateScheduleRequest(BaseModel):
     """Request to create a notification schedule."""
     name: str = Field(..., min_length=1, max_length=255)
     email_template_id: int
     email_schedule_type: EmailScheduleType
-    report_frequency: str = Field(..., description="Reuses report_frequency enum: monthly, quarterly, annual, on_demand")
+    report_frequency: str = Field(..., description="Reuses report_frequency enum: monthly, quarterly, annual, on_demand, daily")
     day_of_month: Optional[int] = Field(None, ge=1, le=28)
     time_of_day: time = Field(default=time(9, 0))
     timezone: str = Field("UTC")
@@ -112,6 +117,22 @@ class CreateScheduleRequest(BaseModel):
     project_id: Optional[int] = None
     contract_id: Optional[int] = None
     counterparty_id: Optional[int] = None
+
+    DIRECT_SEND_TYPES: ClassVar[set] = {EmailScheduleType.CUSTOM, EmailScheduleType.COMPLIANCE_ALERT}
+
+    @model_validator(mode="after")
+    def validate_direct_send_recipients(self):
+        if self.email_schedule_type in self.DIRECT_SEND_TYPES:
+            emails = self.conditions.get("recipient_emails", [])
+            if not isinstance(emails, list) or len(emails) == 0:
+                raise ValueError("Direct-send schedule types require conditions.recipient_emails (non-empty list)")
+        return self
+
+    @model_validator(mode="after")
+    def validate_daily_no_day_of_month(self):
+        if self.report_frequency == "daily":
+            self.day_of_month = None
+        return self
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -331,6 +352,25 @@ class SubmissionResponseListResponse(BaseModel):
     success: bool = True
     submissions: List[SubmissionResponseModel]
     total: int
+
+
+# =============================================================================
+# AI TEMPLATE GENERATION MODELS
+# =============================================================================
+
+class TemplateGenerateRequest(BaseModel):
+    """Request to generate an email template using AI."""
+    prompt: str = Field(..., min_length=1, max_length=2000, description="Natural language description of the desired template")
+    email_schedule_type: str = Field(..., description="Template type context (invoice_reminder, compliance_alert, etc.)")
+    variables: List[str] = Field(default_factory=list, description="Jinja2 variables to include in the template")
+
+
+class TemplateGenerateResponse(BaseModel):
+    """Response containing AI-generated template fields."""
+    success: bool = True
+    subject_template: str
+    body_html: str
+    body_text: str
 
 
 # =============================================================================

@@ -1085,7 +1085,7 @@ and token-based external submission collection.
 - `database/migrations/032_email_notification_engine.sql`
 
 **New Enums:**
-- `email_schedule_type`: `invoice_reminder`, `invoice_initial`, `invoice_escalation`, `compliance_alert`, `meter_data_missing`, `report_ready`, `custom`
+- `email_schedule_type`: `invoice_reminder`, `invoice_initial`, `compliance_alert`, `custom` (migration 057 removed `invoice_escalation`, `meter_data_missing`, `report_ready`)
 - `email_status`: `pending`, `sending`, `delivered`, `bounced`, `failed`, `suppressed`
 - `submission_token_status`: `active`, `used`, `expired`, `revoked`
 
@@ -2349,5 +2349,110 @@ per-meter performance detail, and restructured frontend tabs.
 - **Dropped `submission_response` table entirely**
 
 **Verification:** Two DO blocks — Phase A asserts row count parity between `submission_response` and backfilled `inbound_message` rows; Phase B asserts `submission_response` table, `legacy_submission_response_id` column, and `reference_price.submission_response_id` column are all gone.
+
+---
+
+### Migration 053 - Organization-Scoped API Keys (2026-03-06)
+
+**Migration:** `database/migrations/053_org_scoped_credentials.sql`
+
+**Description:** Refactors the API key system from source-scoped (one key per data source) to org-scoped (one key, many data types). Adds indexed key lookup for O(1) authentication.
+
+**Changes to `integration_credential`:**
+
+- `data_source_id` — Made **nullable** (was NOT NULL). NULL = org-scoped key, non-NULL = legacy source-scoped key.
+- `allowed_scopes TEXT[]` — New column. NULL = all scopes allowed. Non-null = restricted to listed values (`meter_data`, `fx_rates`, `billing_reads`). CHECK constraint validates values.
+- `api_key_hash VARCHAR(64)` — New column. SHA-256 hash of the plaintext API key for indexed O(1) lookup. Partial index on non-NULL values.
+
+**Constraint:** `chk_allowed_scopes_valid` — ensures `allowed_scopes` values are a subset of `{meter_data, fx_rates, billing_reads}`.
+
+**Index:** `idx_credential_api_key_hash` — partial index on `api_key_hash WHERE api_key_hash IS NOT NULL`.
+
+**Backward Compatible:** Existing keys with `data_source_id` set continue to work unchanged.
+
+---
+
+### v10.12 - 2026-03-08 (Sage ID Alias Reversal, Data Fixes, Multi-Phase Support & XF-AB Split)
+
+**Migration:** `database/migrations/054_sage_id_aliases_and_data_fixes.sql`
+
+**Description:** Reverses sage_id aliases to match xlsx source values, applies Step 1 data corrections, adds schema support for multi-phase projects, splits XF-AB into 4 separate projects, and creates ZL02 contracts.
+
+**Sage ID Alias Reversal:**
+- `GC01` → `GC001` (Garden City Mall — restores original SAGE customer number)
+- `ZO01` → `ZL01` (Zoodlabs Group — restores original SAGE customer number)
+- Clears `extraction_metadata.source_sage_customer_id` for these projects (no longer needed)
+
+**Data Fixes:**
+- `MOH01.cod_date`: `2025-09-01` → `2025-12-12` (from Customer summary.xlsx)
+- `NBL01` counterparty: `CROSSBOUNDARY ENERGY NIGERIA LTD.` → `Heineken` (offtaker, not CBE SPV)
+
+**New Column: `project.additional_external_ids TEXT[]`**
+- Stores secondary client-defined project identifiers for multi-phase projects
+- Primary ID remains in `external_project_id VARCHAR(50)` (unchanged, used as lookup key)
+- Populated: QMM01 `['MG 22452']`, NBL01 `['NG 22051']`
+
+**New Column: `contract_line.phase_cod_date DATE`**
+- Phase-specific Commercial Operations Date
+- Use when a project has multiple phases with different COD dates (e.g., KAS01 Phase 1 vs Phase 2)
+
+**XF-AB Split (Step 2):**
+- Renamed `XF-AB` → `XFAB` (primary project keeps existing contract id=31)
+- Updated counterparty name: "XFlora Group" → "Xflora Africa Blooms"
+- Created 3 new projects: `XFBV` (Xflora Bloom Valley), `XFL01` (Xpressions Flora), `XFSS` (Sojanmi Spring)
+- Each new project has counterparty, primary contract (with external_contract_id, payment_terms, dates), and 2 contract lines (metered + available)
+- Ancillary contracts (id=53,54) remain on XFAB
+- Total projects: 32 → 35
+
+**ZL02 Contracts (Step 2):**
+- Added 4 SAGE contracts under existing ZL02 project: CONCBCH0-2025-00002 (RENTAL/USD), CONCBCH0-2025-00003 (OM/USD), CONCBCH0-2025-00004 (RENTAL/USD), CONSLL02-2025-00003 (OM/SLE)
+
+---
+
+### Migration 055 - Step 4: Billing Product & Tariff Structure (2026-03-08)
+
+**Migration:** `database/migrations/055_step4_billing_product_tariff_structure.sql`
+
+**Description:** CBE Data Population Step 4. Links all 114 contract lines to billing products, creates contract-to-billing-product junctions, and inserts clause_tariff placeholders for all primary contracts.
+
+**Section A — contract_type_id fixes:**
+- Fixed NULL `contract_type_id` on 9 contracts: NBL01→PPA, LOI01→ESA, IVL01 OM→OTHER, TWG01 OM→OTHER, XFBV/XFL01/XFSS→PPA, ZL02 contracts→LEASE/OTHER
+
+**Section B — contract_line.billing_product_id:**
+- Linked all 114 contract lines to canonical `billing_product` entries using country-specific product codes (GHREVS for Ghana, KEREVS for Kenya, NIREVS for Nigeria, EGREVS for Egypt, ENER for generic, MOREVS for Mozambique, MAREVS003 for BESS)
+
+**Section C — contract_billing_product junction:**
+- Inserted 72 new junction records (10 pre-existing from pilot)
+- Set `is_primary = true` on 36 contracts (one primary per contract)
+- Total: 82 junction records across 36 contracts
+
+**Section D — clause_tariff placeholders:**
+- Inserted 36 new `clause_tariff` entries (6 pre-existing from pilot)
+- `base_rate = NULL` for all new entries (populated in Step 7/9)
+- Energy sale type breakdown: FIXED_SOLAR (20), NOT_ENERGY_SALES (10), FLOATING_GRID (5), FLOATING_GRID_GENERATOR (1), FLOATING_GENERATOR (1), NULL/placeholder (5)
+- Escalation rates populated where known from PO Summary
+
+**Verification:** 5/5 gates passed.
+
+---
+
+### Migration 056 - billing_tax_rule Project Scope (2026-03-08)
+
+**Migration:** `database/migrations/056_billing_tax_rule_project_scope.sql`
+
+**Description:** Adds `project_id` column to `billing_tax_rule` for project-specific tax overrides. Resolves Section 9.3 open decision (Option A): `NULL project_id` = country default, non-NULL = project-specific override.
+
+**Modified Table: `billing_tax_rule`**
+| Column | Type | Description |
+|--------|------|-------------|
+| `project_id` | BIGINT FK → `project(id)` | NULL = country default, non-NULL = project-specific override |
+
+**Constraint Changes:**
+- Dropped and recreated `billing_tax_rule_no_overlap` GiST exclusion to include `COALESCE(project_id, 0)`, allowing project-specific rules to coexist with country defaults
+- Dropped and recreated `idx_billing_tax_rule_lookup` to include `project_id`
+
+**Application Impact:**
+- Billing API lookup should check project-specific rule first, then fall back to country default (`project_id IS NULL`)
+- Step 8 script populates country defaults + project-specific overrides from invoice PDF extraction
 
 ---

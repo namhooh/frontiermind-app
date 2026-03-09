@@ -7,12 +7,13 @@ Handles CRUD operations for:
 - Ingestion logs (audit trail)
 """
 
+import hashlib
 import hmac
 import json
 import logging
 import os
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from cryptography.fernet import Fernet
 from psycopg2.extras import Json
@@ -124,14 +125,16 @@ class IntegrationRepository:
     def create_credential(
         self,
         organization_id: int,
-        data_source_id: int,
-        auth_type: str,
+        data_source_id: Optional[int] = None,
+        auth_type: str = "api_key",
         credentials: Optional[Dict[str, str]] = None,
         api_key: Optional[str] = None,
         access_token: Optional[str] = None,
         refresh_token: Optional[str] = None,
         token_expires_at: Optional[datetime] = None,
-        label: Optional[str] = None
+        label: Optional[str] = None,
+        allowed_scopes: Optional[List[str]] = None,
+        api_key_hash: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create a new integration credential."""
         encrypted_creds = self._build_credentials_json(
@@ -151,11 +154,11 @@ class IntegrationRepository:
             INSERT INTO integration_credential (
                 organization_id, data_source_id, auth_type,
                 encrypted_credentials, encryption_method,
-                token_expires_at, label
-            ) VALUES (%s, %s, %s, %s, 'fernet', %s, %s)
+                token_expires_at, label, allowed_scopes, api_key_hash
+            ) VALUES (%s, %s, %s, %s, 'fernet', %s, %s, %s, %s)
             RETURNING id, organization_id, data_source_id, auth_type, label,
                       is_active, last_used_at, last_error, error_count,
-                      token_expires_at, created_at, updated_at
+                      token_expires_at, allowed_scopes, created_at, updated_at
         """
 
         with get_db_connection() as conn:
@@ -163,7 +166,7 @@ class IntegrationRepository:
                 cursor.execute(sql, (
                     organization_id, data_source_id, auth_type,
                     encrypted_creds,
-                    token_expires_at, label
+                    token_expires_at, label, allowed_scopes, api_key_hash
                 ))
                 result = cursor.fetchone()
 
@@ -182,7 +185,7 @@ class IntegrationRepository:
                 SELECT id, organization_id, data_source_id, auth_type, label,
                        encrypted_credentials,
                        is_active, last_used_at, last_error, error_count,
-                       token_expires_at, created_at, updated_at
+                       token_expires_at, allowed_scopes, created_at, updated_at
                 FROM integration_credential
                 WHERE id = %s AND organization_id = %s
             """
@@ -190,7 +193,7 @@ class IntegrationRepository:
             sql = """
                 SELECT id, organization_id, data_source_id, auth_type, label,
                        is_active, last_used_at, last_error, error_count,
-                       token_expires_at, created_at, updated_at
+                       token_expires_at, allowed_scopes, created_at, updated_at
                 FROM integration_credential
                 WHERE id = %s AND organization_id = %s
             """
@@ -222,7 +225,7 @@ class IntegrationRepository:
         sql = """
             SELECT id, organization_id, data_source_id, auth_type, label,
                    is_active, last_used_at, last_error, error_count,
-                   token_expires_at, created_at, updated_at
+                   token_expires_at, allowed_scopes, created_at, updated_at
             FROM integration_credential
             WHERE organization_id = %s
         """
@@ -255,7 +258,8 @@ class IntegrationRepository:
         api_key: Optional[str] = None,
         access_token: Optional[str] = None,
         refresh_token: Optional[str] = None,
-        token_expires_at: Optional[datetime] = None
+        token_expires_at: Optional[datetime] = None,
+        allowed_scopes: Optional[List[str]] = None,
     ) -> Optional[Dict[str, Any]]:
         """Update a credential."""
         updates = []
@@ -296,6 +300,10 @@ class IntegrationRepository:
             updates.append("token_expires_at = %s")
             params.append(token_expires_at)
 
+        if allowed_scopes is not None:
+            updates.append("allowed_scopes = %s")
+            params.append(allowed_scopes)
+
         if not updates:
             return self.get_credential(credential_id, organization_id)
 
@@ -307,7 +315,7 @@ class IntegrationRepository:
             WHERE id = %s AND organization_id = %s
             RETURNING id, organization_id, data_source_id, auth_type, label,
                       is_active, last_used_at, last_error, error_count,
-                      token_expires_at, created_at, updated_at
+                      token_expires_at, allowed_scopes, created_at, updated_at
         """
         params.extend([credential_id, organization_id])
 
@@ -884,20 +892,53 @@ class IntegrationRepository:
     def find_credential_by_api_key(self, api_key: str) -> Optional[Dict[str, Any]]:
         """Find a credential by its plaintext API key.
 
-        Iterates active api_key credentials and uses timing-safe comparison.
+        Two-phase lookup:
+        1. Try O(1) indexed lookup via api_key_hash (SHA-256)
+        2. Fallback to full-scan decrypt for pre-hash keys, then backfill hash
         """
-        sql = """
+        key_hash = hashlib.sha256(api_key.encode()).hexdigest()
+
+        # Phase 1: indexed hash lookup
+        hash_sql = """
             SELECT id, organization_id, data_source_id, auth_type,
-                   encrypted_credentials, is_active,
+                   encrypted_credentials, is_active, allowed_scopes,
                    created_at, updated_at
             FROM integration_credential
-            WHERE auth_type = 'api_key'
+            WHERE api_key_hash = %s
+              AND auth_type = 'api_key'
               AND is_active = true
         """
 
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                cursor.execute(sql)
+                cursor.execute(hash_sql, (key_hash,))
+                row = cursor.fetchone()
+
+        if row:
+            # Verify with timing-safe comparison
+            stored_blob = row.get('encrypted_credentials')
+            if stored_blob:
+                secrets = self._unpack_credentials(stored_blob)
+                stored_key = secrets.get('api_key')
+                if stored_key and hmac.compare_digest(stored_key, api_key):
+                    credential = dict(row)
+                    credential.pop('encrypted_credentials', None)
+                    return credential
+
+        # Phase 2: fallback full-scan for pre-hash keys
+        scan_sql = """
+            SELECT id, organization_id, data_source_id, auth_type,
+                   encrypted_credentials, is_active, allowed_scopes,
+                   created_at, updated_at
+            FROM integration_credential
+            WHERE auth_type = 'api_key'
+              AND is_active = true
+              AND api_key_hash IS NULL
+        """
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(scan_sql)
                 results = cursor.fetchall()
 
         for row in results:
@@ -913,6 +954,98 @@ class IntegrationRepository:
             if hmac.compare_digest(stored_key, api_key):
                 credential = dict(row)
                 credential.pop('encrypted_credentials', None)
+                # Backfill the hash for future O(1) lookups
+                self._backfill_api_key_hash(credential["id"], key_hash)
                 return credential
 
         return None
+
+    def _backfill_api_key_hash(self, credential_id: int, key_hash: str) -> None:
+        """Backfill api_key_hash for a credential that was matched via full-scan."""
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "UPDATE integration_credential SET api_key_hash = %s WHERE id = %s",
+                        (key_hash, credential_id),
+                    )
+            logger.info(f"Backfilled api_key_hash for credential {credential_id}")
+        except Exception as e:
+            logger.warning(f"Failed to backfill api_key_hash for credential {credential_id}: {e}")
+
+    # =====================================================
+    # FX Rate Operations
+    # =====================================================
+
+    def resolve_currency_codes(self, codes: List[str]) -> Dict[str, int]:
+        """Resolve currency codes to IDs.
+
+        Returns: {code: id} dict for every code found.
+        """
+        if not codes:
+            return {}
+
+        sql = "SELECT id, code FROM currency WHERE code = ANY(%s)"
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(sql, (list(set(codes)),))
+                results = cursor.fetchall()
+
+        return {row["code"]: row["id"] for row in results}
+
+    def upsert_exchange_rates(
+        self,
+        organization_id: int,
+        rates: List[Dict],
+        source: str = "api",
+    ) -> Tuple[int, int]:
+        """Upsert exchange rates into the exchange_rate table.
+
+        Args:
+            organization_id: Organization scope.
+            rates: List of dicts with keys: currency_id, rate_date, rate.
+            source: Source label for audit trail.
+
+        Returns:
+            (inserted, updated) counts.
+        """
+        if not rates:
+            return (0, 0)
+
+        inserted = 0
+        updated = 0
+
+        with get_db_connection() as conn:
+            conn.autocommit = False
+            try:
+                with conn.cursor() as cursor:
+                    for entry in rates:
+                        cursor.execute(
+                            """
+                            INSERT INTO exchange_rate
+                                (organization_id, currency_id, rate_date, rate, source)
+                            VALUES (%s, %s, %s, %s, %s)
+                            ON CONFLICT (organization_id, currency_id, rate_date)
+                            DO UPDATE SET rate = EXCLUDED.rate, source = EXCLUDED.source
+                            RETURNING (xmax = 0) AS is_insert
+                            """,
+                            (
+                                organization_id,
+                                entry["currency_id"],
+                                entry["rate_date"],
+                                entry["rate"],
+                                source,
+                            ),
+                        )
+                        result_row = cursor.fetchone()
+                        if result_row["is_insert"]:
+                            inserted += 1
+                        else:
+                            updated += 1
+                conn.commit()
+            except Exception:
+                conn.rollback()
+                raise
+
+        return (inserted, updated)

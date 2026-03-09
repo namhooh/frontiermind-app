@@ -6,4 +6,4 @@
  */
 
 /** Frequency options for scheduled reports and notification schedules */
-export type ReportFrequency = 'monthly' | 'quarterly' | 'annual' | 'on_demand'
+export type ReportFrequency = 'monthly' | 'quarterly' | 'annual' | 'on_demand' | 'daily'

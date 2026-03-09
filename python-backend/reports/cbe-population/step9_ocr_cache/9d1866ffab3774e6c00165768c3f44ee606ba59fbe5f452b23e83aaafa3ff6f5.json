@@ -1,0 +1,16 @@
+{
+  "mrp_method": "generator_cost",
+  "mrp_included_components": [
+    "generator_cost"
+  ],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": null,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": "NGN",
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "2. When the Seller delivers this same amount of energy back to the Buyer, the Seller sells it to the Buyer at the Generator Reference Price (the Seller will bill this energy purchased this energy at), i.e. When the Seller delivers y kWh to the Buyer, the Buyer will owe the Seller: y kWh * Generator Reference Price (NGN/kWh). 3. Items 1 and 2 above would cancel out if the total amount of energy that the Seller delivers to the Buyer in a month (y kWh) exceeds the total amount of energy that the Buyer delivers to the Seller in that month (x kWh). Under normal operation, this will always be the case. Therefore, the Seller would simply bill the Buyer for (y \u2013 x) kWh at the Solar Tariff. CBE's overall monthly invoice to NB would be calculated as follows: 1. Energy the Buyer delivers to the Seller = x kWh 2. Energy the Seller delivers to the Buyer (including deemed energy) = y kWh 3. The Seller bills the Buyer as follows at the end of each month: Invoice amount (NGN) = (y \u2013 x) kWh * Solar Tariff (NGN/kWh)",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "This appears to be describing a net metering arrangement where energy delivered by the buyer to the seller is valued at the Generator Reference Price, while net energy consumption is billed at the Solar Tariff. The Generator Reference Price serves as the credit rate for excess energy delivered to the seller."
+}

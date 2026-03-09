@@ -10,6 +10,7 @@ Used by the ingestion endpoints to authenticate API push clients (e.g. Snowflake
 
 import hmac
 import logging
+import os
 from typing import Optional
 
 from fastapi import Depends, HTTPException, Request, Security, status
@@ -48,6 +49,14 @@ class APIKeyAuth:
         Raises:
             HTTPException 401 if missing or invalid.
         """
+        # Dev auth bypass – skip API key validation entirely (never in production)
+        if os.getenv("DEV_AUTH_BYPASS") == "true" and os.getenv("ENVIRONMENT") != "production":
+            org_header = request.headers.get("X-Organization-ID")
+            return {
+                "organization_id": int(org_header) if org_header else 1,
+                "credential_id": 0,
+            }
+
         if credentials is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -92,6 +101,7 @@ class APIKeyAuth:
             "organization_id": credential["organization_id"],
             "credential_id": credential["id"],
             "data_source_id": credential.get("data_source_id"),
+            "allowed_scopes": credential.get("allowed_scopes"),
         }
 
 

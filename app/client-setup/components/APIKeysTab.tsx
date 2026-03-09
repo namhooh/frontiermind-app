@@ -6,14 +6,12 @@ import { Button } from '@/app/components/ui/button'
 import { Switch } from '@/app/components/ui/switch'
 import { Badge } from '@/app/components/ui/badge'
 import {
-  AdminClient,
+  adminClient,
   type CredentialResponse,
   type DataSourceResponse,
   type OrganizationResponse,
 } from '@/lib/api/adminClient'
 import { GenerateAPIKeyDialog } from './GenerateAPIKeyDialog'
-
-const client = new AdminClient()
 
 interface APIKeysTabProps {
   selectedOrganizationId: number | null
@@ -37,12 +35,12 @@ export function APIKeysTab({ selectedOrganizationId }: APIKeysTabProps) {
 
   // Load orgs + data sources on mount
   useEffect(() => {
-    Promise.all([client.listOrganizations(), client.listDataSources()])
-      .then(([orgs, ds]) => {
-        setOrganizations(orgs)
-        setDataSources(ds)
-      })
-      .catch(() => {})
+    adminClient.listOrganizations()
+      .then(setOrganizations)
+      .catch((err) => console.error('Failed to load organizations:', err))
+    adminClient.listDataSources()
+      .then(setDataSources)
+      .catch((err) => console.error('Failed to load data sources:', err))
   }, [])
 
   const loadCredentials = useCallback(async () => {
@@ -50,7 +48,7 @@ export function APIKeysTab({ selectedOrganizationId }: APIKeysTabProps) {
     setLoading(true)
     setError(null)
     try {
-      const creds = await client.listCredentials(orgId)
+      const creds = await adminClient.listCredentials(orgId)
       setCredentials(creds)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load credentials')
@@ -63,14 +61,15 @@ export function APIKeysTab({ selectedOrganizationId }: APIKeysTabProps) {
     loadCredentials()
   }, [loadCredentials])
 
-  function dataSourceName(dsId: number): string {
+  function dataSourceName(dsId: number | null): string {
+    if (dsId == null) return 'Organization-wide'
     return dataSources.find((ds) => ds.id === dsId)?.name ?? `ID ${dsId}`
   }
 
   async function handleToggleActive(cred: CredentialResponse) {
     if (!orgId) return
     try {
-      await client.updateCredential(cred.id, orgId, { is_active: !cred.is_active })
+      await adminClient.updateCredential(cred.id, orgId, { is_active: !cred.is_active })
       loadCredentials()
     } catch {
       // Silently fail and reload
@@ -82,7 +81,7 @@ export function APIKeysTab({ selectedOrganizationId }: APIKeysTabProps) {
     if (!orgId) return
     if (!confirm(`Delete credential "${cred.label || cred.id}"? This cannot be undone.`)) return
     try {
-      await client.deleteCredential(cred.id, orgId)
+      await adminClient.deleteCredential(cred.id, orgId)
       loadCredentials()
     } catch {
       loadCredentials()
@@ -144,6 +143,7 @@ export function APIKeysTab({ selectedOrganizationId }: APIKeysTabProps) {
                 <th className="text-left px-4 py-2 font-medium text-slate-600">ID</th>
                 <th className="text-left px-4 py-2 font-medium text-slate-600">Label</th>
                 <th className="text-left px-4 py-2 font-medium text-slate-600">Data Source</th>
+                <th className="text-left px-4 py-2 font-medium text-slate-600">Scopes</th>
                 <th className="text-left px-4 py-2 font-medium text-slate-600">Status</th>
                 <th className="text-left px-4 py-2 font-medium text-slate-600">Last Used</th>
                 <th className="text-left px-4 py-2 font-medium text-slate-600">Errors</th>
@@ -159,6 +159,19 @@ export function APIKeysTab({ selectedOrganizationId }: APIKeysTabProps) {
                   </td>
                   <td className="px-4 py-2.5 text-slate-600">
                     {dataSourceName(cred.data_source_id)}
+                  </td>
+                  <td className="px-4 py-2.5">
+                    {cred.scopes ? (
+                      <div className="flex flex-wrap gap-1">
+                        {cred.scopes.map((s) => (
+                          <Badge key={s} variant="secondary" className="text-xs">
+                            {s}
+                          </Badge>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-slate-400 text-xs">All</span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5">
                     <Badge variant={cred.is_active ? 'default' : 'destructive'}>

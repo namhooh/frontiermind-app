@@ -1,0 +1,14 @@
+{
+  "mrp_method": "utility_variable_charges_tou",
+  "mrp_included_components": [],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": null,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": "USD",
+  "floor_ceiling_currency": "USD",
+  "floor_ceiling_escalation": "none",
+  "mrp_clause_text": "2. SSA Amendments. Unless expressly specified otherwise, the following amendments to the SSA shall be effective from the Amendment Effective Date: 2.1. Revised Fixed Solar Discount. In anticipation of the expansion of the Facility, the value of the Fixed Solar Discount set forth in Part I of the SSA is hereby amended from 18.5% and restated as 19.5%. The Current Grid Tariff (Year-1) and Discounted Solar Tariff (Year-1) set forth in Part I of the SSA along with their corresponding values shall be deemed deleted in their entirety. 2.2. Revised Floor Solar Tariff (Year-1). In anticipation of the expansion of the Facility, the value of the Floor Solar Tariff (Year-1) set forth in Part I of the SSA is hereby amended from 0.1199 USD/kWh and restated as 0.0874 USD/kWh.",
+  "tou_windows": [],
+  "discount_percentage": 0.195,
+  "notes": "This appears to be an amendment to a solar service agreement that revises the fixed solar discount from 18.5% to 19.5% and lowers the floor solar tariff from $0.1199/kWh to $0.0874/kWh. The document mentions deletion of Current Grid Tariff and Discounted Solar Tariff values but does not show the actual MRP calculation formula."
+}

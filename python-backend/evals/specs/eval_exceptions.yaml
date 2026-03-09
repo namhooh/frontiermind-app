@@ -6,9 +6,9 @@ schema_version: "1.0"
 
 exceptions:
   - id: EXC-001
-    description: "ABI01, BNT01, ZO01 have no SAGE contracts"
+    description: "ABI01, BNT01, ZL01 have no SAGE contracts"
     scope: "contract mapping"
-    sage_ids: [ABI01, BNT01, ZO01]
+    sage_ids: [ABI01, BNT01, ZL01]
     expiry: null  # Permanent -- these are PDF-only projects
     added: "2026-02-28"
 
@@ -16,7 +16,7 @@ exceptions:
     description: "5 currency mismatches (SAGE=USD, FM=local) are domain differences, not errors"
     scope: "currency validation"
     details:
-      - {sage_id: XF-AB, sage_currency: USD, fm_currency: KES}
+      - {sage_id: XFAB, sage_currency: USD, fm_currency: KES}
       - {sage_id: QMM01, sage_currency: USD, fm_currency: MGA}
       - {sage_id: ERG, sage_currency: USD, fm_currency: MGA}
       - {sage_id: MIR01, sage_currency: USD, fm_currency: SLE}

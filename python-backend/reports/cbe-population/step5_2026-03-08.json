@@ -1,0 +1,632 @@
+{
+  "step": 5,
+  "step_name": "Plant Performance Workbook \u2014 Summary Tabs",
+  "status": "failed",
+  "run_date": "2026-03-08T10:54:58.339086",
+  "dry_run": false,
+  "projects_processed": 29,
+  "total_forecasts_inserted": 262,
+  "total_forecasts_updated": 1314,
+  "capacities_updated": 0,
+  "project_results": [
+    {
+      "sage_id": "AMP01",
+      "project_id": 66,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 14,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "CAL01",
+      "project_id": 76,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 21,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "ERG",
+      "project_id": 68,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 38,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "GBL01",
+      "project_id": 52,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 69,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "GC001",
+      "project_id": 48,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 127,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "IVL01",
+      "project_id": 51,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 39,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "JAB01",
+      "project_id": 69,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 78,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "KAS01",
+      "project_id": 53,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 99,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "LOI01",
+      "project_id": 56,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 86,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "MB01",
+      "project_id": 57,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 38,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "MF01",
+      "project_id": 58,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 38,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "MIR01",
+      "project_id": 72,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 39,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "MOH01",
+      "project_id": 8,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 17,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "MP01",
+      "project_id": 60,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 33,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "MP02",
+      "project_id": 59,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 33,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "NBL01",
+      "project_id": 70,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 71,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "NBL02",
+      "project_id": 71,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 47,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "NC02",
+      "project_id": 61,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 38,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "NC03",
+      "project_id": 62,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 33,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "QMM01",
+      "project_id": 67,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 41,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "TBM01",
+      "project_id": 63,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 47,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "TWG01",
+      "project_id": 75,
+      "forecasts_inserted": 49,
+      "forecasts_updated": 0,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "UGL01",
+      "project_id": 54,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 72,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "UNSOS",
+      "project_id": 74,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 34,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "UTK01",
+      "project_id": 64,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 91,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "XFAB",
+      "project_id": 65,
+      "forecasts_inserted": 0,
+      "forecasts_updated": 71,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "XFBV",
+      "project_id": 113,
+      "forecasts_inserted": 71,
+      "forecasts_updated": 0,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "XFL01",
+      "project_id": 114,
+      "forecasts_inserted": 71,
+      "forecasts_updated": 0,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    },
+    {
+      "sage_id": "XFSS",
+      "project_id": 115,
+      "forecasts_inserted": 71,
+      "forecasts_updated": 0,
+      "capacity_updated": false,
+      "capacity_old": null,
+      "capacity_new": null,
+      "discrepancies": [],
+      "errors": []
+    }
+  ],
+  "gate_checks": [
+    {
+      "name": "All PPW projects have matching sage_id in project table",
+      "passed": true,
+      "expected": "0 unresolved",
+      "actual": "0 unresolved"
+    },
+    {
+      "name": "All production_forecast rows have forecast_energy_kwh",
+      "passed": true,
+      "expected": ">0 forecast rows",
+      "actual": "1576 rows upserted"
+    },
+    {
+      "name": "All processed projects have installed_dc_capacity_kwp",
+      "passed": false,
+      "expected": "0 with NULL capacity",
+      "actual": "3 with NULL: XFBV, XFL01, XFSS"
+    },
+    {
+      "name": "No duplicate production_forecast rows (UNIQUE constraint holds)",
+      "passed": true,
+      "expected": "0 duplicates",
+      "actual": "0 duplicates (enforced by UNIQUE(project_id, forecast_month))"
+    }
+  ],
+  "discrepancies": [
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "GC001",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=107314",
+      "source_b": "db_implied_annual=1084230",
+      "recommended_action": "Difference 90.1% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "KAS01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=134139",
+      "source_b": "db_implied_annual=1439585",
+      "recommended_action": "Difference 90.7% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "cross_check",
+      "project": "KAS01",
+      "field": "waterfall.tariff vs clause_tariff.base_rate",
+      "source_a": "waterfall=0.11415211755469308",
+      "source_b": "db=1.255632",
+      "recommended_action": "Difference 90.9%",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "UTK01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=98294",
+      "source_b": "db_implied_annual=1084365",
+      "recommended_action": "Difference 90.9% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "LOI01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=6583",
+      "source_b": "db_implied_annual=67050",
+      "recommended_action": "Difference 90.2% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "JAB01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=72102",
+      "source_b": "db_implied_annual=821689",
+      "recommended_action": "Difference 91.2% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "UGL01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=94581",
+      "source_b": "db_implied_annual=1230939",
+      "recommended_action": "Difference 92.3% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "XFAB",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=66747",
+      "source_b": "db_implied_annual=694931",
+      "recommended_action": "Difference 90.4% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "NBL01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=358229",
+      "source_b": "db_implied_annual=1869452",
+      "recommended_action": "Difference 80.8% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "GBL01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=112894",
+      "source_b": "db_implied_annual=1391111",
+      "recommended_action": "Difference 91.9% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "TBM01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=226791",
+      "source_b": "db_implied_annual=2320838",
+      "recommended_action": "Difference 90.2% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "NBL02",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=508042",
+      "source_b": "db_implied_annual=5515570",
+      "recommended_action": "Difference 90.8% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "QMM01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=2662259",
+      "source_b": "db_implied_annual=27437533",
+      "recommended_action": "Difference 90.3% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "MIR01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=28125",
+      "source_b": "db_implied_annual=337299",
+      "recommended_action": "Difference 91.7% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "IVL01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=84675",
+      "source_b": "db_implied_annual=2565010",
+      "recommended_action": "Difference 96.7% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "NC02",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=61827",
+      "source_b": "db_implied_annual=630545",
+      "recommended_action": "Difference 90.2% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "MB01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=142579",
+      "source_b": "db_implied_annual=1471409",
+      "recommended_action": "Difference 90.3% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "MF01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=83936",
+      "source_b": "db_implied_annual=852247",
+      "recommended_action": "Difference 90.2% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "ERG",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=951233",
+      "source_b": "db_implied_annual=10765567",
+      "recommended_action": "Difference 91.2% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "UNSOS",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=216200",
+      "source_b": "db_implied_annual=3390683",
+      "recommended_action": "Difference 93.6% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "MP02",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=140311",
+      "source_b": "db_implied_annual=1372123",
+      "recommended_action": "Difference 89.8% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "MP01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=77631",
+      "source_b": "db_implied_annual=778259",
+      "recommended_action": "Difference 90.0% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "NC03",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=375067",
+      "source_b": "db_implied_annual=3959660",
+      "recommended_action": "Difference 90.5% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "CAL01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=2258740",
+      "source_b": "db_implied_annual=26065896",
+      "recommended_action": "Difference 91.3% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "MOH01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=289311",
+      "source_b": "db_implied_annual=3380216",
+      "recommended_action": "Difference 91.4% exceeds 5% threshold",
+      "status": "open"
+    },
+    {
+      "severity": "info",
+      "category": "cross_check",
+      "project": "MOH01",
+      "field": "waterfall.tariff vs clause_tariff.base_rate",
+      "source_a": "waterfall=0.12978248692904298",
+      "source_b": "db=0.1087",
+      "recommended_action": "Difference 19.4%",
+      "status": "open"
+    },
+    {
+      "severity": "warning",
+      "category": "cross_check",
+      "project": "AMP01",
+      "field": "waterfall.expected_energy vs SUM(production_forecast)",
+      "source_a": "waterfall_annual=2938",
+      "source_b": "db_implied_annual=42464",
+      "recommended_action": "Difference 93.1% exceeds 5% threshold",
+      "status": "open"
+    }
+  ],
+  "summary_projects_parsed": 28,
+  "waterfall_rows_parsed": 48
+}

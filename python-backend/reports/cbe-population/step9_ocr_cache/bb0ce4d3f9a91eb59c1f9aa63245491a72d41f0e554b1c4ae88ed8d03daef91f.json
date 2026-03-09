@@ -1,0 +1,14 @@
+{
+  "mrp_method": null,
+  "mrp_included_components": [],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": null,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": null,
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "2. SSA Amendments. Unless expressly specified otherwise, the following amendments shall be incorporated as integral provisions to the SSA and shall be effective from the Third Amendment Effective Date:\n\n2.1. Financing of Interconnection Works. The Customer's existing switchboard requires an expansion to accommodate the interconnection of the solar PV system. The parties hereby agree to carry out the Interconnection Works in accordance with the terms set out in Annexure K.\n\n2.2. Revision to Initial Term of the SSA. CBE Ghana has agreed to finance Customer's portion of the cost of the Interconnection Works by adjusting the Initial Term of the SSA. The duration of the Initial Term set forth in Part I of the SSA is hereby amended from period of 16 years and restated as a period of 18 years, starting from the Phase II Commercial Operation Date.",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "This text appears to be from SSA amendments regarding interconnection works financing and term extension, but does not contain any MRP (Market Reference Price) formula or pricing methodology. The content is about contract amendments extending the initial term from 16 to 18 years to finance interconnection works."
+}

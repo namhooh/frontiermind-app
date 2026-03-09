@@ -25,10 +25,7 @@ const DEFAULT_RETRY_DELAY_MS = 1000
 export type EmailScheduleType =
   | 'invoice_reminder'
   | 'invoice_initial'
-  | 'invoice_escalation'
   | 'compliance_alert'
-  | 'meter_data_missing'
-  | 'report_ready'
   | 'custom'
 
 export type EmailStatus =
@@ -106,6 +103,8 @@ export interface OutboundMessageEntry {
   sent_at?: string
   delivered_at?: string
   created_at: string
+  template_body_html?: string
+  template_body_text?: string
 }
 
 export interface SubmissionResponse {
@@ -222,6 +221,19 @@ export interface ContactItem {
   role?: string
   counterparty_id: number
   counterparty_name?: string
+}
+
+export interface GenerateTemplateRequest {
+  prompt: string
+  email_schedule_type: EmailScheduleType
+  variables: string[]
+}
+
+export interface GenerateTemplateResponse {
+  success: boolean
+  subject_template: string
+  body_html: string
+  body_text: string
 }
 
 export interface ContactListFilters {
@@ -370,7 +382,7 @@ export class NotificationsClient {
         const responseData = await response.json()
         if (!response.ok) {
           const error = new NotificationsAPIError(
-            responseData.detail?.message || responseData.message || 'Request failed',
+            responseData.detail?.message || (typeof responseData.detail === 'string' ? responseData.detail : null) || responseData.message || 'Request failed',
             response.status,
             responseData.detail?.error
           )
@@ -541,6 +553,19 @@ export class NotificationsClient {
   // --------------------------------------------------------------------------
   // Submission Methods
   // --------------------------------------------------------------------------
+
+  // --------------------------------------------------------------------------
+  // AI Template Generation
+  // --------------------------------------------------------------------------
+
+  async generateTemplate(request: GenerateTemplateRequest): Promise<GenerateTemplateResponse> {
+    const headers = await this.getHeaders()
+    return this.fetchWithRetry<GenerateTemplateResponse>(
+      `${this.baseUrl}/api/notifications/templates/generate`,
+      { method: 'POST', headers, body: JSON.stringify(request) },
+      0, // no retries for AI generation
+    )
+  }
 
   // --------------------------------------------------------------------------
   // Preview & Contacts

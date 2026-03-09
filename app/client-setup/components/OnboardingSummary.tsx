@@ -8,15 +8,76 @@ export const API_ENDPOINT =
   process.env.NEXT_PUBLIC_API_ENDPOINT ||
   'https://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com'
 
+interface OnboardingParams {
+  endpoint: string
+  apiKey: string
+  organizationId: number
+  scopes?: string[] | null
+  dataSourceId?: number | null
+}
+
+function shouldShow(scope: string, params: OnboardingParams): boolean {
+  const { scopes, dataSourceId } = params
+  if (!scopes || scopes.length === 0) return true
+  if (!dataSourceId && scope !== 'billing_reads') return true
+  return scopes.includes(scope)
+}
+
+export function buildOnboardingSections(params: OnboardingParams): string {
+  const { endpoint, apiKey, organizationId } = params
+
+  const lines: string[] = [
+    '=== FrontierMind API Onboarding ===',
+    '',
+    `Organization ID: ${organizationId}`,
+    `API Key: ${apiKey}`,
+    `API Endpoint: ${endpoint}`,
+    `Auth Header: Authorization: Bearer ${apiKey}`,
+    '',
+    '--- Available Endpoints ---',
+    '',
+  ]
+
+  if (shouldShow('meter_data', params)) {
+    lines.push('POST /api/ingest/meter-data      Push meter readings (JSON)')
+    lines.push('POST /api/ingest/upload           Upload meter data file (CSV/JSON)')
+  }
+  if (shouldShow('fx_rates', params)) {
+    lines.push('POST /api/ingest/fx-rates         Push FX rates (JSON)')
+  }
+  if (shouldShow('billing_reads', params)) {
+    lines.push('POST /api/ingest/billing-reads    Push billing reads (JSON)')
+  }
+
+  lines.push(
+    '',
+    '--- Notes ---',
+    '- All requests require the auth header above',
+    '- Max 5,000 entries per batch',
+    '- Duplicate records are upserted (updated in place)',
+    `- Full API docs: ${endpoint}/docs`,
+  )
+
+  return lines.join('\n')
+}
+
 interface OnboardingSummaryProps {
   organizationId: number
   apiKey: string
+  scopes?: string[] | null
+  dataSourceId?: number | null
 }
 
-export function OnboardingSummary({ organizationId, apiKey }: OnboardingSummaryProps) {
+export function OnboardingSummary({ organizationId, apiKey, scopes, dataSourceId }: OnboardingSummaryProps) {
   const [copied, setCopied] = useState(false)
 
-  const summaryText = `Organization ID: ${organizationId}\nAPI Key: ${apiKey}\nAPI Endpoint: ${API_ENDPOINT}`
+  const summaryText = buildOnboardingSections({
+    endpoint: API_ENDPOINT,
+    apiKey,
+    organizationId,
+    scopes,
+    dataSourceId,
+  })
 
   async function handleCopy() {
     await navigator.clipboard.writeText(summaryText)

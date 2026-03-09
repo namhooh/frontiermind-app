@@ -20,7 +20,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from models.onboarding import (
     PlantPerformanceData,
     PlantPerformanceMonthly,
+    SummaryPerformanceRow,
     TechnicalModelRow,
+    WaterfallRow,
 )
 
 logger = logging.getLogger(__name__)
@@ -36,14 +38,14 @@ TAB_NAME_TO_SAGE_ID: Dict[str, str] = {
     "NBL": "NBL01",
     "NBL01": "NBL01",
     "NBL02": "NBL02",
-    "Guinness": "GC01",
-    "GC01": "GC01",
+    "Guinness": "GC001",
+    "GC001": "GC001",
     "Unilever": "UGL01",
     "UGL01": "UGL01",
     "Loisaba": "LOI01",
     "LOI01": "LOI01",
-    "XFlora": "XF-AB",
-    "XF-AB": "XF-AB",
+    "XFlora": "XFAB",
+    "XFAB": "XFAB",
     "QMM": "QMM01",
     "QMM01": "QMM01",
     "Jabana": "JAB01",
@@ -57,6 +59,27 @@ TAB_NAME_TO_SAGE_ID: Dict[str, str] = {
     "TWG01": "TWG01",
     "Mirambo": "MIR01",
     "MIR01": "MIR01",
+    "XF": "XFAB",
+    "ERG": "ERG",
+    "UTK01": "UTK01",
+    "AMP01": "AMP01",
+    "IVL01": "IVL01",
+    "TBM01": "TBM01",
+    "MB01": "MB01",
+    "MF01": "MF01",
+    "MP01": "MP01",
+    "MP02": "MP02",
+    "NC02": "NC02",
+    "NC03": "NC03",
+    "MOH01": "MOH01",
+    "XFBV": "XFBV",
+    "XFL01": "XFL01",
+    "XFSS": "XFSS",
+    "LTC": "LTC",
+    "BM": "BM",
+    "AJJ": "AJJ",
+    "ABB": "ABB",
+    "BNTR": "BNTR",
 }
 
 # ─── Known Column Headers ──────────────────────────────────────────────────
@@ -81,6 +104,7 @@ TECH_MODEL_COLUMNS: List[Tuple[str, str]] = [
     ("forecast energy phase 2", "forecast_energy_phase2_kwh"),
     ("forcast combined", "forecast_energy_combined_kwh"),
     ("forecast combined", "forecast_energy_combined_kwh"),
+    ("forecast energy", "forecast_energy_combined_kwh"),
     # Forecast irradiance
     ("ghi irr phase 1", "forecast_ghi_wm2"),
     ("ghi irr phase", "forecast_ghi_wm2"),
@@ -501,6 +525,305 @@ class PlantPerformanceParser:
             logger.debug(f"  {sheet_name}: site params: {params}")
 
         return params
+
+    # ─── Summary-Performance Tab Parsing ────────────────────────────────
+
+    # Block header keywords for the Summary-Performance tab
+    SUMMARY_BLOCK_HEADERS = [
+        ("ACTUAL INVOICED ENERGY", "actual_invoiced_energy_kwh"),
+        ("EXPECTED OUTPUT", "expected_output_kwh"),
+        ("VARIANCE", None),  # Skip variance blocks — set current_block_field=None
+        ("ACTUAL IRRADIANCE", "actual_irradiance_wm2"),
+        ("EXPECTED IRRADIANCE", "expected_irradiance_wm2"),
+        ("PLANT AVAILABILITY", "plant_availability_pct"),
+        ("EXPECTED PR", "expected_pr_pct"),
+    ]
+
+    # Keywords that indicate a summary/total row — NOT a block header
+    SUMMARY_SKIP_KEYWORDS = ("TOTAL", "AGREGATED", "WEIGHTED AVERAGE")
+
+    def parse_summary_performance(
+        self, project_filter: Optional[str] = None,
+    ) -> Dict[str, List[SummaryPerformanceRow]]:
+        """
+        Parse the 'Summary - Performance' tab.
+
+        Returns dict keyed by sage_id -> list of SummaryPerformanceRow.
+        The tab has a block layout: repeated blocks of ~30 project rows,
+        each block for a different metric.
+        """
+        try:
+            import openpyxl
+        except ImportError:
+            raise ImportError("openpyxl is required for .xlsx file support")
+
+        if not os.path.exists(self.file_path):
+            raise FileNotFoundError(f"Workbook not found: {self.file_path}")
+
+        wb = openpyxl.load_workbook(self.file_path, data_only=True, read_only=True)
+
+        # Find the Summary-Performance sheet
+        sheet_name = None
+        for name in wb.sheetnames:
+            if "summary" in name.lower() and "performance" in name.lower():
+                sheet_name = name
+                break
+
+        if not sheet_name:
+            wb.close()
+            logger.warning("No 'Summary - Performance' tab found")
+            return {}
+
+        logger.info(f"Parsing Summary-Performance tab: '{sheet_name}'")
+        rows: List[List[Any]] = []
+        for row in wb[sheet_name].iter_rows(values_only=True):
+            rows.append(list(row))
+        wb.close()
+
+        if len(rows) < 5:
+            return {}
+
+        # Detect month columns from row near the top (rows 1-5)
+        month_cols = self._detect_month_columns(rows)
+        if not month_cols:
+            logger.warning("Could not detect month columns in Summary-Performance tab")
+            return {}
+
+        logger.info(f"  Detected {len(month_cols)} month columns")
+
+        # Detect blocks and parse project rows within each block
+        # result: sage_id -> {month -> partial SummaryPerformanceRow fields}
+        merged: Dict[str, Dict[date, Dict[str, Any]]] = {}
+
+        current_block_field: Optional[str] = None
+
+        for i, row in enumerate(rows):
+            if not row:
+                continue
+
+            # Check if this row is a block header
+            row_text = " ".join(
+                str(c).strip() for c in row[:6] if c is not None
+            ).upper()
+
+            # Skip summary/total rows — they contain block keywords
+            # but are NOT actual block headers (e.g. "TOTAL AGREGATED
+            # ENERGY SALES - ACTUAL INVOICED ENERGY")
+            if any(kw in row_text for kw in self.SUMMARY_SKIP_KEYWORDS):
+                continue
+
+            block_match = None
+            matched_header = False
+            for header_keyword, field_name in self.SUMMARY_BLOCK_HEADERS:
+                if header_keyword in row_text:
+                    block_match = field_name  # None for VARIANCE → skips data rows
+                    matched_header = True
+                    break
+
+            if matched_header:
+                current_block_field = block_match
+                logger.debug(f"  Row {i+1}: block header -> {current_block_field}")
+                continue
+
+            if current_block_field is None:
+                continue
+
+            # Try to read this row as a project data row
+            # sage_id is typically in col D or E (index 3 or 4)
+            sage_id = self._extract_sage_id_from_summary_row(row)
+            if not sage_id:
+                continue
+
+            if project_filter and sage_id != project_filter:
+                continue
+
+            # Read monthly values
+            for col_idx, month_date in month_cols.items():
+                if col_idx >= len(row):
+                    continue
+                val = _safe_float(row[col_idx])
+                if val is None:
+                    continue
+
+                # Normalize percentage fields
+                if current_block_field in ("plant_availability_pct", "expected_pr_pct"):
+                    if val > 1.0:
+                        val = val / 100.0
+
+                merged.setdefault(sage_id, {}).setdefault(month_date, {})[
+                    current_block_field
+                ] = val
+
+        # Convert merged dict to SummaryPerformanceRow list
+        result: Dict[str, List[SummaryPerformanceRow]] = {}
+        for sage_id, months in merged.items():
+            rows_out = []
+            for month_date in sorted(months.keys()):
+                fields = months[month_date]
+                rows_out.append(SummaryPerformanceRow(
+                    sage_id=sage_id,
+                    month=month_date,
+                    **fields,
+                ))
+            result[sage_id] = rows_out
+
+        total_rows = sum(len(v) for v in result.values())
+        logger.info(
+            f"  Parsed {total_rows} summary rows for "
+            f"{len(result)} project(s)"
+        )
+        return result
+
+    def _detect_month_columns(
+        self, rows: List[List[Any]]
+    ) -> Dict[int, date]:
+        """
+        Detect which columns contain monthly time-series data.
+
+        Scans the first ~10 rows for date headers (datetime objects or
+        "Jan-20", "Feb-20" style strings) and returns {col_index: date}.
+        """
+        for i, row in enumerate(rows[:10]):
+            if not row:
+                continue
+            month_map: Dict[int, date] = {}
+            for j, val in enumerate(row):
+                if j < 4:  # Skip project info columns (A-D)
+                    continue
+                d = _parse_date(val)
+                if d:
+                    month_map[j] = d
+
+            # If we found a reasonable number of month columns, use this row
+            if len(month_map) >= 6:
+                return month_map
+
+        return {}
+
+    def _extract_sage_id_from_summary_row(self, row: List[Any]) -> Optional[str]:
+        """
+        Extract sage_id from a project row in the Summary tab.
+
+        Checks cols D and E (index 3, 4) for known sage_ids or tab name mappings.
+        """
+        for col_idx in (4, 3, 5):  # Prefer col E, then D, then F
+            if col_idx >= len(row) or row[col_idx] is None:
+                continue
+            val = str(row[col_idx]).strip()
+            if not val or val in ("-", "N/A", "n/a"):
+                continue
+
+            # Direct sage_id match
+            if val in TAB_NAME_TO_SAGE_ID.values():
+                return val
+
+            # Tab name -> sage_id
+            mapped = TAB_NAME_TO_SAGE_ID.get(val)
+            if mapped:
+                return mapped
+
+        return None
+
+    # ─── Project Waterfall Tab Parsing ────────────────────────────────────
+
+    def parse_project_waterfall(
+        self, project_filter: Optional[str] = None,
+    ) -> List[WaterfallRow]:
+        """
+        Parse the 'Project Waterfall' tab.
+
+        Returns list of WaterfallRow, one per project.
+        Layout: Col A = sage_id, Col B = kWp, Col C = expected energy,
+        Col D = actual energy, Col J = $/kWh tariff.
+        """
+        try:
+            import openpyxl
+        except ImportError:
+            raise ImportError("openpyxl is required for .xlsx file support")
+
+        if not os.path.exists(self.file_path):
+            raise FileNotFoundError(f"Workbook not found: {self.file_path}")
+
+        wb = openpyxl.load_workbook(self.file_path, data_only=True, read_only=True)
+
+        # Find the Project Waterfall sheet
+        sheet_name = None
+        for name in wb.sheetnames:
+            if "waterfall" in name.lower():
+                sheet_name = name
+                break
+
+        if not sheet_name:
+            wb.close()
+            logger.warning("No 'Project Waterfall' tab found")
+            return []
+
+        logger.info(f"Parsing Project Waterfall tab: '{sheet_name}'")
+        rows: List[List[Any]] = []
+        for row in wb[sheet_name].iter_rows(values_only=True):
+            rows.append(list(row))
+        wb.close()
+
+        if len(rows) < 2:
+            return []
+
+        # Find header row
+        header_idx = None
+        for i, row in enumerate(rows[:10]):
+            if not row:
+                continue
+            row_text = " ".join(str(c).strip().lower() for c in row[:5] if c is not None)
+            if any(kw in row_text for kw in ["tab id", "project", "sage", "site"]):
+                header_idx = i
+                break
+
+        # If no header found, assume row 0 is header
+        if header_idx is None:
+            header_idx = 0
+
+        result: List[WaterfallRow] = []
+        for i in range(header_idx + 1, len(rows)):
+            row = rows[i]
+            if not row or all(v is None for v in row):
+                continue
+
+            # Col A: sage_id / Tab ID
+            sage_id_raw = row[0] if len(row) > 0 else None
+            if sage_id_raw is None:
+                continue
+            sage_id_str = str(sage_id_raw).strip()
+            if not sage_id_str or sage_id_str.lower() in ("total", "grand total", ""):
+                continue
+
+            # Skip garbage rows
+            if sage_id_str.lower() in ("tab id", "#ref!", "total", "grand total", ""):
+                continue
+
+            # Resolve via mapping
+            sage_id = TAB_NAME_TO_SAGE_ID.get(sage_id_str, sage_id_str)
+
+            if project_filter and sage_id != project_filter:
+                continue
+
+            # Col B: kWp installed capacity
+            capacity = _safe_float(row[1]) if len(row) > 1 else None
+            # Col C: Expected energy
+            expected = _safe_float(row[2]) if len(row) > 2 else None
+            # Col D: Actual energy
+            actual = _safe_float(row[3]) if len(row) > 3 else None
+            # Col J (index 9): $/kWh tariff
+            tariff = _safe_float(row[9]) if len(row) > 9 else None
+
+            result.append(WaterfallRow(
+                sage_id=sage_id,
+                installed_capacity_kwp=capacity,
+                expected_energy_kwh=expected,
+                actual_energy_kwh=actual,
+                tariff_rate_per_kwh=tariff,
+            ))
+
+        logger.info(f"  Parsed {len(result)} waterfall rows")
+        return result
 
     # ─── Keyword-Based Parsing (fallback) ─────────────────────────────────
 

@@ -83,7 +83,7 @@ class PortfolioRevenueSummaryResponse(BaseModel):
 # ============================================================================
 
 @router.get("/revenue-summary", response_model=PortfolioRevenueSummaryResponse)
-async def get_revenue_summary(
+def get_revenue_summary(
     organization_id: int = Query(..., description="Organisation ID"),
 ):
     """
@@ -175,7 +175,8 @@ async def get_revenue_summary(
             # 3. Data coverage
             # ------------------------------------------------------------------
             cur.execute("SELECT COUNT(*) FROM project WHERE organization_id = %s", (organization_id,))
-            total_projects = cur.fetchone()[0]
+            row = cur.fetchone()
+            total_projects = row[0] if row else 0
 
             cur.execute("""
                 SELECT COUNT(DISTINCT c.project_id)
@@ -185,7 +186,8 @@ async def get_revenue_summary(
                 JOIN project p ON p.id = c.project_id
                 WHERE p.organization_id = %s AND ma.energy_kwh IS NOT NULL
             """, (organization_id,))
-            projects_with_meter = cur.fetchone()[0]
+            row = cur.fetchone()
+            projects_with_meter = row[0] if row else 0
 
             cur.execute("""
                 SELECT COUNT(DISTINCT pf.project_id)
@@ -193,7 +195,8 @@ async def get_revenue_summary(
                 JOIN project p ON p.id = pf.project_id
                 WHERE p.organization_id = %s AND pf.forecast_energy_kwh IS NOT NULL
             """, (organization_id,))
-            projects_with_forecast = cur.fetchone()[0]
+            row = cur.fetchone()
+            projects_with_forecast = row[0] if row else 0
 
             cur.execute("""
                 SELECT COUNT(DISTINCT c.project_id)
@@ -202,7 +205,8 @@ async def get_revenue_summary(
                 JOIN project p ON p.id = c.project_id
                 WHERE p.organization_id = %s AND cl.clause_tariff_id IS NOT NULL
             """, (organization_id,))
-            projects_with_tariff = cur.fetchone()[0]
+            row = cur.fetchone()
+            projects_with_tariff = row[0] if row else 0
 
             # ------------------------------------------------------------------
             # 4. Aggregate into response structures

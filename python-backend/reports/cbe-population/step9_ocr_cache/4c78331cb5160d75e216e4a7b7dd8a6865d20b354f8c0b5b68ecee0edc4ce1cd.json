@@ -1,0 +1,14 @@
+{
+  "mrp_method": "utility_variable_charges_tou",
+  "mrp_included_components": [],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": null,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": null,
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "\"Operating Year\" means successive periods of 1 year beginning on the Commercial Operation Date up to and including one day before the annual anniversary of the Commercial Operation Date.",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "This appears to be a definition clause for 'Operating Year' rather than an MRP formula. No pricing or tariff information is visible in this screenshot."
+}

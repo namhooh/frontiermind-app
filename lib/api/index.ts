@@ -134,6 +134,22 @@ export {
   type OAuthProvider,
 } from './oauthClient'
 
+// Inbound Client
+export {
+  InboundClient,
+  InboundAPIError,
+  type InboundMessage,
+  type InboundAttachment,
+  type InboundMessageStatus,
+  type AttachmentProcessingStatus,
+  type InboundMessageFilters,
+  type ApproveRequest,
+  type RejectRequest,
+  type ApproveResponse,
+  type AttachmentExtractionResult,
+  type InboundClientConfig,
+} from './inboundClient'
+
 // Admin Client
 export {
   AdminClient,

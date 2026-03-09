@@ -89,6 +89,30 @@ class InboundMessageListResponse(BaseModel):
 
 class ReviewAction(BaseModel):
     reason: Optional[str] = None
+    project_id: Optional[int] = None
+    billing_month: Optional[str] = None
+
+
+class ProcessAttachmentRequest(BaseModel):
+    project_id: Optional[int] = None
+    billing_month: Optional[str] = None
+
+
+class AttachmentProcessingResponse(BaseModel):
+    success: bool
+    message: str
+    status: str
+    observation_id: Optional[int] = None
+    mrp_per_kwh: Optional[float] = None
+    confidence: Optional[str] = None
+    billing_month: Optional[str] = None
+    failed_reason: Optional[str] = None
+
+
+class ApproveMessageResponse(BaseModel):
+    success: bool = True
+    message: str
+    extraction_results: List[AttachmentProcessingResponse] = []
 
 
 # =============================================================================

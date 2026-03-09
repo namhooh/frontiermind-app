@@ -142,19 +142,79 @@ class NotificationService:
 
         return total_sent
 
-    INVOICE_SCHEDULE_TYPES = {"invoice_reminder", "invoice_initial", "invoice_escalation"}
+    INVOICE_SCHEDULE_TYPES = {"invoice_reminder", "invoice_initial"}
+    DIRECT_SEND_TYPES = {"custom", "compliance_alert"}
 
     def _process_single_schedule(self, schedule: Dict[str, Any]) -> int:
-        """Process a single notification schedule."""
+        """Process a single notification schedule — dispatches to invoice or direct-send path."""
         schedule_type = schedule.get("email_schedule_type")
-        if schedule_type not in self.INVOICE_SCHEDULE_TYPES:
+
+        if schedule_type in self.DIRECT_SEND_TYPES:
+            return self._process_direct_schedule(schedule)
+        elif schedule_type in self.INVOICE_SCHEDULE_TYPES:
+            return self._process_invoice_schedule(schedule)
+        else:
             logger.debug(
-                f"Schedule {schedule['id']}: email_schedule_type '{schedule_type}' not yet supported"
+                f"Schedule {schedule['id']}: email_schedule_type '{schedule_type}' not supported"
             )
             return 0
 
+    def _process_direct_schedule(self, schedule: Dict[str, Any]) -> int:
+        """Process a direct-send schedule — sends to stored recipient_emails, no invoice matching."""
         org_id = schedule["organization_id"]
-        conditions = schedule.get("conditions", {})
+        conditions = schedule.get("conditions") or {}
+        recipient_emails = conditions.get("recipient_emails", [])
+
+        if not recipient_emails:
+            logger.debug(f"Schedule {schedule['id']}: no recipient_emails in conditions")
+            return 0
+
+        # Build context
+        context = {
+            "schedule_name": schedule.get("name", ""),
+            "schedule_type": schedule.get("email_schedule_type", ""),
+            "date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "sender_name": "FrontierMind",
+        }
+
+        # Render email
+        rendered = self.renderer.render_email(
+            subject_template=schedule["subject_template"],
+            body_html_template=schedule["body_html"],
+            body_text_template=schedule.get("body_text"),
+            context=context,
+        )
+
+        emails_sent = 0
+        for email_addr in recipient_emails:
+            _, success = self._send_single_email(
+                org_id=org_id,
+                template_id=schedule["email_template_id"],
+                schedule_id=schedule["id"],
+                recipient_email=email_addr,
+                subject=rendered["subject"],
+                html_body=rendered["html"],
+                text_body=rendered.get("text"),
+            )
+            if success:
+                emails_sent += 1
+
+        return emails_sent
+
+    def _process_invoice_schedule(self, schedule: Dict[str, Any]) -> int:
+        """Process an invoice-based schedule — matches invoices and resolves contacts."""
+        org_id = schedule["organization_id"]
+        conditions = schedule.get("conditions") or {}
+
+        # Auto-exclude paid invoices when due_date_relative is configured
+        if "due_date_relative" in conditions:
+            statuses = conditions.get("invoice_status")
+            if statuses and "paid" in statuses:
+                conditions = {**conditions, "invoice_status": [s for s in statuses if s != "paid"]}
+            elif not statuses:
+                conditions = {**conditions, "invoice_status": ["sent", "verified"]}
+
+        is_daily = schedule.get("report_frequency") == "daily"
 
         # Find matching invoices
         invoices = self.repo.get_invoices_matching_conditions(
@@ -174,6 +234,12 @@ class NotificationService:
         escalation_after = schedule.get("escalation_after") or 999
 
         for invoice in invoices:
+            # Daily dedup: skip if already sent today for this invoice
+            if is_daily and self.repo.has_sent_today_for_invoice(
+                org_id, invoice["id"], schedule["id"]
+            ):
+                continue
+
             # Check reminder count
             reminder_count = self.repo.count_reminders_for_invoice(
                 org_id, invoice["id"], schedule["id"]

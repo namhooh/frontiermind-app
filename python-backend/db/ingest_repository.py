@@ -109,6 +109,7 @@ class IngestRepository:
         org_id: int,
         channel: Optional[str] = None,
         inbound_message_status: Optional[str] = None,
+        project_id: Optional[int] = None,
         limit: int = 50,
         offset: int = 0,
     ) -> Tuple[List[Dict[str, Any]], int]:
@@ -123,6 +124,9 @@ class IngestRepository:
                 if inbound_message_status:
                     where += " AND inbound_message_status = %s"
                     params.append(inbound_message_status)
+                if project_id is not None:
+                    where += " AND project_id = %s"
+                    params.append(project_id)
 
                 cur.execute(
                     f"SELECT COUNT(*) as cnt FROM inbound_message {where}",
@@ -145,7 +149,31 @@ class IngestRepository:
                     """,
                     params + [limit, offset],
                 )
-                return [dict(row) for row in cur.fetchall()], total
+                messages = [dict(row) for row in cur.fetchall()]
+
+                # Batch-fetch attachments for all messages
+                if messages:
+                    msg_ids = [m["id"] for m in messages]
+                    placeholders = ", ".join(["%s"] * len(msg_ids))
+                    cur.execute(
+                        f"""
+                        SELECT id, inbound_message_id, filename, content_type,
+                               size_bytes, attachment_processing_status,
+                               extraction_result, reference_price_id, created_at
+                        FROM inbound_attachment
+                        WHERE inbound_message_id IN ({placeholders})
+                        ORDER BY id
+                        """,
+                        msg_ids,
+                    )
+                    atts_by_msg: Dict[int, List[Dict[str, Any]]] = {}
+                    for a in cur.fetchall():
+                        a = dict(a)
+                        atts_by_msg.setdefault(a["inbound_message_id"], []).append(a)
+                    for m in messages:
+                        m["attachments"] = atts_by_msg.get(m["id"], [])
+
+                return messages, total
 
     def update_inbound_message_status(
         self,
@@ -315,7 +343,7 @@ class IngestRepository:
                     FROM customer_contact cc
                     JOIN counterparty cp ON cp.id = cc.counterparty_id
                     WHERE LOWER(cc.email) = LOWER(%s)
-                      AND cp.organization_id = %s
+                      AND cc.organization_id = %s
                       AND cc.is_active = true
                     LIMIT 1
                     """,
@@ -340,6 +368,54 @@ class IngestRepository:
                 )
                 row = cur.fetchone()
                 return dict(row) if row else None
+
+    # =========================================================================
+    # ATTACHMENT PROCESSING HELPERS
+    # =========================================================================
+
+    def get_message_for_attachment(self, attachment_id: int) -> Optional[Dict[str, Any]]:
+        """Fetch the parent inbound_message for a given attachment."""
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT im.*
+                    FROM inbound_message im
+                    JOIN inbound_attachment ia ON ia.inbound_message_id = im.id
+                    WHERE ia.id = %s
+                    """,
+                    (attachment_id,),
+                )
+                row = cur.fetchone()
+                return dict(row) if row else None
+
+    def resolve_project_for_counterparty(
+        self, counterparty_id: int, org_id: int
+    ) -> Optional[int]:
+        """
+        Find the unique project with a REBASED_MARKET_PRICE tariff for a counterparty.
+
+        Returns project_id if exactly one match, None otherwise.
+        """
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    SELECT DISTINCT ct.project_id
+                    FROM clause_tariff ct
+                    JOIN escalation_type esc ON esc.id = ct.escalation_type_id
+                    JOIN contract c ON c.id = ct.contract_id
+                    WHERE c.counterparty_id = %s
+                      AND c.organization_id = %s
+                      AND esc.code = 'REBASED_MARKET_PRICE'
+                      AND ct.is_current = true
+                    """,
+                    (counterparty_id, org_id),
+                )
+                rows = cur.fetchall()
+                if len(rows) == 1:
+                    return rows[0]["project_id"]
+                return None
 
     # =========================================================================
     # DUAL-WRITE HELPERS

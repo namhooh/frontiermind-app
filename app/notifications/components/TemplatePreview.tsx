@@ -9,7 +9,7 @@ interface TemplatePreviewProps {
 
 export function TemplatePreview({ html, loading }: TemplatePreviewProps) {
   return (
-    <div className="relative border border-slate-200 rounded-lg overflow-hidden bg-white" style={{ height: 400 }}>
+    <div className="relative border border-slate-200 rounded-lg overflow-hidden bg-white h-full">
       {loading && (
         <div className="absolute inset-0 flex items-center justify-center bg-white/80 z-10">
           <Loader2 className="w-5 h-5 animate-spin text-slate-400" />

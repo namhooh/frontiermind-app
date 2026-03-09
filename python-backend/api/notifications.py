@@ -33,6 +33,8 @@ from models.notifications import (
     PreviewTemplateResponse,
     ContactItem,
     ContactListResponse,
+    TemplateGenerateRequest,
+    TemplateGenerateResponse,
 )
 from db.notification_repository import NotificationRepository
 from db.database import init_connection_pool, get_db_connection
@@ -271,6 +273,84 @@ async def delete_template(template_id: int, auth: dict = Depends(require_supabas
 
 
 # ============================================================================
+# AI Template Generation
+# ============================================================================
+
+@router.post(
+    "/templates/generate",
+    response_model=TemplateGenerateResponse,
+    summary="Generate email template using AI",
+)
+async def generate_template(
+    body: TemplateGenerateRequest, auth: dict = Depends(require_supabase_auth),
+) -> TemplateGenerateResponse:
+    """Use Claude to generate an HTML email template from a natural language prompt."""
+    import json as _json
+    from anthropic import Anthropic
+
+    anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not anthropic_api_key:
+        raise HTTPException(status_code=500, detail={"success": False, "message": "ANTHROPIC_API_KEY not configured"})
+
+    variables_list = ", ".join(f"{{{{ {v} }}}}" for v in body.variables) if body.variables else "none provided"
+
+    system_prompt = (
+        "You are an expert email template designer for a renewable energy contract management platform called FrontierMind. "
+        "Generate a professional, responsive HTML email template based on the user's description.\n\n"
+        "Rules:\n"
+        "- Use Jinja2 {{ variable_name }} syntax for dynamic content\n"
+        "- Include ALL provided variables naturally in the template\n"
+        "- Generate clean, inline-styled HTML that renders well in email clients\n"
+        "- Use a professional color scheme (blues/grays) with good typography\n"
+        "- Include a header, body content, and footer section\n"
+        "- Make the template responsive with max-width container\n"
+        "- Do NOT use external CSS or JavaScript\n"
+        "- Generate a matching plain text version\n\n"
+        "Return ONLY valid JSON with exactly these keys:\n"
+        '{ "subject_template": "...", "body_html": "...", "body_text": "..." }\n\n'
+        "No markdown code fences. No explanation. Just the JSON object."
+    )
+
+    user_message = (
+        f"Template type: {body.email_schedule_type}\n"
+        f"Description: {body.prompt}\n"
+        f"Available variables: {variables_list}"
+    )
+
+    try:
+        client = Anthropic(api_key=anthropic_api_key)
+        response = client.messages.create(
+            model="claude-haiku-4-5-20251001",
+            max_tokens=4096,
+            temperature=0.7,
+            system=system_prompt,
+            messages=[{"role": "user", "content": user_message}],
+        )
+
+        raw_text = response.content[0].text.strip()
+        # Strip markdown code fences if present
+        if raw_text.startswith("```"):
+            raw_text = raw_text.split("\n", 1)[1] if "\n" in raw_text else raw_text[3:]
+            if raw_text.endswith("```"):
+                raw_text = raw_text[:-3].strip()
+
+        result = _json.loads(raw_text)
+
+        return TemplateGenerateResponse(
+            success=True,
+            subject_template=result["subject_template"],
+            body_html=result["body_html"],
+            body_text=result["body_text"],
+        )
+    except _json.JSONDecodeError as e:
+        logger.error(f"AI template generation returned invalid JSON: {e}")
+        raise HTTPException(status_code=502, detail={"success": False, "message": "AI returned invalid response. Please try again."})
+    except Exception as e:
+        logger.error(f"AI template generation failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail={"success": False, "message": f"Template generation failed: {e}"})
+
+
+# ============================================================================
 # Template Preview
 # ============================================================================
 
@@ -323,12 +403,35 @@ async def preview_template(
             detail={"success": False, "message": "Provide template_id or inline subject_template + body_html"},
         )
 
-    # Build context
+    # Build context: start with sample defaults, then overlay real org data
     context = dict(SAMPLE_CONTEXT)
 
-    # If invoice_header_id provided, use real data
+    # Fetch real organization data to replace hardcoded placeholders
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT name FROM organization WHERE id = %s",
+                    (org_id,),
+                )
+                org_row = cur.fetchone()
+                if org_row:
+                    context["company_name"] = org_row["name"]
+                    context["sender_name"] = org_row["name"]
+
+                # Use a real project name if available
+                cur.execute(
+                    "SELECT name FROM project WHERE organization_id = %s ORDER BY id LIMIT 1",
+                    (org_id,),
+                )
+                proj_row = cur.fetchone()
+                if proj_row:
+                    context["project_name"] = proj_row["name"]
+    except Exception as e:
+        logger.warning(f"Failed to load org context for preview: {e}")
+
+    # If invoice_header_id provided, overlay real invoice data
     if body.invoice_header_id:
-        _validate_entity_ownership("project", body.invoice_header_id, org_id) if False else None
         try:
             from services.email.notification_service import NotificationService
             service = NotificationService(notification_repo)

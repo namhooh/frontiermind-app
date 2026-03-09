@@ -1,0 +1,26 @@
+{
+  "mrp_method": "blended_grid_generator",
+  "mrp_included_components": [
+    "energy_charge",
+    "fuel_surcharge"
+  ],
+  "mrp_excluded_components": [
+    "VAT",
+    "demand_charge"
+  ],
+  "mrp_exclude_vat": true,
+  "mrp_exclude_demand_charges": true,
+  "mrp_currency": "NGN",
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "between 6am and 5pm. VAT and any demand charge savings associated with the System are excluded from the calculation of the Grid Reference Price. No less than 15 days prior to the annual anniversary of each Operating Year, the Buyer and the Seller shall jointly verify the electric utility invoices (the \"Utility Reference Invoices\") for the preceding 12 month period. If the Utility Reference Invoices are not provided to the Seller by such date, the Seller shall be entitled to use publicly available sources to reach a reasonable estimate of the Grid Reference Price. If by reason of changes to the presentation or categorization of component charges the Utility Reference Invoices are no longer an adequate and reasonable means for ascertaining variable charges levied by the Utility, either Party may refer its determination to an Expert Dispute if the Parties do not agree on an appropriate Grid Reference Price. Upon receipt of the Utility Reference Invoices from the Buyer, the Seller shall provide the Buyer with its calculation of the Grid Reference Price for the subsequent Operating Year. This shall occur no later than 30 days after the beginning of the relevant Operating Year. Generator Reference Price = Equal to the generator fuel price (derived from the Generator Reference Bills, as defined below), and specified as the aggregate Naira cost of the amount of generator fuel purchased by buyer), divided by the total kWh supplied by the generators, and multiplied by the surcharge accounting for non-fuel generator expenses that are also avoided / reduced via operation of the solar facility (including operations & maintenance and wear & tear of the asset), which for all years of the Agreement will be equivalent to a factor of 1.10. The Seller may request the Buyer to provide access to raw generator data, such access not to be unreasonably withheld or delayed. No less than 15 days prior to the annual anniversary of each Operating Year, the Buyer and the Seller shall jointly verify all invoices (the \"Generator Reference Invoices\") for direct diesel, compressed natural gas and / or liquid natural gas fuel costs incurred by the Generator Equipment for the preceding 12 month period. If the Generator Reference Invoices are not jointly verified by such date, the Seller shall be entitled to use publicly available sources to reach a reasonable estimate of the Generator Reference Price. If by reason of changes to the presentation or categorization of component charges the Generator Reference Invoices provided are no longer an adequate and reasonable means for ascertaining the Generator Reference Price, either Party may refer its determination to an Expert Dispute if the Parties do not agree on an appropriate Generator Reference Price. Upon joint verification of the Generator Reference Invoices aforementioned, no later than 30 days after the annual anniversary, the Seller shall provide the Buyer with its calculation of the Generator Reference Price for the subsequent Operating Year. This shall occur no later than 30 days after the beginning of the relevant Operating Year. Amendment to payment structure to accommodate Generator charging the BESS Proposed payment structure: 1. Seller pays the Buyer for the energy that the Buyer delivers to the Seller at the Generator Reference Price. For example, if the Buyer delivers x kWh to the Seller, the Seller pays the Buyer: x kWh * Generator Reference Price (NGN/kWh)",
+  "tou_windows": [
+    {
+      "name": "off_peak",
+      "start": "06:00",
+      "end": "17:00"
+    }
+  ],
+  "discount_percentage": null,
+  "notes": "This contract uses a blended approach with both Grid Reference Price (utility charges excluding VAT and demand charges for 6am-5pm period) and Generator Reference Price (fuel costs plus 10% surcharge for O&M and equipment wear). The Generator Reference Price is calculated from actual fuel invoices divided by kWh generated, multiplied by 1.10 factor."
+}

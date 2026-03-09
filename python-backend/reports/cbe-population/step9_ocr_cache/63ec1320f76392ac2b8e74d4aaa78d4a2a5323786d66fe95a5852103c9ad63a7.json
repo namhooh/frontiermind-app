@@ -1,0 +1,14 @@
+{
+  "mrp_method": "utility_variable_charges_tou",
+  "mrp_included_components": [],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": null,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": "KSH",
+  "floor_ceiling_currency": "USD",
+  "floor_ceiling_escalation": "2.5% annual",
+  "mrp_clause_text": "ANNEXURE C: PRICING AND PAYMENT TERMS\n\n1. Pricing\n\nThe Minimum Solar Price is equal to 0.06 USD per kilowatt-hour for the first Operating Year of the Agreement and shall escalate by 2.5% at the beginning of the second Operating Year and each anniversary thereafter.\n\nThe Maximum Solar Price is equal to 0.210 USD per kilowatt-hour for the full Term of the Agreement.\n\nBetween the two aforementioned limits, each kilowatt-hour of Energy Output from the Facility during will be priced at a 65% discount to the Grid Reference Price. The Grid Reference Price will be stated in KSH.\n\nThe following formula will be used to calculate the total amount due from the Customer to the Developer at the end of each month:\n\nPayment = (1 \u2212 Solar Discount) \u00d7 Energy Output \u00d7 Grid Reference Price\n\nor, if higher\n\nPayment = Energy Output \u00d7 Minimum Solar Price\n\nbut not exceeding\n\nPayment = Energy Output \u00d7 Maximum Solar Price",
+  "tou_windows": [],
+  "discount_percentage": 0.65,
+  "notes": "Contract uses Grid Reference Price in KSH with 65% discount, but has USD-denominated floor (0.06 USD with 2.5% annual escalation) and ceiling (0.21 USD fixed). Payment is the higher of discounted grid price or floor price, but capped at ceiling price."
+}

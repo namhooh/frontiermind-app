@@ -1,0 +1,45 @@
+{
+  "mrp_method": "utility_variable_charges_tou",
+  "mrp_included_components": [],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": null,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": null,
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "Note 2: The off-peak hours are as follows:\n\nDay | Start (Hrs.) | End (Hrs.)\nWeekdays | 00:00 | 06:00\n | 22:00 | 00:00\nSaturday/Holidays | 00:00 | 08:00\n | 14:00 | 00:00\nSunday | 00:00 | 00:00",
+  "tou_windows": [
+    {
+      "name": "off-peak",
+      "day": "weekdays",
+      "start": "00:00",
+      "end": "06:00"
+    },
+    {
+      "name": "off-peak",
+      "day": "weekdays",
+      "start": "22:00",
+      "end": "00:00"
+    },
+    {
+      "name": "off-peak",
+      "day": "saturday_holidays",
+      "start": "00:00",
+      "end": "08:00"
+    },
+    {
+      "name": "off-peak",
+      "day": "saturday_holidays",
+      "start": "14:00",
+      "end": "00:00"
+    },
+    {
+      "name": "off-peak",
+      "day": "sunday",
+      "start": "00:00",
+      "end": "00:00"
+    }
+  ],
+  "discount_percentage": null,
+  "notes": "This appears to be only a note defining time-of-use off-peak hours, not the main MRP formula. The full MRP definition would be elsewhere in the contract."
+}

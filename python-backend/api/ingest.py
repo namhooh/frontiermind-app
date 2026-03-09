@@ -23,12 +23,15 @@ from pydantic import BaseModel, Field
 
 from middleware.rate_limiter import limiter, limit_default
 from middleware.api_key_auth import require_api_key
+from middleware.supabase_auth import require_supabase_auth
 from services.audit_service import log_business_event
 
 from db.database import init_connection_pool
 from db.integration_repository import IntegrationRepository
 from models.ingestion import (
     BillingReadsBatchRequest,
+    FXRateBatchRequest,
+    FXRateBatchResponse,
     GenerateAPIKeyRequest,
     GenerateAPIKeyResponse,
     IngestionHistoryItem,
@@ -104,6 +107,22 @@ def _authorize_source_for_token(auth: dict, requested_source_type: SourceType) -
                 f"API key is scoped to data_source_id={token_ds_id}, "
                 f"but request used source_type='{requested_source_type.value}'"
             ),
+        )
+
+
+def _authorize_scope(auth: dict, required_scope: str) -> None:
+    """Check that the API key's allowed_scopes permit the requested scope.
+
+    - allowed_scopes is None → all scopes allowed (org-wide key)
+    - allowed_scopes is a list → required_scope must be in the list
+    """
+    allowed = auth.get("allowed_scopes")
+    if allowed is None:
+        return
+    if required_scope not in allowed:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"API key does not have the '{required_scope}' scope. Allowed: {allowed}",
         )
 
 
@@ -189,7 +208,7 @@ class FileIdResponse(BaseModel):
 async def generate_presigned_url(
     http_request: Request,  # Required for rate limiting
     request: PresignedUrlRequestBody,
-    organization_id: int = Query(..., description="Organization ID"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> PresignedUrlResponse:
     """
     Generate a presigned URL for uploading meter data to S3.
@@ -202,6 +221,7 @@ async def generate_presigned_url(
     The uploaded file will land in s3://bucket/raw/{source}/{org_id}/{date}/{file_id}_{filename}
     and trigger the Validator Lambda for processing.
     """
+    organization_id = auth["organization_id"]
     try:
         s3_client = get_s3_client()
 
@@ -281,6 +301,7 @@ async def ingest_meter_data(
     repository = get_repository()
     organization_id = auth["organization_id"]
     _authorize_source_for_token(auth, request.source_type)
+    _authorize_scope(auth, "meter_data")
 
     try:
         svc = get_ingest_service()
@@ -377,6 +398,7 @@ async def upload_meter_data(
             detail=f"Invalid source_type: {source_type}. Must be one of: {[s.value for s in SourceType]}",
         )
     _authorize_source_for_token(auth, src)
+    _authorize_scope(auth, "meter_data")
 
     result = svc.ingest_file(
         content=content,
@@ -441,6 +463,7 @@ async def ingest_billing_reads(
     """
     organization_id = auth["organization_id"]
     _authorize_source_for_token(auth, request.source_type)
+    _authorize_scope(auth, "billing_reads")
 
     try:
         svc = get_ingest_service()
@@ -483,6 +506,90 @@ async def ingest_billing_reads(
 
 
 # ============================================================================
+# FX Rate Ingestion Endpoint
+# ============================================================================
+
+
+@router.post(
+    "/fx-rates",
+    response_model=FXRateBatchResponse,
+    summary="Push FX rate data via API",
+    description="Ingest exchange rates as a JSON batch. Upserts into the exchange_rate table.",
+)
+@limiter.limit("30/minute")
+async def ingest_fx_rates(
+    http_request: Request,
+    background_tasks: BackgroundTasks,
+    request: FXRateBatchRequest,
+    auth: dict = Depends(require_api_key),
+) -> FXRateBatchResponse:
+    """
+    Ingest a batch of FX rates.
+
+    Resolves currency codes to IDs, deduplicates within the batch (last-write-wins),
+    and upserts into the exchange_rate table. Max 5,000 entries per batch.
+    """
+    _authorize_scope(auth, "fx_rates")
+    organization_id = auth["organization_id"]
+    repository = get_repository()
+
+    # Collect unique currency codes and resolve to IDs
+    unique_codes = list({entry.currency_code for entry in request.rates})
+    code_to_id = repository.resolve_currency_codes(unique_codes)
+
+    unknown_codes = [c for c in unique_codes if c not in code_to_id]
+    if unknown_codes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Unknown currency codes: {unknown_codes}",
+        )
+
+    # Deduplicate within batch: last-write-wins for same (currency_code, rate_date)
+    seen = {}
+    for entry in request.rates:
+        key = (entry.currency_code, entry.rate_date)
+        seen[key] = entry
+
+    # Build upsert records
+    upsert_records = [
+        {
+            "currency_id": code_to_id[entry.currency_code],
+            "rate_date": entry.rate_date,
+            "rate": float(entry.rate),
+        }
+        for entry in seen.values()
+    ]
+
+    try:
+        inserted, updated = repository.upsert_exchange_rates(
+            organization_id=organization_id,
+            rates=upsert_records,
+            source=request.source,
+        )
+    except Exception as e:
+        logger.error(f"FX rate ingestion failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"FX rate ingestion failed: {e}",
+        )
+
+    log_business_event(
+        background_tasks, http_request,
+        action="IMPORT",
+        resource_type="fx_rates",
+        organization_id=organization_id,
+        records_affected=inserted + updated,
+        details={"inserted": inserted, "updated": updated, "source": request.source},
+    )
+
+    return FXRateBatchResponse(
+        success=True,
+        inserted=inserted,
+        updated=updated,
+    )
+
+
+# ============================================================================
 # Inverter Sync Endpoint
 # ============================================================================
 
@@ -519,6 +626,7 @@ async def sync_site(
     Looks up the site's credential and source type, fetches data from
     the manufacturer API, and ingests it through the pipeline.
     """
+    _authorize_scope(auth, "meter_data")
     repository = get_repository()
     organization_id = auth["organization_id"]
 
@@ -863,6 +971,13 @@ async def get_ingestion_stats(
 # ============================================================================
 
 
+def _credential_to_response(row: dict) -> dict:
+    """Map DB row (allowed_scopes) to response model (scopes)."""
+    result = dict(row)
+    result["scopes"] = result.pop("allowed_scopes", None)
+    return result
+
+
 @router.post(
     "/credentials",
     response_model=IntegrationCredentialResponse,
@@ -872,7 +987,7 @@ async def get_ingestion_stats(
 )
 async def create_credential(
     credential: IntegrationCredentialCreate,
-    organization_id: int = Query(..., description="Organization ID"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> IntegrationCredentialResponse:
     """
     Create a new integration credential.
@@ -882,6 +997,7 @@ async def create_credential(
     - For OAuth2: {"access_token": "...", "refresh_token": "...", "scope": "..."}
     """
     repository = get_repository()
+    organization_id = auth["organization_id"]
 
     try:
         result = repository.create_credential(
@@ -891,9 +1007,10 @@ async def create_credential(
             credentials=credential.credentials,
             token_expires_at=credential.token_expires_at,
             label=credential.label,
+            allowed_scopes=[s.value for s in credential.scopes] if credential.scopes else None,
         )
 
-        return IntegrationCredentialResponse(**result)
+        return IntegrationCredentialResponse(**_credential_to_response(result))
 
     except Exception as e:
         logger.error(f"Error creating credential: {e}")
@@ -914,7 +1031,7 @@ async def generate_api_key(
     request: Request,
     background_tasks: BackgroundTasks,
     body: GenerateAPIKeyRequest,
-    organization_id: int = Query(..., description="Organization ID"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> GenerateAPIKeyResponse:
     """
     Generate a new API key for a client.
@@ -923,8 +1040,11 @@ async def generate_api_key(
     The plaintext key is returned in the response and cannot be retrieved again.
     """
     repository = get_repository()
+    organization_id = auth["organization_id"]
 
     plaintext_key = f"fm_{secrets.token_urlsafe(32)}"
+    key_hash = hashlib.sha256(plaintext_key.encode()).hexdigest()
+    scopes_list = [s.value for s in body.scopes] if body.scopes else None
 
     try:
         result = repository.create_credential(
@@ -933,6 +1053,8 @@ async def generate_api_key(
             auth_type="api_key",
             credentials={"api_key": plaintext_key},
             label=body.label,
+            allowed_scopes=scopes_list,
+            api_key_hash=key_hash,
         )
 
         log_business_event(
@@ -942,15 +1064,16 @@ async def generate_api_key(
             resource_id=str(result["id"]),
             organization_id=organization_id,
             severity="WARNING",
-            details={"data_source_id": body.data_source_id, "label": body.label},
+            details={"data_source_id": body.data_source_id, "label": body.label, "scopes": scopes_list},
         )
 
         return GenerateAPIKeyResponse(
             credential_id=result["id"],
             organization_id=result["organization_id"],
-            data_source_id=result["data_source_id"],
+            data_source_id=result.get("data_source_id"),
             api_key=plaintext_key,
             label=result.get("label"),
+            scopes=result.get("allowed_scopes"),
             created_at=result["created_at"],
         )
 
@@ -969,7 +1092,7 @@ async def generate_api_key(
     description="List all integration credentials for the organization.",
 )
 async def list_credentials(
-    organization_id: int = Query(..., description="Organization ID"),
+    auth: dict = Depends(require_supabase_auth),
     data_source_id: Optional[int] = Query(None, description="Filter by data source ID"),
     is_active: Optional[bool] = Query(None, description="Filter by active status"),
 ) -> List[IntegrationCredentialResponse]:
@@ -977,6 +1100,7 @@ async def list_credentials(
     List integration credentials for an organization.
     """
     repository = get_repository()
+    organization_id = auth["organization_id"]
 
     credentials = repository.list_credentials(
         organization_id=organization_id,
@@ -984,7 +1108,7 @@ async def list_credentials(
         is_active=is_active,
     )
 
-    return [IntegrationCredentialResponse(**c) for c in credentials]
+    return [IntegrationCredentialResponse(**_credential_to_response(c)) for c in credentials]
 
 
 @router.get(
@@ -995,12 +1119,13 @@ async def list_credentials(
 )
 async def get_credential(
     credential_id: int,
-    organization_id: int = Query(..., description="Organization ID"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> IntegrationCredentialResponse:
     """
     Get a specific integration credential.
     """
     repository = get_repository()
+    organization_id = auth["organization_id"]
 
     credential = repository.get_credential(
         credential_id=credential_id,
@@ -1014,7 +1139,7 @@ async def get_credential(
             detail="Credential not found",
         )
 
-    return IntegrationCredentialResponse(**credential)
+    return IntegrationCredentialResponse(**_credential_to_response(credential))
 
 
 @router.put(
@@ -1026,12 +1151,13 @@ async def get_credential(
 async def update_credential(
     credential_id: int,
     update: IntegrationCredentialUpdate,
-    organization_id: int = Query(..., description="Organization ID"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> IntegrationCredentialResponse:
     """
     Update an integration credential.
     """
     repository = get_repository()
+    organization_id = auth["organization_id"]
 
     result = repository.update_credential(
         credential_id=credential_id,
@@ -1048,7 +1174,7 @@ async def update_credential(
             detail="Credential not found",
         )
 
-    return IntegrationCredentialResponse(**result)
+    return IntegrationCredentialResponse(**_credential_to_response(result))
 
 
 @router.delete(
@@ -1061,7 +1187,7 @@ async def delete_credential(
     request: Request,
     background_tasks: BackgroundTasks,
     credential_id: int,
-    organization_id: int = Query(..., description="Organization ID"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> None:
     """
     Delete an integration credential.
@@ -1069,6 +1195,7 @@ async def delete_credential(
     This will also delete all integration sites associated with this credential.
     """
     repository = get_repository()
+    organization_id = auth["organization_id"]
 
     deleted = repository.delete_credential(
         credential_id=credential_id,
@@ -1105,12 +1232,13 @@ async def delete_credential(
 )
 async def create_site(
     site: IntegrationSiteCreate,
-    organization_id: int = Query(..., description="Organization ID"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> IntegrationSiteResponse:
     """
     Create an integration site mapping.
     """
     repository = get_repository()
+    organization_id = auth["organization_id"]
 
     try:
         result = repository.create_site(
@@ -1142,7 +1270,7 @@ async def create_site(
     description="List all integration sites for the organization.",
 )
 async def list_sites(
-    organization_id: int = Query(..., description="Organization ID"),
+    auth: dict = Depends(require_supabase_auth),
     integration_credential_id: Optional[int] = Query(None, description="Filter by credential"),
     data_source_id: Optional[int] = Query(None, description="Filter by data source"),
     project_id: Optional[int] = Query(None, description="Filter by project"),
@@ -1153,6 +1281,7 @@ async def list_sites(
     List integration sites for an organization.
     """
     repository = get_repository()
+    organization_id = auth["organization_id"]
 
     sites = repository.list_sites(
         organization_id=organization_id,
@@ -1174,12 +1303,13 @@ async def list_sites(
 )
 async def get_site(
     site_id: int,
-    organization_id: int = Query(..., description="Organization ID"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> IntegrationSiteResponse:
     """
     Get a specific integration site.
     """
     repository = get_repository()
+    organization_id = auth["organization_id"]
 
     site = repository.get_site(
         site_id=site_id,
@@ -1204,12 +1334,13 @@ async def get_site(
 async def update_site(
     site_id: int,
     update: IntegrationSiteUpdate,
-    organization_id: int = Query(..., description="Organization ID"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> IntegrationSiteResponse:
     """
     Update an integration site.
     """
     repository = get_repository()
+    organization_id = auth["organization_id"]
 
     result = repository.update_site(
         site_id=site_id,
@@ -1239,12 +1370,13 @@ async def update_site(
 )
 async def delete_site(
     site_id: int,
-    organization_id: int = Query(..., description="Organization ID"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> None:
     """
     Delete an integration site.
     """
     repository = get_repository()
+    organization_id = auth["organization_id"]
 
     deleted = repository.delete_site(
         site_id=site_id,

@@ -1,0 +1,17 @@
+{
+  "mrp_method": "blended_grid_generator",
+  "mrp_included_components": [
+    "grid_reference_rate",
+    "generator_reference_rate"
+  ],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": null,
+  "mrp_exclude_demand_charges": null,
+  "mrp_currency": null,
+  "floor_ceiling_currency": null,
+  "floor_ceiling_escalation": null,
+  "mrp_clause_text": "\"Average Reference Rate\", for any Operating Year, means the average of the Grid Reference Rate and the Generator Reference Rate for such Operating Year, weighted based on the periods during which the grid and the Buyer's generators were, respectively, the primary source of (non-solar) electricity for the site (as determined based on the Seller's solar monitoring system).",
+  "tou_windows": [],
+  "discount_percentage": null,
+  "notes": "MRP is a weighted average of grid and generator rates based on which source was primary during different periods, excluding solar generation. Weighting is determined by solar monitoring system data."
+}

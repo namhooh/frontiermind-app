@@ -1,0 +1,16 @@
+{
+  "mrp_method": "utility_variable_charges_tou",
+  "mrp_included_components": [
+    "energy_charge"
+  ],
+  "mrp_excluded_components": [],
+  "mrp_exclude_vat": false,
+  "mrp_exclude_demand_charges": true,
+  "mrp_currency": "KES",
+  "floor_ceiling_currency": "USD",
+  "floor_ceiling_escalation": "2.5% annual",
+  "mrp_clause_text": "SCHEDULE 2: PRICING SCHEDULE\n\nRate: If the product of the Discount multiplied by the Market Reference Price is more than the Maximum Market Rate then the Rate will be the Maximum Market Rate.\n\nIf the product of the Discount multiplied by the Market Reference Price is less than the Minimum Market Rate then the Rate will be the Minimum Market Rate.\n\nAt all other times the product of the Discount multiplied by the Market Reference Price will be the Rate\n\nDenominated in KES\n\nDiscount: 95%\n\nMarket Reference Price: On the Commercial Operations Date and every annual anniversary after that date, the Market Reference Price is derived from the Reference Bill\n\nPaid in Kenyan Shillings\n\nMaximum Market Rate: 0.2500 USD/kWh (Year 1)\n\nThe Maximum Market Rate will be escalated by 2.5% on every annual anniversary of the Commercial Operations Date\n\nDenominated in US Dollars, but converted into and paid in Kenyan Shillings on the basis of the Selling Rate for US Dollars on the business day invoice is paid\n\nMinimum Market Rate: 0.1099 USD/kWh (Year 1)\n\nThe Minimum Market Rate will be escalated by 2.5% escalation on every annual anniversary of Commercial Operations Date\n\nDenominated in US Dollars, but converted into and paid in Kenyan Shillings on the basis of the Selling Rate for US Dollars on the business day invoice is paid\n\nRequired Solar Output: means for each month after the Commercial Operations Date 80 per cent of the Expected Solar Output in respect of that month as defined in schedule 5",
+  "tou_windows": [],
+  "discount_percentage": 0.05,
+  "notes": "MRP is derived from a 'Reference Bill' paid in Kenyan Shillings. The pricing structure uses a discount of 95% (meaning the rate is 5% of MRP) with USD-denominated floor and ceiling rates that escalate annually by 2.5%. The final rate is bounded by minimum (0.1099 USD/kWh) and maximum (0.2500 USD/kWh) rates in Year 1."
+}
