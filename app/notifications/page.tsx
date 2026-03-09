@@ -758,37 +758,37 @@ function NotificationsPageContent() {
                                                       {att.extraction_result.mrp_per_kwh != null && (
                                                         <div>
                                                           <span className="text-xs font-medium text-green-700">MRP</span>
-                                                          <span className="ml-1 text-green-900 font-semibold">{att.extraction_result.mrp_per_kwh} /kWh</span>
+                                                          <span className="ml-1 text-green-900 font-semibold">{String(att.extraction_result.mrp_per_kwh)} /kWh</span>
                                                         </div>
                                                       )}
-                                                      {att.extraction_result.billing_month_stored && (
+                                                      {att.extraction_result.billing_month_stored != null && (
                                                         <div>
                                                           <span className="text-xs font-medium text-green-700">Month</span>
-                                                          <span className="ml-1 text-green-900">{att.extraction_result.billing_month_stored as string}</span>
+                                                          <span className="ml-1 text-green-900">{String(att.extraction_result.billing_month_stored)}</span>
                                                         </div>
                                                       )}
                                                       {att.extraction_result.total_variable_charges != null && (
                                                         <div>
                                                           <span className="text-xs font-medium text-green-700">Total Charges</span>
-                                                          <span className="ml-1 text-green-900">{att.extraction_result.total_variable_charges as number}</span>
+                                                          <span className="ml-1 text-green-900">{String(att.extraction_result.total_variable_charges)}</span>
                                                         </div>
                                                       )}
                                                       {att.extraction_result.total_kwh_invoiced != null && (
                                                         <div>
                                                           <span className="text-xs font-medium text-green-700">kWh Invoiced</span>
-                                                          <span className="ml-1 text-green-900">{att.extraction_result.total_kwh_invoiced as number}</span>
+                                                          <span className="ml-1 text-green-900">{String(att.extraction_result.total_kwh_invoiced)}</span>
                                                         </div>
                                                       )}
-                                                      {att.extraction_result.extraction_confidence && (
+                                                      {att.extraction_result.extraction_confidence != null && (
                                                         <div>
                                                           <span className="text-xs font-medium text-green-700">Confidence</span>
-                                                          <span className="ml-1 text-green-900">{att.extraction_result.extraction_confidence as string}</span>
+                                                          <span className="ml-1 text-green-900">{String(att.extraction_result.extraction_confidence)}</span>
                                                         </div>
                                                       )}
-                                                      {att.extraction_result.observation_id && (
+                                                      {att.extraction_result.observation_id != null && (
                                                         <div>
                                                           <span className="text-xs font-medium text-green-700">Observation</span>
-                                                          <span className="ml-1 text-green-900">#{att.extraction_result.observation_id as number}</span>
+                                                          <span className="ml-1 text-green-900">#{String(att.extraction_result.observation_id)}</span>
                                                         </div>
                                                       )}
                                                     </div>
