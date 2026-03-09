@@ -51,6 +51,7 @@ import {
   type ApproveResponse,
 } from '@/lib/api/inboundClient'
 import { createClient } from '@/lib/supabase/client'
+import { IS_DEMO } from '@/lib/demoMode'
 import { ComposeEmailDialog } from './components/ComposeEmailDialog'
 import { ScheduleFormDialog } from './components/ScheduleFormDialog'
 import { TemplateEditorDialog } from './components/TemplateEditorDialog'
@@ -136,6 +137,8 @@ function NotificationsPageContent() {
   const [approveResults, setApproveResults] = useState<Record<number, ApproveResponse>>({})
   const [rejectReason, setRejectReason] = useState('')
   const [showRejectInput, setShowRejectInput] = useState<number | null>(null)
+  const [showApproveInput, setShowApproveInput] = useState<number | null>(null)
+  const [approveProjectId, setApproveProjectId] = useState<number | undefined>()
 
   const supabase = useRef(createClient())
   const [organizationId, setOrganizationId] = useState<number | undefined>()
@@ -157,9 +160,9 @@ function NotificationsPageContent() {
     loadOrg()
   }, [])
 
-  // Dev fallback: use org 1 when no Supabase session (dev only)
+  // Dev/demo fallback: use org 1 when no Supabase session
   useEffect(() => {
-    if (process.env.NODE_ENV === 'development' && !organizationId) {
+    if ((process.env.NODE_ENV === 'development' || IS_DEMO) && !organizationId) {
       setOrganizationId(1)
     }
   }, [organizationId])
@@ -187,30 +190,32 @@ function NotificationsPageContent() {
 
   const isDev = process.env.NODE_ENV === 'development'
 
+  const skipAuth = isDev || IS_DEMO
+
   const client = useMemo(
     () => new NotificationsClient({
       enableLogging: isDev,
       getAuthToken: async () => {
-        if (isDev) return null
+        if (skipAuth) return null
         const { data: { session } } = await supabase.current.auth.getSession()
         return session?.access_token ?? null
       },
       organizationId,
     }),
-    [organizationId, isDev]
+    [organizationId, skipAuth, isDev]
   )
 
   const inboundClient = useMemo(
     () => new InboundClient({
       enableLogging: isDev,
       getAuthToken: async () => {
-        if (isDev) return null
+        if (skipAuth) return null
         const { data: { session } } = await supabase.current.auth.getSession()
         return session?.access_token ?? null
       },
       organizationId,
     }),
-    [organizationId, isDev]
+    [organizationId, skipAuth, isDev]
   )
 
   const loadInbox = useCallback(async () => {
@@ -335,12 +340,16 @@ function NotificationsPageContent() {
     }
   }
 
-  const handleApprove = async (messageId: number) => {
+  const handleApprove = async (messageId: number, projectId?: number) => {
     setActionLoading(messageId)
     setError(null)
     try {
-      const result = await inboundClient.approveMessage(messageId)
+      const result = await inboundClient.approveMessage(messageId, {
+        project_id: projectId,
+      })
       setApproveResults(prev => ({ ...prev, [messageId]: result }))
+      setShowApproveInput(null)
+      setApproveProjectId(undefined)
       await loadInbox()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to approve message')
@@ -557,24 +566,31 @@ function NotificationsPageContent() {
                                   </span>
                                 </td>
                                 <td className="px-4 py-3 text-slate-500" onClick={(e) => e.stopPropagation()}>
-                                  {msg.attachment_count > 0 && (
-                                    <span className="inline-flex items-center gap-1">
-                                      <Paperclip className="w-3.5 h-3.5" />
-                                      {msg.attachment_count}
-                                      {msg.attachments?.map((att) => (
-                                        <Button
-                                          key={att.id}
-                                          variant="ghost"
-                                          size="sm"
-                                          className="h-6 w-6 p-0"
-                                          onClick={() => handleDownloadAttachment(att.id)}
-                                          title={`View ${att.filename || 'attachment'}`}
-                                        >
-                                          <Eye className="w-3.5 h-3.5" />
-                                        </Button>
-                                      ))}
-                                    </span>
-                                  )}
+                                  {msg.attachment_count > 0 && (() => {
+                                    const statuses = msg.attachments?.map(a => a.attachment_processing_status) || []
+                                    const eyeColor = statuses.includes('failed') ? 'text-red-500'
+                                      : statuses.includes('pending') || statuses.includes('processing') ? 'text-amber-500'
+                                      : statuses.every(s => s === 'extracted') ? 'text-green-500'
+                                      : 'text-slate-400'
+                                    return (
+                                      <span className="inline-flex items-center gap-1">
+                                        <Paperclip className="w-3.5 h-3.5" />
+                                        {msg.attachment_count}
+                                        {msg.attachments?.map((att) => (
+                                          <Button
+                                            key={att.id}
+                                            variant="ghost"
+                                            size="sm"
+                                            className="h-6 w-6 p-0"
+                                            onClick={() => handleDownloadAttachment(att.id)}
+                                            title={`View ${att.filename || 'attachment'}`}
+                                          >
+                                            <Eye className={`w-3.5 h-3.5 ${eyeColor}`} />
+                                          </Button>
+                                        ))}
+                                      </span>
+                                    )
+                                  })()}
                                 </td>
                                 <td className="px-4 py-3 text-slate-500">
                                   {new Date(msg.created_at).toLocaleString()}
@@ -586,7 +602,11 @@ function NotificationsPageContent() {
                                         variant="outline"
                                         size="sm"
                                         disabled={isActioning}
-                                        onClick={() => handleApprove(msg.id)}
+                                        onClick={() => {
+                                          setShowApproveInput(showApproveInput === msg.id ? null : msg.id)
+                                          setShowRejectInput(null)
+                                          setApproveProjectId(undefined)
+                                        }}
                                         title="Approve"
                                         className="text-green-600 hover:bg-green-50 border-green-200"
                                       >
@@ -596,7 +616,10 @@ function NotificationsPageContent() {
                                         variant="outline"
                                         size="sm"
                                         disabled={isActioning}
-                                        onClick={() => setShowRejectInput(showRejectInput === msg.id ? null : msg.id)}
+                                        onClick={() => {
+                                          setShowRejectInput(showRejectInput === msg.id ? null : msg.id)
+                                          setShowApproveInput(null)
+                                        }}
                                         title="Reject"
                                         className="text-red-600 hover:bg-red-50 border-red-200"
                                       >
@@ -606,6 +629,43 @@ function NotificationsPageContent() {
                                   )}
                                 </td>
                               </tr>
+
+                              {/* Approve project picker */}
+                              {showApproveInput === msg.id && (
+                                <tr className="bg-green-50 border-b border-slate-100">
+                                  <td colSpan={7} className="px-4 py-3">
+                                    <div className="flex items-center gap-2 max-w-lg">
+                                      <select
+                                        value={approveProjectId ?? ''}
+                                        onChange={(e) => setApproveProjectId(e.target.value ? Number(e.target.value) : undefined)}
+                                        className="flex-1 px-3 py-1.5 text-sm border border-green-200 rounded-lg focus:outline-none focus:border-green-400 bg-white"
+                                        onClick={(e) => e.stopPropagation()}
+                                      >
+                                        <option value="">Select project (optional)</option>
+                                        {projects.map((p) => (
+                                          <option key={p.id} value={p.id}>{p.sage_id ? `${p.sage_id} - ${p.name}` : p.name}</option>
+                                        ))}
+                                      </select>
+                                      <Button
+                                        size="sm"
+                                        disabled={isActioning}
+                                        onClick={() => handleApprove(msg.id, approveProjectId)}
+                                        className="bg-green-600 hover:bg-green-700 text-white"
+                                      >
+                                        {isActioning ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
+                                        Confirm
+                                      </Button>
+                                      <Button
+                                        variant="ghost"
+                                        size="sm"
+                                        onClick={() => { setShowApproveInput(null); setApproveProjectId(undefined) }}
+                                      >
+                                        Cancel
+                                      </Button>
+                                    </div>
+                                  </td>
+                                </tr>
+                              )}
 
                               {/* Reject reason input */}
                               {showRejectInput === msg.id && (
@@ -679,9 +739,19 @@ function NotificationsPageContent() {
                                                           : `${(att.size_bytes / 1048576).toFixed(1)} MB`}
                                                       </span>
                                                     )}
-                                                    <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${attStyle.bg} ${attStyle.text}`}>
-                                                      {att.attachment_processing_status}
+                                                    <span
+                                                      className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${attStyle.bg} ${attStyle.text}`}
+                                                      title={att.attachment_processing_status === 'failed' && att.failed_reason ? att.failed_reason : undefined}
+                                                    >
+                                                      {att.attachment_processing_status === 'processing' ? 'extracting...'
+                                                        : att.attachment_processing_status === 'failed' ? 'extraction failed'
+                                                        : att.attachment_processing_status}
                                                     </span>
+                                                    {att.attachment_processing_status === 'failed' && att.failed_reason && (
+                                                      <span className="text-xs text-red-500 truncate max-w-xs" title={att.failed_reason}>
+                                                        {att.failed_reason}
+                                                      </span>
+                                                    )}
                                                   </div>
                                                   <Button
                                                     variant="outline"
