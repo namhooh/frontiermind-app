@@ -190,32 +190,34 @@ function NotificationsPageContent() {
 
   const isDev = process.env.NODE_ENV === 'development'
 
-  const skipAuth = isDev || IS_DEMO
+  const demoToken = IS_DEMO ? process.env.NEXT_PUBLIC_DEMO_ACCESS_TOKEN : undefined
 
   const client = useMemo(
     () => new NotificationsClient({
       enableLogging: isDev,
       getAuthToken: async () => {
-        if (skipAuth) return null
+        if (demoToken) return demoToken
+        if (isDev) return null
         const { data: { session } } = await supabase.current.auth.getSession()
         return session?.access_token ?? null
       },
       organizationId,
     }),
-    [organizationId, skipAuth, isDev]
+    [organizationId, isDev, demoToken]
   )
 
   const inboundClient = useMemo(
     () => new InboundClient({
       enableLogging: isDev,
       getAuthToken: async () => {
-        if (skipAuth) return null
+        if (demoToken) return demoToken
+        if (isDev) return null
         const { data: { session } } = await supabase.current.auth.getSession()
         return session?.access_token ?? null
       },
       organizationId,
     }),
-    [organizationId, skipAuth, isDev]
+    [organizationId, isDev, demoToken]
   )
 
   const loadInbox = useCallback(async () => {

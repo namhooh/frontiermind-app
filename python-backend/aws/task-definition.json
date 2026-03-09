@@ -88,6 +88,10 @@
         {
           "name": "SENTRY_DSN",
           "valueFrom": "arn:aws:secretsmanager:us-east-1:724772070642:secret:frontiermind/backend/sentry-dsn"
+        },
+        {
+          "name": "DEMO_ACCESS_TOKEN",
+          "valueFrom": "arn:aws:secretsmanager:us-east-1:724772070642:secret:frontiermind/backend/demo-access-token"
         }
       ],
       "logConfiguration": {

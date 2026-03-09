@@ -127,6 +127,20 @@ class SupabaseAuth:
                 "role": "admin",
             }
 
+        # Demo access token – allows read-only demo access in production
+        demo_token = os.getenv("DEMO_ACCESS_TOKEN")
+        if (
+            demo_token
+            and credentials is not None
+            and credentials.credentials == demo_token
+        ):
+            org_id = _get_org_id_from_header(request)
+            return {
+                "user_id": "demo-user",
+                "organization_id": org_id,
+                "role": "viewer",
+            }
+
         if credentials is None:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
