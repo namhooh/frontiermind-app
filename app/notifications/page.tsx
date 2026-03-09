@@ -44,7 +44,6 @@ import {
   type EmailTemplate,
   type NotificationSchedule,
   type OutboundMessageEntry,
-  type SubmissionResponse,
 } from '@/lib/api/notificationsClient'
 import {
   InboundClient,
@@ -60,7 +59,6 @@ import { TemplateEditorDialog } from './components/TemplateEditorDialog'
 import { describeDueDateTiming, type DueDateRelativeConfig } from './components/DueDateTimingBuilder'
 
 type TabId = 'inbox' | 'schedules' | 'email-history' | 'templates'
-type InboxView = 'emails' | 'submissions'
 
 const STATUS_STYLES: Record<string, { bg: string; text: string }> = {
   delivered: { bg: 'bg-green-100', text: 'text-green-700' },
@@ -107,8 +105,6 @@ function NotificationsPageContent() {
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [emailLogs, setEmailLogs] = useState<OutboundMessageEntry[]>([])
   const [emailLogsTotal, setEmailLogsTotal] = useState(0)
-  const [submissions, setSubmissions] = useState<SubmissionResponse[]>([])
-  const [submissionsTotal, setSubmissionsTotal] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [page, setPage] = useState(0)
@@ -129,7 +125,6 @@ function NotificationsPageContent() {
   const [editingTemplate, setEditingTemplate] = useState<EmailTemplate | undefined>()
 
   // Inbox state
-  const [inboxView, setInboxView] = useState<InboxView>('emails')
   const [inboundMessages, setInboundMessages] = useState<InboundMessage[]>([])
   const [inboundTotal, setInboundTotal] = useState(0)
   const [inboundStatusFilter, setInboundStatusFilter] = useState<InboundMessageStatus | ''>('pending_review')
@@ -268,16 +263,6 @@ function NotificationsPageContent() {
     }
   }, [client, selectedProjectId, page])
 
-  const loadSubmissions = useCallback(async () => {
-    try {
-      const { submissions: data, total } = await client.listSubmissions(undefined, pageSize, page * pageSize)
-      setSubmissions(data)
-      setSubmissionsTotal(total)
-    } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load submissions')
-    }
-  }, [client, page])
-
   useEffect(() => {
     if (!organizationId) return
     setLoading(true)
@@ -286,11 +271,7 @@ function NotificationsPageContent() {
     const loadData = async () => {
       switch (activeTab) {
         case 'inbox':
-          if (inboxView === 'submissions') {
-            await loadSubmissions()
-          } else {
-            await loadInbox()
-          }
+          await loadInbox()
           break
         case 'schedules':
           await loadSchedules()
@@ -305,23 +286,22 @@ function NotificationsPageContent() {
       setLoading(false)
     }
     loadData()
-  }, [activeTab, inboxView, organizationId, loadInbox, loadSchedules, loadTemplates, loadEmailLogs, loadSubmissions])
+  }, [activeTab, organizationId, loadInbox, loadSchedules, loadTemplates, loadEmailLogs])
 
   // Reload paginated data when page changes
   useEffect(() => {
     if (!organizationId) return
-    if (activeTab === 'inbox' && inboxView === 'emails') loadInbox()
-    if (activeTab === 'inbox' && inboxView === 'submissions') loadSubmissions()
+    if (activeTab === 'inbox') loadInbox()
     if (activeTab === 'email-history') loadEmailLogs()
-  }, [page, activeTab, inboxView, organizationId, loadInbox, loadEmailLogs, loadSubmissions])
+  }, [page, activeTab, organizationId, loadInbox, loadEmailLogs])
 
   // Reload inbox when status filter changes
   useEffect(() => {
-    if (!organizationId || activeTab !== 'inbox' || inboxView !== 'emails') return
+    if (!organizationId || activeTab !== 'inbox') return
     setPage(0)
     setLoading(true)
     loadInbox().finally(() => setLoading(false))
-  }, [inboundStatusFilter, organizationId, activeTab, inboxView, loadInbox])
+  }, [inboundStatusFilter, organizationId, activeTab, loadInbox])
 
   const handleToggleSchedule = async (schedule: NotificationSchedule) => {
     try {
@@ -402,7 +382,7 @@ function NotificationsPageContent() {
   ]
 
   const totalForPagination = activeTab === 'inbox'
-    ? (inboxView === 'submissions' ? submissionsTotal : inboundTotal)
+    ? inboundTotal
     : emailLogsTotal
   const showPagination = (activeTab === 'inbox' || activeTab === 'email-history') && totalForPagination > pageSize
 
@@ -497,45 +477,28 @@ function NotificationsPageContent() {
             {/* Inbox Tab */}
             {activeTab === 'inbox' && (
               <div>
-                {/* Inbox view toggle + filters */}
+                {/* Inbox filters */}
                 <div className="flex items-center gap-4 mb-4">
-                  <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
-                    {(['emails', 'submissions'] as const).map((view) => (
-                      <button
-                        key={view}
-                        onClick={() => { setInboxView(view); setPage(0) }}
-                        className={`px-3 py-1.5 text-sm font-medium rounded-md transition-colors ${
-                          inboxView === view
-                            ? 'bg-white text-slate-900 shadow-sm'
-                            : 'text-slate-500 hover:text-slate-700'
-                        }`}
-                      >
-                        {view === 'emails' ? 'Emails' : 'Submissions'}
-                      </button>
-                    ))}
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium text-slate-600">Status:</label>
+                    <select
+                      value={inboundStatusFilter}
+                      onChange={(e) => setInboundStatusFilter(e.target.value as InboundMessageStatus | '')}
+                      className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 bg-white"
+                    >
+                      <option value="">All</option>
+                      <option value="pending_review">Pending Review</option>
+                      <option value="approved">Approved</option>
+                      <option value="rejected">Rejected</option>
+                      <option value="auto_processed">Auto Processed</option>
+                      <option value="noise">Noise</option>
+                      <option value="received">Received</option>
+                      <option value="failed">Failed</option>
+                    </select>
                   </div>
-                  {inboxView === 'emails' && (
-                    <div className="flex items-center gap-2">
-                      <label className="text-sm font-medium text-slate-600">Status:</label>
-                      <select
-                        value={inboundStatusFilter}
-                        onChange={(e) => setInboundStatusFilter(e.target.value as InboundMessageStatus | '')}
-                        className="px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 bg-white"
-                      >
-                        <option value="">All</option>
-                        <option value="pending_review">Pending Review</option>
-                        <option value="approved">Approved</option>
-                        <option value="rejected">Rejected</option>
-                        <option value="auto_processed">Auto Processed</option>
-                        <option value="noise">Noise</option>
-                        <option value="received">Received</option>
-                        <option value="failed">Failed</option>
-                      </select>
-                    </div>
-                  )}
                 </div>
 
-                {inboxView === 'emails' && (inboundMessages.length === 0 ? (
+                {inboundMessages.length === 0 ? (
                   <EmptyState icon={Inbox} message="No inbound messages" />
                 ) : (
                   <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
@@ -839,40 +802,8 @@ function NotificationsPageContent() {
                       </tbody>
                     </table>
                   </div>
-                ))}
+                )}
 
-                {inboxView === 'submissions' && (submissions.length === 0 ? (
-                  <EmptyState icon={Inbox} message="No submissions received yet" />
-                ) : (
-                  <div className="bg-white rounded-lg border border-slate-200 overflow-hidden">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr className="bg-slate-50 border-b border-slate-200">
-                          <th className="text-left px-4 py-3 font-medium text-slate-600">ID</th>
-                          <th className="text-left px-4 py-3 font-medium text-slate-600">Submitted By</th>
-                          <th className="text-left px-4 py-3 font-medium text-slate-600">Data</th>
-                          <th className="text-left px-4 py-3 font-medium text-slate-600">Date</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {submissions.map((s) => (
-                          <tr key={s.id} className="border-b border-slate-100 last:border-0">
-                            <td className="px-4 py-3 text-slate-500">#{s.id}</td>
-                            <td className="px-4 py-3 text-slate-700">{s.submitted_by_email || '-'}</td>
-                            <td className="px-4 py-3 text-slate-700 max-w-xs">
-                              <pre className="text-xs bg-slate-50 rounded p-1 overflow-auto max-h-16">
-                                {JSON.stringify(s.response_data, null, 2)}
-                              </pre>
-                            </td>
-                            <td className="px-4 py-3 text-slate-500">
-                              {new Date(s.created_at).toLocaleString()}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                ))}
               </div>
             )}
 
