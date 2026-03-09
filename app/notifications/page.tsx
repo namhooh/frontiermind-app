@@ -127,7 +127,7 @@ function NotificationsPageContent() {
   // Inbox state
   const [inboundMessages, setInboundMessages] = useState<InboundMessage[]>([])
   const [inboundTotal, setInboundTotal] = useState(0)
-  const [inboundStatusFilter, setInboundStatusFilter] = useState<InboundMessageStatus | ''>('pending_review')
+  const [inboundStatusFilter, setInboundStatusFilter] = useState<InboundMessageStatus | ''>('')
   const [expandedMessageId, setExpandedMessageId] = useState<number | null>(null)
   const [actionLoading, setActionLoading] = useState<number | null>(null)
   const [expandedSentId, setExpandedSentId] = useState<number | null>(null)
