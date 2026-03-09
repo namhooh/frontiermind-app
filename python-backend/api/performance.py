@@ -125,6 +125,7 @@ async def get_plant_performance(
                 # 1) Project metadata
                 cur.execute("""
                     SELECT p.installed_dc_capacity_kwp,
+                           p.cod_date,
                            ct.logic_parameters->>'degradation_pct' AS degradation_pct
                     FROM project p
                     LEFT JOIN clause_tariff ct
@@ -138,6 +139,7 @@ async def get_plant_performance(
 
                 capacity = _d2f(proj.get("installed_dc_capacity_kwp"))
                 degradation_pct = float(proj["degradation_pct"]) if proj.get("degradation_pct") else None
+                cod_date = proj.get("cod_date")
 
                 # 2) Get canonical meter list from contract_line (ordered by contract_line_number)
                 cur.execute("""
@@ -213,7 +215,8 @@ async def get_plant_performance(
                             pf.forecast_energy_kwh,
                             pf.forecast_ghi_irradiance,
                             pf.forecast_poa_irradiance,
-                            pf.forecast_pr
+                            pf.forecast_pr,
+                            pf.operating_year AS forecast_operating_year
                         FROM production_forecast pf
                         WHERE pf.project_id = %(pid)s
                     )
@@ -228,7 +231,7 @@ async def get_plant_performance(
                         fc.forecast_ghi_irradiance,
                         fc.forecast_poa_irradiance,
                         fc.forecast_pr,
-                        pp.operating_year,
+                        COALESCE(pp.operating_year, fc.forecast_operating_year) AS operating_year,
                         pp.actual_pr,
                         pp.actual_availability_pct,
                         pp.energy_comparison,
@@ -314,9 +317,17 @@ async def get_plant_performance(
                     actual_ghi_wm2 = _d2f(mr.get("actual_ghi"))
                     actual_ghi_kwh = actual_ghi_wm2 / 1000.0 if actual_ghi_wm2 is not None else None
 
+                    # operating_year: prefer DB value, fall back to cod_date computation
+                    oy = mr.get("operating_year")
+                    if oy is None and cod_date and isinstance(bm, date):
+                        year_diff = bm.year - cod_date.year
+                        if bm.month < cod_date.month:
+                            year_diff -= 1
+                        oy = max(1, year_diff + 1)
+
                     months.append(PerformanceMonth(
                         billing_month=bm_str,
-                        operating_year=mr.get("operating_year"),
+                        operating_year=oy,
                         total_metered_kwh=metered,
                         total_available_kwh=available,
                         total_energy_kwh=total_energy,
