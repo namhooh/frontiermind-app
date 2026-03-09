@@ -278,6 +278,20 @@ class NotificationRepository:
                 conn.commit()
                 return cursor.rowcount > 0
 
+    def hard_delete_schedule(self, schedule_id: int, org_id: int) -> bool:
+        """Permanently delete a schedule."""
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    DELETE FROM email_notification_schedule
+                    WHERE id = %s AND organization_id = %s
+                    """,
+                    (schedule_id, org_id),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+
     def get_due_schedules(self) -> List[Dict[str, Any]]:
         """Get all active schedules where next_run_at <= now()."""
         with get_db_connection() as conn:

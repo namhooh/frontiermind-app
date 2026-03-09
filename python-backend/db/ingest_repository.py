@@ -159,7 +159,7 @@ class IngestRepository:
                         f"""
                         SELECT id, inbound_message_id, filename, content_type,
                                size_bytes, attachment_processing_status,
-                               extraction_result, reference_price_id, created_at
+                               extraction_result, reference_price_id, failed_reason, created_at
                         FROM inbound_attachment
                         WHERE inbound_message_id IN ({placeholders})
                         ORDER BY id

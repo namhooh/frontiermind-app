@@ -595,8 +595,8 @@ async def delete_schedule(schedule_id: int, auth: dict = Depends(require_supabas
     existing = notification_repo.get_schedule(schedule_id, org_id)
     if not existing:
         raise HTTPException(status_code=404, detail={"success": False, "message": "Schedule not found"})
-    notification_repo.update_schedule(schedule_id, org_id, {"is_active": False})
-    return SuccessResponse(message="Schedule deactivated")
+    notification_repo.hard_delete_schedule(schedule_id, org_id)
+    return SuccessResponse(message="Schedule deleted")
 
 
 @router.post("/schedules/{schedule_id}/trigger", response_model=SendEmailResponse)

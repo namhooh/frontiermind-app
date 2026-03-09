@@ -34,6 +34,7 @@ import {
   Loader2,
   Filter,
   RefreshCw,
+  Trash2,
 } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/app/components/ui/button'
@@ -339,6 +340,16 @@ function NotificationsPageContent() {
       await loadEmailLogs()
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to trigger schedule')
+    }
+  }
+
+  const handleDeleteSchedule = async (scheduleId: number) => {
+    if (!confirm('Delete this schedule? This cannot be undone.')) return
+    try {
+      await client.deactivateSchedule(scheduleId)
+      await loadSchedules()
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to delete schedule')
     }
   }
 
@@ -705,7 +716,8 @@ function NotificationsPageContent() {
                                             {msg.attachments.map((att) => {
                                               const attStyle = STATUS_STYLES[att.attachment_processing_status] || STATUS_STYLES.pending
                                               return (
-                                                <div key={att.id} className="flex items-center justify-between bg-white rounded border border-slate-200 px-3 py-2">
+                                                <Fragment key={att.id}>
+                                                <div className="flex items-center justify-between bg-white rounded border border-slate-200 px-3 py-2">
                                                   <div className="flex items-center gap-2 min-w-0">
                                                     <Paperclip className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
                                                     <span className="text-sm text-slate-700 truncate">{att.filename || 'unnamed'}</span>
@@ -740,6 +752,49 @@ function NotificationsPageContent() {
                                                     <Download className="w-3 h-3" />
                                                   </Button>
                                                 </div>
+                                                {att.attachment_processing_status === 'extracted' && att.extraction_result && (
+                                                  <div className="ml-6 mt-1 bg-green-50 border border-green-200 rounded px-3 py-2 text-sm">
+                                                    <div className="flex items-center gap-4 flex-wrap">
+                                                      {att.extraction_result.mrp_per_kwh != null && (
+                                                        <div>
+                                                          <span className="text-xs font-medium text-green-700">MRP</span>
+                                                          <span className="ml-1 text-green-900 font-semibold">{att.extraction_result.mrp_per_kwh} /kWh</span>
+                                                        </div>
+                                                      )}
+                                                      {att.extraction_result.billing_month_stored && (
+                                                        <div>
+                                                          <span className="text-xs font-medium text-green-700">Month</span>
+                                                          <span className="ml-1 text-green-900">{att.extraction_result.billing_month_stored as string}</span>
+                                                        </div>
+                                                      )}
+                                                      {att.extraction_result.total_variable_charges != null && (
+                                                        <div>
+                                                          <span className="text-xs font-medium text-green-700">Total Charges</span>
+                                                          <span className="ml-1 text-green-900">{att.extraction_result.total_variable_charges as number}</span>
+                                                        </div>
+                                                      )}
+                                                      {att.extraction_result.total_kwh_invoiced != null && (
+                                                        <div>
+                                                          <span className="text-xs font-medium text-green-700">kWh Invoiced</span>
+                                                          <span className="ml-1 text-green-900">{att.extraction_result.total_kwh_invoiced as number}</span>
+                                                        </div>
+                                                      )}
+                                                      {att.extraction_result.extraction_confidence && (
+                                                        <div>
+                                                          <span className="text-xs font-medium text-green-700">Confidence</span>
+                                                          <span className="ml-1 text-green-900">{att.extraction_result.extraction_confidence as string}</span>
+                                                        </div>
+                                                      )}
+                                                      {att.extraction_result.observation_id && (
+                                                        <div>
+                                                          <span className="text-xs font-medium text-green-700">Observation</span>
+                                                          <span className="ml-1 text-green-900">#{att.extraction_result.observation_id as number}</span>
+                                                        </div>
+                                                      )}
+                                                    </div>
+                                                  </div>
+                                                )}
+                                                </Fragment>
                                               )
                                             })}
                                           </div>
@@ -898,6 +953,15 @@ function NotificationsPageContent() {
                             title={s.is_active ? 'Pause' : 'Resume'}
                           >
                             {s.is_active ? <Pause className="w-3.5 h-3.5" /> : <Play className="w-3.5 h-3.5" />}
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleDeleteSchedule(s.id)}
+                            title="Delete"
+                            className="text-red-500 hover:bg-red-50 border-red-200"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
                           </Button>
                         </div>
                       </div>

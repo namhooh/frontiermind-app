@@ -1,6 +1,6 @@
 'use client'
 
-const INVOICE_STATUSES = ['draft', 'sent', 'verified', 'disputed', 'paid']
+const INVOICE_STATUSES = ['draft', 'sent', 'paid']
 
 interface ConditionsBuilderProps {
   value: Record<string, unknown>
@@ -11,9 +11,6 @@ export function ConditionsBuilder({ value, onChange }: ConditionsBuilderProps) {
   const selectedStatuses = (value.invoice_status as string[]) || []
   const daysOverdueMin = (value.days_overdue_min as number) ?? ''
   const daysOverdueMax = (value.days_overdue_max as number) ?? ''
-  const minAmount = (value.min_amount as number) ?? ''
-  const maxAmount = (value.max_amount as number) ?? ''
-
   function update(key: string, val: unknown) {
     const next = { ...value }
     if (val === '' || val === null || val === undefined || (Array.isArray(val) && val.length === 0)) {
@@ -78,33 +75,6 @@ export function ConditionsBuilder({ value, onChange }: ConditionsBuilderProps) {
         </div>
       </div>
 
-      {/* Amount Range */}
-      <div className="grid grid-cols-2 gap-3">
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Min Amount</label>
-          <input
-            type="number"
-            min={0}
-            step={100}
-            value={minAmount}
-            onChange={(e) => update('min_amount', e.target.value ? Number(e.target.value) : '')}
-            placeholder="0"
-            className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400"
-          />
-        </div>
-        <div>
-          <label className="block text-xs font-medium text-slate-600 mb-1">Max Amount</label>
-          <input
-            type="number"
-            min={0}
-            step={100}
-            value={maxAmount}
-            onChange={(e) => update('max_amount', e.target.value ? Number(e.target.value) : '')}
-            placeholder="No limit"
-            className="w-full px-3 py-1.5 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400"
-          />
-        </div>
-      </div>
     </div>
   )
 }
