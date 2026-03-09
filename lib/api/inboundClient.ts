@@ -46,6 +46,7 @@ export interface InboundAttachment {
   attachment_processing_status: AttachmentProcessingStatus
   extraction_result?: Record<string, unknown>
   reference_price_id?: number
+  failed_reason?: string
   created_at: string
 }
 
@@ -219,7 +220,7 @@ export class InboundClient {
         this.log('info', `${options.method || 'GET'} ${url}`)
         const response = await fetch(url, options)
         const text = await response.text()
-        let responseData: Record<string, unknown>
+        let responseData: any
         try {
           responseData = JSON.parse(text)
         } catch {
