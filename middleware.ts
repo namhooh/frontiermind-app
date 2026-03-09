@@ -10,6 +10,7 @@ export async function middleware(request: NextRequest) {
     // Allow /projects*, /api/*, and Next.js internal routes
     if (
       !pathname.startsWith('/projects') &&
+      !pathname.startsWith('/notifications') &&
       !pathname.startsWith('/api') &&
       !pathname.startsWith('/_next') &&
       !pathname.startsWith('/submit')
