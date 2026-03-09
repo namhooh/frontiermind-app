@@ -137,7 +137,6 @@ function NotificationsPageContent() {
   const [approveResults, setApproveResults] = useState<Record<number, ApproveResponse>>({})
   const [rejectReason, setRejectReason] = useState('')
   const [showRejectInput, setShowRejectInput] = useState<number | null>(null)
-  const [showApproveInput, setShowApproveInput] = useState<number | null>(null)
   const [approveProjectId, setApproveProjectId] = useState<number | undefined>()
 
   const supabase = useRef(createClient())
@@ -350,7 +349,6 @@ function NotificationsPageContent() {
         project_id: projectId,
       })
       setApproveResults(prev => ({ ...prev, [messageId]: result }))
-      setShowApproveInput(null)
       setApproveProjectId(undefined)
       await loadInbox()
     } catch (e) {
@@ -599,16 +597,23 @@ function NotificationsPageContent() {
                                 </td>
                                 <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
                                   {isPending && (
-                                    <div className="flex gap-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <select
+                                        value={approveProjectId ?? ''}
+                                        onChange={(e) => setApproveProjectId(e.target.value ? Number(e.target.value) : undefined)}
+                                        className="w-40 px-2 py-1 text-xs border border-slate-200 rounded focus:outline-none focus:border-slate-400 bg-white"
+                                        title="Assign to project"
+                                      >
+                                        <option value="">Project...</option>
+                                        {projects.map((p) => (
+                                          <option key={p.id} value={p.id}>{p.sage_id ? `${p.sage_id} - ${p.name}` : p.name}</option>
+                                        ))}
+                                      </select>
                                       <Button
                                         variant="outline"
                                         size="sm"
                                         disabled={isActioning}
-                                        onClick={() => {
-                                          setShowApproveInput(showApproveInput === msg.id ? null : msg.id)
-                                          setShowRejectInput(null)
-                                          setApproveProjectId(undefined)
-                                        }}
+                                        onClick={() => handleApprove(msg.id, approveProjectId)}
                                         title="Approve"
                                         className="text-green-600 hover:bg-green-50 border-green-200"
                                       >
@@ -620,7 +625,6 @@ function NotificationsPageContent() {
                                         disabled={isActioning}
                                         onClick={() => {
                                           setShowRejectInput(showRejectInput === msg.id ? null : msg.id)
-                                          setShowApproveInput(null)
                                         }}
                                         title="Reject"
                                         className="text-red-600 hover:bg-red-50 border-red-200"
@@ -631,43 +635,6 @@ function NotificationsPageContent() {
                                   )}
                                 </td>
                               </tr>
-
-                              {/* Approve project picker */}
-                              {showApproveInput === msg.id && (
-                                <tr className="bg-green-50 border-b border-slate-100">
-                                  <td colSpan={7} className="px-4 py-3">
-                                    <div className="flex items-center gap-2 max-w-lg">
-                                      <select
-                                        value={approveProjectId ?? ''}
-                                        onChange={(e) => setApproveProjectId(e.target.value ? Number(e.target.value) : undefined)}
-                                        className="flex-1 px-3 py-1.5 text-sm border border-green-200 rounded-lg focus:outline-none focus:border-green-400 bg-white"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        <option value="">Select project (optional)</option>
-                                        {projects.map((p) => (
-                                          <option key={p.id} value={p.id}>{p.sage_id ? `${p.sage_id} - ${p.name}` : p.name}</option>
-                                        ))}
-                                      </select>
-                                      <Button
-                                        size="sm"
-                                        disabled={isActioning}
-                                        onClick={() => handleApprove(msg.id, approveProjectId)}
-                                        className="bg-green-600 hover:bg-green-700 text-white"
-                                      >
-                                        {isActioning ? <Loader2 className="w-3 h-3 animate-spin mr-1" /> : null}
-                                        Confirm
-                                      </Button>
-                                      <Button
-                                        variant="ghost"
-                                        size="sm"
-                                        onClick={() => { setShowApproveInput(null); setApproveProjectId(undefined) }}
-                                      >
-                                        Cancel
-                                      </Button>
-                                    </div>
-                                  </td>
-                                </tr>
-                              )}
 
                               {/* Reject reason input */}
                               {showRejectInput === msg.id && (
