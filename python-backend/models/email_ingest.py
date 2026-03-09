@@ -51,6 +51,7 @@ class InboundAttachmentResponse(BaseModel):
     attachment_processing_status: str
     extraction_result: Optional[dict] = None
     reference_price_id: Optional[int] = None
+    failed_reason: Optional[str] = None
     created_at: datetime
 
 

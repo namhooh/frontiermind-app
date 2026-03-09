@@ -107,6 +107,11 @@ class EmailIngestService:
         from urllib.parse import unquote_plus
         s3_key = unquote_plus(s3_key)
 
+        # Skip non-email objects (e.g. attachments stored under ingest/)
+        if s3_key.startswith("ingest/") or s3_key == "AMAZON_SES_SETUP_NOTIFICATION":
+            logger.debug(f"Skipping non-email S3 object: {s3_key}")
+            return {"action": "skipped", "reason": "not a raw email"}
+
         s3_raw_path = f"s3://{bucket}/{s3_key}"
         return self.process_inbound_email(s3_raw_path, bucket, s3_key)
 
@@ -171,12 +176,15 @@ class EmailIngestService:
         in_reply_to = headers.get("in-reply-to", "").strip("<>") or None
         references_chain = self._parse_references(headers.get("references", ""))
 
-        # 5. Noise check
+        # 5. Default org fallback for noise/unroutable emails
+        default_org_id = int(os.getenv("DEFAULT_ORGANIZATION_ID", "1"))
+
+        # 6. Noise check
         noise, noise_reason = is_noise(headers)
         if noise:
             logger.info(f"Noise detected: {noise_reason} — {sender_email}")
             msg_id = self.repo.create_inbound_message({
-                "organization_id": 0,  # Will be overwritten if routable
+                "organization_id": default_org_id,
                 "channel": "email",
                 "subject": subject,
                 "raw_headers": headers,
@@ -189,14 +197,14 @@ class EmailIngestService:
             })
             return {"action": "noise", "message_id": msg_id, "reason": noise_reason}
 
-        # 6. Route to organization
+        # 7. Route to organization
         recipients = self._extract_recipients(msg)
         org_info = self._route_to_org(recipients)
 
         if not org_info:
             logger.warning(f"Unroutable email from {sender_email} to {recipients}")
             msg_id = self.repo.create_inbound_message({
-                "organization_id": 0,
+                "organization_id": default_org_id,
                 "channel": "email",
                 "subject": subject,
                 "raw_headers": headers,
