@@ -235,16 +235,16 @@ async def approve_message(
         if not updated:
             raise HTTPException(status_code=404, detail={"success": False, "message": "Message not found"})
 
-        # Trigger extraction on all pending attachments
+        # Trigger extraction on pending and failed attachments (failed may need retry with project_id)
         attachments = ingest_repo.list_attachments_for_message(message_id)
-        pending = [a for a in attachments if a.get("attachment_processing_status") == "pending"]
+        retryable = [a for a in attachments if a.get("attachment_processing_status") in ("pending", "failed")]
 
         extraction_results: list[AttachmentProcessingResponse] = []
-        if pending:
+        if retryable:
             from services.ingest.attachment_processing_service import AttachmentProcessingService
 
             service = AttachmentProcessingService(ingest_repo)
-            for att in pending:
+            for att in retryable:
                 result = service.process_attachment(
                     attachment_id=att["id"],
                     org_id=org_id,

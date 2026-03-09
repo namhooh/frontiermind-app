@@ -20,6 +20,7 @@ import {
 import { ConditionsBuilder } from './ConditionsBuilder'
 import { RecipientPicker } from './RecipientPicker'
 import { DueDateTimingBuilder, type DueDateRelativeConfig } from './DueDateTimingBuilder'
+import type { ProjectGroupedItem } from '@/lib/api/adminClient'
 
 const INVOICE_TYPES: EmailScheduleType[] = ['invoice_reminder', 'invoice_initial']
 
@@ -38,9 +39,10 @@ interface ScheduleFormDialogProps {
   client: NotificationsClient
   schedule?: NotificationSchedule
   onSaved?: () => void
+  projects?: ProjectGroupedItem[]
 }
 
-export function ScheduleFormDialog({ open, onOpenChange, client, schedule, onSaved }: ScheduleFormDialogProps) {
+export function ScheduleFormDialog({ open, onOpenChange, client, schedule, onSaved, projects = [] }: ScheduleFormDialogProps) {
   const isEdit = !!schedule
   const [templates, setTemplates] = useState<EmailTemplate[]>([])
   const [saving, setSaving] = useState(false)
@@ -49,7 +51,7 @@ export function ScheduleFormDialog({ open, onOpenChange, client, schedule, onSav
   // Form state
   const [name, setName] = useState('')
   const [templateId, setTemplateId] = useState<number | ''>('')
-  const [frequency, setFrequency] = useState<ReportFrequency>('monthly')
+  const [frequency, setFrequency] = useState<ReportFrequency>('daily')
   const [dayOfMonth, setDayOfMonth] = useState<number | ''>(15)
   const [timeOfDay, setTimeOfDay] = useState('09:00')
   const [timezone, setTimezone] = useState('UTC')
@@ -58,6 +60,7 @@ export function ScheduleFormDialog({ open, onOpenChange, client, schedule, onSav
   const [maxReminders, setMaxReminders] = useState<number | ''>(3)
   const [escalationAfter, setEscalationAfter] = useState<number | ''>(1)
   const [dueDateRelative, setDueDateRelative] = useState<DueDateRelativeConfig>({})
+  const [projectId, setProjectId] = useState<number | ''>('')
 
   // Derive schedule type from selected template
   const selectedTemplate = templates.find((t) => t.id === templateId)
@@ -82,10 +85,11 @@ export function ScheduleFormDialog({ open, onOpenChange, client, schedule, onSav
         setMaxReminders(schedule.max_reminders ?? 3)
         setEscalationAfter(schedule.escalation_after ?? 1)
         setDueDateRelative((schedule.conditions?.due_date_relative as DueDateRelativeConfig) || {})
+        setProjectId(schedule.project_id ?? '')
       } else {
         setName('')
         setTemplateId('')
-        setFrequency('monthly')
+        setFrequency('daily')
         setDayOfMonth(15)
         setTimeOfDay('09:00')
         setTimezone('UTC')
@@ -94,6 +98,7 @@ export function ScheduleFormDialog({ open, onOpenChange, client, schedule, onSav
         setMaxReminders(3)
         setEscalationAfter(1)
         setDueDateRelative({})
+        setProjectId('')
       }
     }
   }, [open, client, schedule])
@@ -121,6 +126,7 @@ export function ScheduleFormDialog({ open, onOpenChange, client, schedule, onSav
         max_reminders: isDirectSend ? undefined : (maxReminders ? Number(maxReminders) : undefined),
         escalation_after: isDirectSend ? undefined : (escalationAfter ? Number(escalationAfter) : undefined),
         include_submission_link: false,
+        project_id: projectId ? Number(projectId) : undefined,
       }
       if (isEdit) {
         await client.updateSchedule(schedule!.id, payload)
@@ -157,6 +163,20 @@ export function ScheduleFormDialog({ open, onOpenChange, client, schedule, onSav
               placeholder="Monthly Invoice Reminder"
               className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400"
             />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-700 mb-1">Project</label>
+            <select
+              value={projectId}
+              onChange={(e) => setProjectId(e.target.value ? Number(e.target.value) : '')}
+              className="w-full px-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:border-blue-400 bg-white"
+            >
+              <option value="">All Projects</option>
+              {projects.map((p) => (
+                <option key={p.id} value={p.id}>{p.sage_id ? `${p.sage_id} - ${p.name}` : p.name}</option>
+              ))}
+            </select>
           </div>
 
           <div>

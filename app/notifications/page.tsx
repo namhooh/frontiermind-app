@@ -33,6 +33,7 @@ import {
   Paperclip,
   Loader2,
   Filter,
+  RefreshCw,
 } from 'lucide-react'
 import Link from 'next/link'
 import { Button } from '@/app/components/ui/button'
@@ -543,6 +544,8 @@ function NotificationsPageContent() {
                         {inboundMessages.map((msg) => {
                           const isExpanded = expandedMessageId === msg.id
                           const isPending = msg.inbound_message_status === 'pending_review'
+                          const hasFailedAttachments = msg.inbound_message_status === 'approved'
+                            && msg.attachments?.some(a => a.attachment_processing_status === 'failed')
                           const isActioning = actionLoading === msg.id
                           const style = STATUS_STYLES[msg.inbound_message_status] || STATUS_STYLES.received
 
@@ -596,7 +599,7 @@ function NotificationsPageContent() {
                                   {new Date(msg.created_at).toLocaleString()}
                                 </td>
                                 <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                                  {isPending && (
+                                  {(isPending || hasFailedAttachments) && (
                                     <div className="flex items-center gap-1.5">
                                       <select
                                         value={approveProjectId ?? ''}
@@ -614,23 +617,29 @@ function NotificationsPageContent() {
                                         size="sm"
                                         disabled={isActioning}
                                         onClick={() => handleApprove(msg.id, approveProjectId)}
-                                        title="Approve"
-                                        className="text-green-600 hover:bg-green-50 border-green-200"
+                                        title={hasFailedAttachments ? "Retry extraction" : "Approve"}
+                                        className={hasFailedAttachments
+                                          ? "text-amber-600 hover:bg-amber-50 border-amber-200"
+                                          : "text-green-600 hover:bg-green-50 border-green-200"}
                                       >
-                                        {isActioning ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                                        {isActioning ? <Loader2 className="w-3 h-3 animate-spin" />
+                                          : hasFailedAttachments ? <RefreshCw className="w-3 h-3" />
+                                          : <Check className="w-3 h-3" />}
                                       </Button>
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        disabled={isActioning}
-                                        onClick={() => {
-                                          setShowRejectInput(showRejectInput === msg.id ? null : msg.id)
-                                        }}
-                                        title="Reject"
-                                        className="text-red-600 hover:bg-red-50 border-red-200"
-                                      >
-                                        <X className="w-3 h-3" />
-                                      </Button>
+                                      {isPending && (
+                                        <Button
+                                          variant="outline"
+                                          size="sm"
+                                          disabled={isActioning}
+                                          onClick={() => {
+                                            setShowRejectInput(showRejectInput === msg.id ? null : msg.id)
+                                          }}
+                                          title="Reject"
+                                          className="text-red-600 hover:bg-red-50 border-red-200"
+                                        >
+                                          <X className="w-3 h-3" />
+                                        </Button>
+                                      )}
                                     </div>
                                   )}
                                 </td>
@@ -1085,6 +1094,7 @@ function NotificationsPageContent() {
         client={client}
         schedule={editingSchedule}
         onSaved={loadSchedules}
+        projects={projects}
       />
 
       <TemplateEditorDialog

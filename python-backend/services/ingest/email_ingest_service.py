@@ -276,10 +276,15 @@ class EmailIngestService:
             f"org={org_id}, status={sender_status}, attachments={len(attachment_ids)}"
         )
 
-        # 12. Auto-trigger extraction for known contacts
-        if contact_id and attachment_ids:
+        # 12. Auto-trigger extraction only when project is resolved
+        if contact_id and attachment_ids and project_id:
             self._auto_extract_attachments(
                 attachment_ids, org_id, msg_id, counterparty_id, project_id
+            )
+        elif contact_id and attachment_ids:
+            logger.info(
+                f"Skipping auto-extraction for message {msg_id}: "
+                f"project_id not resolved, awaiting manual assignment"
             )
 
         return {

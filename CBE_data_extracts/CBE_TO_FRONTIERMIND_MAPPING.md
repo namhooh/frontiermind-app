@@ -5,7 +5,7 @@ This document maps CBE's data architecture to FrontierMind's canonical schema an
 **Sources:** AM Onboarding Template (Excel), PPA Contract PDFs, Utility Invoices (GRP — Grid Reference Price), Snowflake data warehouse, Operations Plant Performance Workbook, Operating Revenue Masterfile.
 
 **Schema version:** v10.14 (migration 056)
-**Latest population step:** Step 10b — Tariff Rate Population (2026-03-09)
+**Latest population step:** Step 11 — Forecast Extension to Contract End (2026-03-09)
 
 **Companion documentation:**
 - [`contract-digitization/docs/IMPLEMENTATION_GUIDE.md`](../contract-digitization/docs/IMPLEMENTATION_GUIDE.md) — Full contract digitization pipeline (OCR, PII, clause extraction, ontology)
@@ -23,6 +23,8 @@ This document maps CBE's data architecture to FrontierMind's canonical schema an
 - [`python-backend/reports/cbe-population/step9_2026-03-09.json`](../python-backend/reports/cbe-population/step9_2026-03-09.json) — Step 9 run report
 - [`python-backend/reports/cbe-population/step8_2026-03-08.json`](../python-backend/reports/cbe-population/step8_2026-03-08.json) — Step 8 report: invoice calibration & tax rule extraction
 - [`python-backend/scripts/step10b_tariff_rate_population.py`](../python-backend/scripts/step10b_tariff_rate_population.py) — Step 10b: Tariff rate population (Section 30)
+- [`python-backend/scripts/extend_forecasts.py`](../python-backend/scripts/extend_forecasts.py) — Step 11: Forecast extension engine (Section 31)
+- [`python-backend/reports/cbe-population/extend_forecasts_2026-03-09.json`](../python-backend/reports/cbe-population/extend_forecasts_2026-03-09.json) — Step 11 report
 
 ---
 
@@ -1702,6 +1704,9 @@ From the MOH01 onboarding audit (`database/scripts/project-onboarding/audits/GH_
 | 15 | PPA structured field mapping incomplete — LLM returns structured `default_rate` and `available_energy` but parser only populated deprecated flat fields | `default_rate` and `available_energy` always None in `PPAContractData` | **Fixed** (parser now populates structured models) |
 | 16 | `formula_type` not set at onboarding — rebased market price engine requires `logic_parameters.formula_type` but tariff builder never set it | Engine would fail when invoked for onboarded REBASED_MARKET_PRICE projects | **Fixed** (infers GRID_DISCOUNT_BOUNDED from floor/ceiling presence) |
 | 17 | Cross-tenant counterparty conflation — global unique key `(counterparty_type_id, LOWER(name))` means two orgs with same counterparty name conflict | Currently single-tenant (CBE only); will need `organization_id` added when second client onboards | Open (design debt) |
+| 18 | Capacity mismatch — `project.installed_dc_capacity_kwp` vs `forecast.source_metadata.site_params.capacity_kwp` for 7 projects (MF01 -82%, NC02 -62%, MB01 -53%, IVL01 +235%, KAS01 -31%, NBL01 -21%, QMM01 +12%) | Forecast extension uses existing values as-is, but absolute energy figures may be wrong if based on wrong capacity | Open |
+| 19 | UNSOS forecast data anomaly — 2025-2026 values appear templated/constant, causing 16.8% implicit degradation (capped to 1%) | Extended forecasts use capped degradation; underlying baseline may be incorrect | Open |
+| 20 | Missing COD dates — AMP01, XFBV, XFL01, XFSS have NULL `cod_date` | `operating_year` NULL on projected rows; cannot use cod+term end date fallback | Open |
 
 ---
 
@@ -3084,3 +3089,133 @@ ABI01, AR01, BNT01, GBL01, GC001, IVL01 (OM), LOI01 (×2), NBL01, NBL02, NC02, N
 ### 30.6 Dashboard Audit Fix (same session)
 
 - Cleared 72 `contract_billing_product.notes` rows containing internal pipeline string `"Step 4 auto-derived from contract_line"` — set to NULL so they no longer display on Pricing & Tariffs tab
+
+---
+
+## 31. Step 11: Forecast Extension to Contract End (2026-03-09)
+
+**Script:** `python-backend/scripts/extend_forecasts.py`
+**Report:** `python-backend/reports/cbe-population/extend_forecasts_2026-03-09.json`
+**Mode:** LIVE (single-project test on GBL01, then full run)
+
+### 31.1 What Was Done
+
+Extended `production_forecast` rows from their last existing month to the contract end date for all eligible projects. Uses the last full calendar year of existing forecasts as a baseline, applies annual degradation, and projects forward month-by-month.
+
+**Methodology:**
+1. Determine contract end date: `cod_date + contract_term_years_po` → fallback to `contract.end_date`
+2. Extract baseline from last full calendar year of existing forecasts (12 months)
+3. Determine degradation: explicit (from `clause_tariff.logic_parameters.degradation_pct`) → implicit (Year 1 vs baseline year energy ratio) → flat (0%)
+4. Cap implicit degradation at 1%/year (anything higher is a data artifact)
+5. Project forward: energy and PR degrade; GHI and POA stay constant
+6. Insert with `ON CONFLICT (project_id, forecast_month) DO NOTHING` (idempotent)
+
+All projected rows have `forecast_source = 'projected'` and `source_metadata` containing engine name, baseline year, degradation rate and source.
+
+### 31.2 Results
+
+| Metric | Value |
+|--------|-------|
+| Projects processed | 35 |
+| Projects extended | 27 (+ GBL01 in test run = 28 unique) |
+| Projects skipped | 8 |
+| Total rows inserted | 4,379 (+ 245 GBL01 test = 4,624 total) |
+
+### 31.3 Per-Project Summary
+
+| Project | Months | Range | Degradation | Source | End Date Via |
+|---------|--------|-------|-------------|--------|-------------|
+| AMP01 | 63 | → 2032-03 | 0.0% flat | — | contract.end_date |
+| CAL01 | 184 | → 2042-04 | 1.0% capped | implicit (raw 1.85%) | cod + 17y |
+| ERG | 203 | → 2043-11 | 0.0% flat | — | cod + 20y |
+| GBL01 | 245 | → 2047-05 | 0.5% implicit | Y1=2021, BL=2026 | contract.end_date |
+| GC001 | 38 | → 2030-02 | 0.4% implicit | Y1=2016, BL=2026 | contract.end_date |
+| IVL01 | 262 | → 2048-10 | 0.0% flat | — | cod + 25y |
+| JAB01 | 102 | → 2035-06 | 0.5% implicit | Y1=2020, BL=2026 | cod + 15y |
+| LOI01 | 27 | → 2029-03 | 0.0% flat | — | cod + 10y |
+| MB01 | 217 | → 2045-01 | 0.0% flat | — | cod + 20y |
+| MF01 | 202 | → 2043-10 | 0.0% flat | — | cod + 20y |
+| MIR01 | 46 | → 2030-10 | 0.0% flat | — | cod + 7y |
+| MOH01 | 288 | → 2050-12 | 0.7% explicit | clause_tariff | cod + 25y |
+| MP01 | 208 | → 2044-04 | 0.55% implicit | Y1=2024, BL=2026 | cod + 20y |
+| MP02 | 207 | → 2044-03 | 0.55% implicit | Y1=2024, BL=2026 | cod + 20y |
+| NBL01 | 111 | → 2036-03 | 0.0% flat | — | contract.end_date |
+| NBL02 | 135 | → 2038-03 | 0.4% implicit | Y1=2023, BL=2026 | contract.end_date |
+| NC02 | 203 | → 2043-11 | 0.0% flat | — | contract.end_date |
+| NC03 | 206 | → 2044-02 | 0.55% implicit | Y1=2024, BL=2026 | contract.end_date |
+| QMM01 | 197 | → 2043-05 | 0.0% flat | — | contract.end_date |
+| TBM01 | 194 | → 2043-02 | 0.7% implicit | Y1=2023, BL=2026 | cod + 20y |
+| TWG01 | 96 | → 2035-12 | 0.0% flat | — | cod + 10y |
+| UGL01 | 109 | → 2036-01 | 0.5% implicit | Y1=2021, BL=2026 | cod + 15y |
+| UNSOS | 87 | → 2034-03 | 1.0% capped | implicit (raw 16.78%) | cod + 10y |
+| UTK01 | 89 | → 2034-05 | 0.7% implicit | Y1=2019, BL=2026 | cod + 15y |
+| XFAB | 170 | → 2041-02 | 0.5% implicit | Y1=2021, BL=2026 | cod + 20y |
+| XFBV | 245 | → 2047-05 | 0.5% implicit | Y1=2021, BL=2026 | contract.end_date |
+| XFL01 | 245 | → 2047-05 | 0.5% implicit | Y1=2021, BL=2026 | contract.end_date |
+| XFSS | 245 | → 2047-05 | 0.5% implicit | Y1=2021, BL=2026 | contract.end_date |
+
+### 31.4 Skipped Projects
+
+| Project | Reason |
+|---------|--------|
+| KAS01 | Already covered (existing forecasts extend past contract end) |
+| ABI01, BNT01 | No existing forecast rows (construction phase) |
+| AR01, ZL02 | No existing forecast rows (cod + term exist, but PPW data missing) |
+| TBC | No existing forecast rows (construction phase, no tariff) |
+| ZL01 | No existing forecast rows (legacy entity) |
+
+### 31.5 Data Quality Issues
+
+#### Issue 1: UNSOS — Anomalous Forecast Data (Severity: HIGH)
+
+Hybrid plant (solar + diesel) with templated/placeholder forecast values:
+- 2024: real-looking values (241K–410K kWh, varying monthly)
+- 2025: repeating constants (~332K, ~321K kWh)
+- 2026: different repeating constants (~216K, ~209K kWh) — **~35% drop from 2025**
+- Implicit degradation: 16.78% → **capped to 1%**
+
+**Action:** Investigate whether PPW source data for UNSOS was templated/incorrectly parsed. The hybrid structure may have caused the parser to pick up wrong sections. See Known Pipeline Gap #19.
+
+#### Issue 2: CAL01 — Elevated Implicit Degradation (Severity: MEDIUM)
+
+- PR drops from ~0.81 (2025) to ~0.77 (2026) — ~5% PR loss in one year
+- Implicit degradation: 1.85% → **capped to 1%** (typical solar: 0.3–0.7%/yr)
+- Energy values otherwise correlate with irradiance
+
+**Action:** Check if PPW source data has a step-change between 2025 and 2026 (different PVSyst scenario or capacity assumption). See also Section 26.3 COD mismatch for CAL01.
+
+#### Issue 3: Capacity Mismatches (Severity: HIGH)
+
+Cross-reference of `project.installed_dc_capacity_kwp` (from CBE Customer Summary) vs `forecast.source_metadata.site_params.capacity_kwp` (from PPW project tabs). Already documented in Section 26.3 — repeated here for extension context:
+
+| Project | `project` table (kWp) | `forecast` metadata (kWp) | Variance |
+|---------|----------------------|--------------------------|----------|
+| MF01 | 674 | 118.5 | -82% |
+| NC02 | 1,282.58 | 493.42 | -62% |
+| MB01 | 1,172.52 | 544.92 | -53% |
+| IVL01 | 967.68 | 3,242.52 | +235% |
+| KAS01 | 1,305.24 | 904.8 | -31% |
+| NBL01 | 3,173 | 2,511 | -21% |
+| QMM01 | 14,447.76 | 16,150 | +12% |
+
+Forecast extension is unaffected (extends existing values as-is), but energy figures may be wrong if the wrong capacity was used in the original PVSyst model. See Known Pipeline Gap #18.
+
+#### Issue 4: Missing COD Dates (Severity: LOW)
+
+| Project | Impact |
+|---------|--------|
+| AMP01 | `operating_year` NULL on projected rows; falls back to `contract.end_date` |
+| XFBV, XFL01, XFSS | Same — COD should match XFAB (2021-01-11) |
+
+See Known Pipeline Gap #20.
+
+### 31.6 Gate Checks
+
+| Gate | Expected | Actual | Passed |
+|------|----------|--------|--------|
+| GBL01 test: GHI constant, energy/PR declining | Verified | avg_ghi ~150.58 across all years | Yes |
+| GBL01 test: forecast_source = 'projected' | All new rows | Confirmed | Yes |
+| Full run: rows inserted | ~4,624 | 4,624 (245 + 4,379) | Yes |
+| Full run: no errors | 0 errors | 0 errors | Yes |
+| Degradation cap applied where needed | UNSOS + CAL01 | Both capped to 1% | Yes |
+| Idempotent re-run | ON CONFLICT DO NOTHING | GBL01 skipped on second run | Yes |

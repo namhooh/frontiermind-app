@@ -209,7 +209,8 @@
       "Bash(pip3 list:*)",
       "Bash(/Users/namho/frontiermind-app/python-backend/venv/bin/pip list:*)",
       "Bash(venv/bin/python3:*)",
-      "Bash(aws ec2:*)"
+      "Bash(aws ec2:*)",
+      "Bash(openssl rand:*)"
     ]
   }
 }
