@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, Path, status
 from pydantic import BaseModel, Field
 
 from db.database import get_db_connection, init_connection_pool
+from models.billing_cycle import ComputePerformanceRequest
 
 logger = logging.getLogger(__name__)
 
@@ -57,6 +58,7 @@ class PerformanceMonth(BaseModel):
     forecast_ghi_irradiance: Optional[float] = None
     forecast_poa_irradiance: Optional[float] = None
     forecast_pr: Optional[float] = None
+    forecast_pr_poa: Optional[float] = None
     # Performance metrics (from plant_performance)
     actual_pr: Optional[float] = None
     actual_availability_pct: Optional[float] = None
@@ -216,6 +218,7 @@ async def get_plant_performance(
                             pf.forecast_ghi_irradiance,
                             pf.forecast_poa_irradiance,
                             pf.forecast_pr,
+                            pf.forecast_pr_poa,
                             pf.operating_year AS forecast_operating_year
                         FROM production_forecast pf
                         WHERE pf.project_id = %(pid)s
@@ -231,6 +234,7 @@ async def get_plant_performance(
                         fc.forecast_ghi_irradiance,
                         fc.forecast_poa_irradiance,
                         fc.forecast_pr,
+                        fc.forecast_pr_poa,
                         COALESCE(pp.operating_year, fc.forecast_operating_year) AS operating_year,
                         pp.actual_pr,
                         pp.actual_availability_pct,
@@ -247,30 +251,36 @@ async def get_plant_performance(
                 """, {"pid": project_id})
                 month_rows = cur.fetchall()
 
-                # 4) Get per-meter breakdown for all months
+                # 4) Get per-meter breakdown for all months (metered + available energy lines)
                 per_meter_data: dict[str, dict[int, dict]] = {}  # billing_month → {meter_id → {metered, available}}
                 if meter_ids_ordered:
                     cur.execute("""
                         SELECT
                             date_trunc('month', ma.period_start)::date AS billing_month,
                             ma.meter_id,
-                            COALESCE(ma.energy_kwh, ma.total_production, 0) AS metered_kwh,
+                            cl.energy_category,
+                            COALESCE(ma.energy_kwh, ma.total_production, 0) AS energy_kwh,
                             COALESCE(ma.available_energy_kwh, 0) AS available_kwh
                         FROM meter_aggregate ma
                         JOIN contract_line cl ON cl.id = ma.contract_line_id
                         WHERE ma.meter_id = ANY(%(mids)s)
                           AND ma.period_start IS NOT NULL
-                          AND cl.energy_category = 'metered'
+                          AND cl.energy_category IN ('metered', 'available')
                     """, {"mids": meter_ids_ordered})
                     for row in cur.fetchall():
                         bm = row["billing_month"]
                         bm_key = bm.strftime("%Y-%m-%d") if isinstance(bm, date) else str(bm)
                         if bm_key not in per_meter_data:
                             per_meter_data[bm_key] = {}
-                        per_meter_data[bm_key][row["meter_id"]] = {
-                            "metered_kwh": _d2f(row["metered_kwh"]),
-                            "available_kwh": _d2f(row["available_kwh"]),
-                        }
+                        mid = row["meter_id"]
+                        if mid not in per_meter_data[bm_key]:
+                            per_meter_data[bm_key][mid] = {"metered_kwh": 0.0, "available_kwh": 0.0}
+                        if row["energy_category"] == "metered":
+                            per_meter_data[bm_key][mid]["metered_kwh"] += _d2f(row["energy_kwh"]) or 0.0
+                            # Also pick up available_energy_kwh from the metered line if populated
+                            per_meter_data[bm_key][mid]["available_kwh"] += _d2f(row["available_kwh"]) or 0.0
+                        elif row["energy_category"] == "available":
+                            per_meter_data[bm_key][mid]["available_kwh"] += _d2f(row["energy_kwh"]) or 0.0
 
                 # Meter name lookup
                 meter_name_map = {r["meter_id"]: r["meter_name"] for r in meter_rows}
@@ -317,13 +327,15 @@ async def get_plant_performance(
                     actual_ghi_wm2 = _d2f(mr.get("actual_ghi"))
                     actual_ghi_kwh = actual_ghi_wm2 / 1000.0 if actual_ghi_wm2 is not None else None
 
-                    # operating_year: prefer DB value, fall back to cod_date computation
+                    # operating_year: always derive deterministically from COD
+                    # OY_n = ceil((months_since_cod) / 12), months before COD = 0 (early_ops)
                     oy = mr.get("operating_year")
-                    if oy is None and cod_date and isinstance(bm, date):
-                        year_diff = bm.year - cod_date.year
-                        if bm.month < cod_date.month:
-                            year_diff -= 1
-                        oy = max(1, year_diff + 1)
+                    if cod_date and isinstance(bm, date):
+                        months_since_cod = (bm.year - cod_date.year) * 12 + (bm.month - cod_date.month)
+                        if months_since_cod < 0:
+                            oy = 0  # early_ops: before COD
+                        else:
+                            oy = (months_since_cod // 12) + 1
 
                     months.append(PerformanceMonth(
                         billing_month=bm_str,
@@ -337,6 +349,7 @@ async def get_plant_performance(
                         forecast_ghi_irradiance=_d2f(mr.get("forecast_ghi_irradiance")),
                         forecast_poa_irradiance=_d2f(mr.get("forecast_poa_irradiance")),
                         forecast_pr=_d2f(mr.get("forecast_pr")),
+                        forecast_pr_poa=_d2f(mr.get("forecast_pr_poa")),
                         actual_pr=_d2f(mr.get("actual_pr")),
                         actual_availability_pct=_d2f(mr.get("actual_availability_pct")),
                         energy_comparison=_d2f(mr.get("energy_comparison")),
@@ -646,6 +659,46 @@ async def add_performance_manual(
         raise
     except Exception as e:
         logger.error(f"Error saving performance data: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# POST /projects/{project_id}/plant-performance/compute
+# ============================================================================
+
+@router.post(
+    "/projects/{project_id}/plant-performance/compute",
+    response_model=dict,
+    summary="Compute plant performance from existing meter_aggregate data",
+)
+async def compute_plant_performance(
+    project_id: int = Path(..., description="Project ID"),
+    body: "ComputePerformanceRequest" = ...,
+) -> dict:
+    """Compute plant_performance from meter_aggregate + production_forecast.
+
+    Unlike the manual endpoint, this reads directly from existing meter_aggregate
+    data — no manual input needed. Used by the billing cycle orchestrator.
+    """
+    if not USE_DATABASE:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    from models.billing_cycle import ComputePerformanceRequest as _CPR
+    if not isinstance(body, _CPR):
+        body = _CPR(**body.dict() if hasattr(body, 'dict') else body)
+
+    from services.billing.performance_service import PerformanceService
+    svc = PerformanceService()
+
+    try:
+        result = svc.compute(project_id=project_id, billing_month=body.billing_month)
+        if not result.get("success"):
+            raise HTTPException(status_code=422, detail=result.get("error", "Performance computation failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error computing performance for project {project_id}: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
 
 

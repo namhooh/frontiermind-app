@@ -48,8 +48,13 @@ class BillingAdapterBase(Protocol):
 def get_billing_adapter(source_type: str) -> "BillingAdapterBase":
     """Select billing adapter based on source type or client identifier."""
     from .cbe_billing_adapter import CBEBillingAdapter
+    from .generic_billing_adapter import GenericBillingAdapter
 
-    if source_type == 'snowflake':
-        return CBEBillingAdapter()
-    # Future: elif source_type == 'acme': return AcmeBillingAdapter()
-    return CBEBillingAdapter()  # default for now
+    ADAPTER_REGISTRY = {
+        'snowflake': CBEBillingAdapter,
+        'generic': GenericBillingAdapter,
+        # Future: 'acme': AcmeBillingAdapter,
+    }
+
+    adapter_cls = ADAPTER_REGISTRY.get(source_type, GenericBillingAdapter)
+    return adapter_cls()

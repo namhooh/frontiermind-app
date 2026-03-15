@@ -4,8 +4,9 @@ This document maps CBE's data architecture to FrontierMind's canonical schema an
 
 **Sources:** AM Onboarding Template (Excel), PPA Contract PDFs, Utility Invoices (GRP — Grid Reference Price), Snowflake data warehouse, Operations Plant Performance Workbook, Operating Revenue Masterfile.
 
-**Schema version:** v10.14 (migration 056)
+**Schema version:** v10.16 (migration 060)
 **Latest population step:** Step 11 — Forecast Extension to Contract End (2026-03-09)
+**Latest architecture update:** Section 32 — Live Data Pipeline & Billing Cycle (2026-03-15)
 
 **Companion documentation:**
 - [`contract-digitization/docs/IMPLEMENTATION_GUIDE.md`](../contract-digitization/docs/IMPLEMENTATION_GUIDE.md) — Full contract digitization pipeline (OCR, PII, clause extraction, ontology)
@@ -490,7 +491,7 @@ CBE provides contract line data from `dim_finance_contract_line` (Snowflake/CSV)
 | `VALID_FROM` | `valid_from` | Tariff effective start date |
 | `VALID_TO` | `valid_to` | Tariff effective end date |
 | `METER_ID` (if metered) | `meter_id` (FK) | Resolved via meter lookup |
-| (derived from PRODUCT_CODE) | `tariff_type_id` (FK) | Adapter maps product codes to tariff_type |
+| (derived from PRODUCT_CODE) | `energy_sale_type_id` (FK) | Post-059: adapter maps product codes to energy_sale_type (revenue/product type) |
 | Full original record | `source_metadata.original_record` | Preserved for audit |
 
 #### Tariff Structure Fields (from Onboarding Template / `Inp_Proj`)
@@ -503,9 +504,9 @@ These fields define HOW the tariff is calculated, not just the base rate. They c
 
 | Source Field | FrontierMind Column | Storage | Notes |
 |---|---|---|---|
-| Onboarding "Contract Service/Product Type" | `tariff_type_id` | FK → `tariff_type` | Resolves to ENERGY_SALES, EQUIPMENT_RENTAL_LEASE, LOAN, BESS_LEASE, ENERGY_AS_SERVICE, OTHER_SERVICE, NOT_APPLICABLE |
-| Onboarding "Energy Sales Tariff Type" | `energy_sale_type_id` | FK → `energy_sale_type` | Resolves to FIXED_SOLAR, FLOATING_GRID, FLOATING_GENERATOR, FLOATING_GRID_GENERATOR, NOT_ENERGY_SALES |
-| Onboarding "Price Adjustment type" / `Inp_Proj` row 108 | `escalation_type_id` | FK → `escalation_type` | Resolves to FIXED_INCREASE, PERCENTAGE, US_CPI, REBASED_MARKET_PRICE, NONE |
+| PO Summary col E "Energy Sale Type" | `tariff_type_id` | FK → `tariff_type` | **Post-059: Offtake/Billing Model.** Resolves to TAKE_OR_PAY, TAKE_AND_PAY, MINIMUM_OFFTAKE, FINANCE_LEASE, OPERATING_LEASE, NOT_APPLICABLE |
+| PO Summary col D "Revenue Type" / Onboarding "Contract Service/Product Type" | `energy_sale_type_id` | FK → `energy_sale_type` | **Post-059: Revenue/Product Type.** Resolves to ENERGY_SALES, EQUIPMENT_RENTAL_LEASE, LOAN, BESS_LEASE, ENERGY_AS_SERVICE, OTHER_SERVICE, NOT_APPLICABLE |
+| Onboarding "Price Adjustment type" / `Inp_Proj` row 108 / PO Summary col AD | `escalation_type_id` | FK → `escalation_type` | **Post-059: Expanded.** Resolves to NONE, FIXED_INCREASE, FIXED_DECREASE, PERCENTAGE, US_CPI, REBASED_MARKET_PRICE, FLOATING_GRID, FLOATING_GENERATOR, FLOATING_GRID_GENERATOR, NOT_ENERGY_SALES |
 | (from MRP currency) | `market_ref_currency_id` | FK → `currency` | MRP currency (often differs from billing currency) |
 
 **Pricing formula parameters** — These are stored in `clause_tariff.logic_parameters` JSONB, not as standalone columns. The Pricing Calculator reads them at invoice generation time.
@@ -530,18 +531,18 @@ These fields define HOW the tariff is calculated, not just the base rate. They c
 | Onboarding "Price adjustment frequency" (row 43) | `escalation_frequency` | "Annually", "Biannually" — escalation cadence |
 | Onboarding "Energy Sales Tariff to be adjusted" (row 47) | `tariff_components_to_adjust` | Which components get escalated (e.g. "Solar Tarrif + Floor Tarrif") |
 
-#### Tariff Type Mapping
+#### Product → Revenue Type Mapping (post-059: `energy_sale_type`)
 
-| CBE Product Code | CBE Description | FrontierMind tariff_type |
+| CBE Product Code | CBE Description | FrontierMind `energy_sale_type` |
 |-----------------|-----------------|--------------------------|
-| ENER0001 | Metered Energy | METERED_ENERGY |
-| ENER0002 | Available Energy | AVAILABLE_ENERGY |
-| ENER0003 | Deemed Energy | DEEMED_ENERGY |
-| BESS0001 | BESS Capacity | BESS_CAPACITY |
-| RENT0001 | Equipment Rental | EQUIP_RENTAL |
-| OMFE0001 | O&M Fee | OM_FEE |
-| DIES0001 | Diesel | DIESEL |
-| PNLT0001 | Penalty | PENALTY |
+| ENER0001 | Metered Energy | ENERGY_SALES |
+| ENER0002 | Available Energy | ENERGY_SALES |
+| ENER0003 | Deemed Energy | ENERGY_SALES |
+| BESS0001 | BESS Capacity | BESS_LEASE |
+| RENT0001 | Equipment Rental | EQUIPMENT_RENTAL_LEASE |
+| OMFE0001 | O&M Fee | OTHER_SERVICE |
+| DIES0001 | Diesel | OTHER_SERVICE |
+| PNLT0001 | Penalty | OTHER_SERVICE |
 
 #### Tariff Structure Types
 
@@ -562,14 +563,20 @@ These fields define HOW the tariff is calculated, not just the base rate. They c
 
 #### Escalation Types
 
-Canonical `escalation_type.code` values (from migration 027). CBE-specific detail (rate, index name) lives in `clause_tariff.logic_parameters`.
+Canonical `escalation_type.code` values (from migrations 027 + 059). CBE-specific detail (rate, index name) lives in `clause_tariff.logic_parameters`. Post-059: FLOATING_* sub-types added as flat codes; MRP-family queried with `IN ('REBASED_MARKET_PRICE', 'FLOATING_GRID', 'FLOATING_GENERATOR', 'FLOATING_GRID_GENERATOR')`.
 
 | Canonical Code | CBE Label | Description | Formula | logic_parameters keys | CBE Examples |
 |------|------|-------------|---------|------|-------------|
-| `FIXED` | FIXED_PCT | Fixed annual percentage increase | `base * (1 + pct)^years` | `escalation_rate`, `escalation_month` | MF01 (1%), Kasapreko floor (2.5%) |
-| `CPI` | US_CPI | Indexed to CPI (index specified in params) | `base * (CPI_current / CPI_base)` | `price_index_name` = 'US_CPI_U' | Garden City, Loisaba, Caledonia, Unilever Ghana |
-| `GRID_PASSTHROUGH` | REBASED_MKT | Rebased to current market reference | `market_price * (1 - discount)` | `market_ref_price`, `discount_pct` | MOH01 |
-| `NONE` | NONE | No escalation, fixed for contract life | `base` | — | Some projects |
+| `NONE` | NONE | Fixed price, no adjustment | `base` | — | QMM01 |
+| `FIXED_INCREASE` | FIXED_AMT | Fixed amount increase annually | `base + amount * years` | `escalation_rate` | — |
+| `FIXED_DECREASE` | FIXED_DEC | Fixed amount decrease annually | `base - amount * years` | `escalation_rate` | — |
+| `PERCENTAGE` | FIXED_PCT | Fixed annual percentage increase | `base * (1 + pct)^years` | `escalation_rate`, `escalation_month` | MF01 (1%), MB01, AMP01, TBM01 |
+| `US_CPI` | US_CPI | Indexed to US CPI | `base * (CPI_current / CPI_base)` | `price_index_name` = 'US_CPI_U' | Garden City, Loisaba, Caledonia, XFlora |
+| `REBASED_MARKET_PRICE` | REBASED_MKT | Rebased to market reference (generic) | `market_price * (1 - discount)` | `market_ref_price`, `discount_pct` | MOH01 |
+| `FLOATING_GRID` | FLOAT_GRID | Discounted grid utility tariff (MRP sub-type) | `MAX(floor, MIN(grid * (1-d), ceiling))` | `discount_pct`, `floor_rate`, `ceiling_rate` | KAS01, GBL01, UGL01, MOH01 |
+| `FLOATING_GENERATOR` | FLOAT_GEN | Discounted diesel/gas generator cost (MRP sub-type) | `MAX(floor, MIN(gen * (1-d), ceiling))` | `discount_pct`, `floor_rate`, `ceiling_rate` | NBL02 |
+| `FLOATING_GRID_GENERATOR` | FLOAT_GRID_GEN | Combined grid + generator baseline (MRP sub-type) | `MAX(floor, MIN(combined * (1-d), ceiling))` | `discount_pct`, `floor_rate`, `ceiling_rate` | JAB01 |
+| `NOT_ENERGY_SALES` | N/A | Non-energy arrangement (lease, O&M, etc.) | — | — | AR01, TWG01, ZL01/ZL02 |
 
 #### source_metadata example (CBE)
 
@@ -913,7 +920,7 @@ guaranteed_kwh = base_guarantee * (actual_capacity / design_capacity)
 
 For Minimum Offtake contracts only. From the Plant Performance Workbook columns AL/AM. **Calculated at runtime** by the pricing calculator or rules engine — not materialized as a database view. All source data exists in `meter_aggregate`, `expected_invoice_line_item`, and `clause_tariff`.
 
-The calculation filters on `energy_sale_type.code = 'MIN_OFFTAKE'` (via `clause_tariff.energy_sale_type_id`), reads `min_offtake_pct` from `clause_tariff.logic_parameters` JSONB, and joins through `meter_aggregate` and `expected_invoice_line_item` to compute monthly variance and cumulative deferred kWh.
+The calculation identifies Minimum Offtake contracts via `tariff_type.code = 'MINIMUM_OFFTAKE'` (post-059: offtake model), reads `min_offtake_pct` from `clause_tariff.logic_parameters` JSONB, and joins through `meter_aggregate` and `expected_invoice_line_item` to compute monthly variance and cumulative deferred kWh.
 
 | Source | Output | Derivation |
 |--------|--------|------------|
@@ -1041,8 +1048,8 @@ Migration 040 merged `tariff_annual_rate` + `tariff_monthly_rate` into a unified
 | `hard_currency_id` (FK) | International reference currency (USD, EUR) |
 | `local_currency_id` (FK) | Local market currency where project operates |
 | `billing_currency_id` (FK) | Currency on invoices (must equal hard or local) |
-| `fx_rate_hard_id` (FK) | FK to `exchange_rate` for hard currency |
-| `fx_rate_local_id` (FK) | FK to `exchange_rate` for local currency |
+| `billing_period_id` (FK) | FK to `billing_period` for monthly rows; NULL for annual |
+| `exchange_rate_id` (FK) | FK to `exchange_rate` for local→USD conversion; NULL for USD-denominated or annual rows |
 | `effective_rate_contract_ccy` | Effective rate in the contractual source-of-truth currency |
 | `effective_rate_hard_ccy` | Effective rate in hard/international currency |
 | `effective_rate_local_ccy` | Effective rate in local market currency |
@@ -1411,9 +1418,9 @@ GET /api/projects/{projectId}/dashboard (adminClient.getProjectDashboard)
 +-----------------------------------------------------------------------+
 | 1. clause_tariff                                                      |
 |    tariff_group_key = "CONZIM00-2025-00002-4000"                      |
-|    tariff_type_id -> ENERGY_SALES (FK to tariff_type)                 |
-|    energy_sale_type_id -> FIXED_SOLAR (FK to energy_sale_type)       |
-|    escalation_type_id -> FIXED (FK to escalation_type)               |
+|    tariff_type_id -> TAKE_OR_PAY (FK to tariff_type — offtake model) |
+|    energy_sale_type_id -> ENERGY_SALES (FK to energy_sale_type — revenue type) |
+|    escalation_type_id -> PERCENTAGE (FK to escalation_type)          |
 |    base_rate = 0.12 ZAR                                               |
 |    logic_parameters = {escalation_rate: 0.01, ...}                    |
 |    source_metadata = {external_line_id: "4000", ...}                  |
@@ -1530,7 +1537,7 @@ CBE has tariff lines that are not meter-based (capacity charges, O&M fees, equip
 
 | Aspect | Metered Line | Non-Metered Line |
 |--------|-------------|------------------|
-| `clause_tariff.tariff_type` | METERED_ENERGY | EQUIP_RENTAL, OM_FEE, etc. |
+| `clause_tariff.energy_sale_type` | ENERGY_SALES | EQUIPMENT_RENTAL_LEASE, OTHER_SERVICE, BESS_LEASE |
 | `clause_tariff.meter_id` | SET (physical meter) | NULL |
 | `meter_aggregate` row | YES (with readings) | NO |
 | `line_item.meter_aggregate_id` | SET (links to readings) | NULL |
@@ -1549,17 +1556,17 @@ The core business logic that the Operating Revenue Masterfile encodes. This is w
 def calculate_fixed_tariff(tariff, billing_date, price_index_data):
     years = years_since(tariff.escalation_start_date, billing_date)
 
-    if tariff.escalation_type == 'FIXED':  # canonical; CBE label: FIXED_PCT
+    if tariff.escalation_type == 'PERCENTAGE':  # post-059 canonical code
         rate = tariff.logic_parameters['escalation_rate']
         return tariff.base_rate * (1 + rate) ** years
 
-    elif tariff.escalation_type == 'CPI':  # canonical; CBE label: US_CPI
+    elif tariff.escalation_type == 'US_CPI':  # post-059 canonical code
         index_name = tariff.logic_parameters.get('price_index_name', 'US_CPI_U')
         cpi_base = price_index_data.get(index_name, tariff.escalation_start_date)
         cpi_now = price_index_data.get(index_name, billing_date)
         return tariff.base_rate * (cpi_now / cpi_base)
 
-    elif tariff.escalation_type == 'GRID_PASSTHROUGH':  # canonical; CBE label: REBASED_MKT
+    elif tariff.escalation_type == 'REBASED_MARKET_PRICE':  # post-059 canonical code
         # Re-priced to current market; adapter provides updated base_rate
         return tariff.base_rate
 
@@ -1640,9 +1647,9 @@ Tracks which tables/views referenced in this mapping doc have concrete migration
 | Table/View | Migration | Status |
 |------------|-----------|--------|
 | `clause_tariff` (base) | 000_baseline + 022 | Implemented |
-| `clause_tariff` classification FKs (`tariff_type_id`, `energy_sale_type_id`, `escalation_type_id`, `market_ref_currency_id`) | 027 + 034 | Implemented (`tariff_structure_id` dropped in 034) |
-| `energy_sale_type` lookup | 027 | Implemented (seeded: FIXED_SOLAR, FLOATING_GRID, FLOATING_GENERATOR, FLOATING_GRID_GENERATOR, NOT_ENERGY_SALES) |
-| `escalation_type` lookup | 027 | Implemented (seeded: FIXED, CPI, CUSTOM, NONE, GRID_PASSTHROUGH) |
+| `clause_tariff` classification FKs (`tariff_type_id`, `energy_sale_type_id`, `escalation_type_id`, `market_ref_currency_id`) | 027 + 034 + 059 | Implemented. Post-059: `tariff_type` = offtake model, `energy_sale_type` = revenue type, `escalation_type` = pricing mechanism |
+| `energy_sale_type` lookup (Revenue/Product Type) | 027 → repurposed 059 | Implemented (059: ENERGY_SALES, EQUIPMENT_RENTAL_LEASE, LOAN, BESS_LEASE, ENERGY_AS_SERVICE, OTHER_SERVICE, NOT_APPLICABLE) |
+| `escalation_type` lookup (Pricing Mechanism) | 027 + 059 | Implemented (059: NONE, FIXED_INCREASE, FIXED_DECREASE, PERCENTAGE, US_CPI, REBASED_MARKET_PRICE, FLOATING_GRID, FLOATING_GENERATOR, FLOATING_GRID_GENERATOR, NOT_ENERGY_SALES — flat codes, no parent_id) |
 | `meter_aggregate` | 000_baseline + 007 + 022 + 026 | Implemented |
 | `customer_contact` | 028 | Implemented |
 | `production_forecast` | 029 | Implemented |
@@ -1650,7 +1657,7 @@ Tracks which tables/views referenced in this mapping doc have concrete migration
 | Deferred energy calculation | — | Deferred to pricing calculator / rules engine — no DB view |
 | `exchange_rate` | 022 | Implemented |
 | `currency` (seeded) | 022 | Implemented (11 currencies) |
-| `tariff_type` (seeded) | 022 | Implemented (14 types) |
+| `tariff_type` (Offtake/Billing Model) | 022 → repurposed 059 | Implemented (059: TAKE_OR_PAY, TAKE_AND_PAY, MINIMUM_OFFTAKE, FINANCE_LEASE, OPERATING_LEASE, NOT_APPLICABLE) |
 | `billing_period` (calendar) | 021 + 033 | Implemented (48 months: Jan 2024 – Dec 2027, UNIQUE on dates) |
 | `generated_report.invoice_direction` | 034 | Implemented (nullable enum, wired through report pipeline) |
 | `contract.payment_terms` | 034 | Implemented (VARCHAR(50), parsed from onboarding template) |
@@ -3219,3 +3226,67 @@ See Known Pipeline Gap #20.
 | Full run: no errors | 0 errors | 0 errors | Yes |
 | Degradation cap applied where needed | UNSOS + CAL01 | Both capped to 1% | Yes |
 | Idempotent re-run | ON CONFLICT DO NOTHING | GBL01 skipped on second run | Yes |
+
+---
+
+## 32. Live Data Pipeline — Lifecycle Categorization & Billing Cycle Architecture
+
+> Added 2026-03-15. Documents the transition from one-time CBE population scripts (Steps 1–12) to a recurring monthly live operations pipeline.
+
+### 32.1 Context
+
+Steps 1–12 above populated FrontierMind from CBE-specific Excel files and Snowflake CSVs. These scripts are **not reusable** for ongoing monthly billing. The live pipeline separates three concerns:
+1. **One-time onboarding/backfill** from CBE workbooks (Part A of `CBE_DATA_POPULATION_WORKFLOW.md`)
+2. **Recurring external live inputs** pushed by clients/operations monthly
+3. **Internal derived computations** triggered by upstream data arrival
+
+### 32.2 Five-Way Lifecycle Classification
+
+Every FrontierMind table falls into one of these categories:
+
+| Category | Tables | Update Trigger |
+|----------|--------|---------------|
+| **Baseline Master** | `project`, `contract`, `contract_line`, `meter`, `counterparty`, `asset`, `customer_contact`, `production_forecast`, `production_guarantee` | Onboarding, dashboard PATCH |
+| **Slow-Changing Config** | `contract_amendment`, `clause_tariff`, `billing_tax_rule`, `billing_product`, `clause` | Amendment discovery, tax recalibration, manual calibration |
+| **Live External Input** | `exchange_rate`, `reference_price`, `meter_aggregate` | Monthly API push (`/api/ingest/*`) |
+| **Live Derived** | `tariff_rate`, `plant_performance`, `expected_invoice_header`, `expected_invoice_line_item` | Compute services triggered by upstream data |
+| **System / Lookup** | `billing_period`, `currency`, `tariff_type`, `meter_type`, `invoice_line_item_type`, `data_source`, `counterparty_type`, `clause_type`, `clause_category`, `escalation_type` | Seeded once, rarely changes |
+
+### 32.3 Live Input Endpoints
+
+| Endpoint | Table | Auth | Scope | Canonical Model |
+|----------|-------|------|-------|----------------|
+| `POST /api/ingest/billing-reads` | `meter_aggregate` | API-key | `billing_reads` | `BillingReadsBatchRequest` — untyped dicts mapped by adapter |
+| `POST /api/ingest/fx-rates` | `exchange_rate` | API-key | `fx_rates` | `FXRateBatchRequest` — `currency_code`, `rate_date`, `rate` |
+| `POST /api/ingest/reference-prices` | `reference_price` | API-key | `reference_prices` | `ReferencePriceBatchRequest` — `project_sage_id`, `period_start`, `total_variable_charges`, `total_kwh_invoiced`, `currency_code`, `operating_year` (auto-derived from COD) |
+
+### 32.4 Compute Services
+
+| Service | API Endpoint | Inputs | Output Table |
+|---------|-------------|--------|-------------|
+| `TariffRateService` | `POST /api/projects/{id}/billing/generate-tariff-rates` | `clause_tariff` + `exchange_rate` + `reference_price` (conditional) | `tariff_rate` |
+| `PerformanceService` | `POST /api/projects/{id}/plant-performance/compute` | `meter_aggregate` + `production_forecast` | `plant_performance` |
+| `InvoiceService` | `POST /api/projects/{id}/billing/generate-expected-invoice` | `tariff_rate` + `meter_aggregate` + `contract_line` + `billing_tax_rule` | `expected_invoice_header` + `expected_invoice_line_item` |
+| `BillingCycleOrchestrator` | `POST /api/projects/{id}/billing/run-cycle` | All of the above | All derived tables |
+
+### 32.5 Orchestrator Prerequisite Logic
+
+The orchestrator checks prerequisites **per tariff family**, not globally:
+
+- **Deterministic tariffs** (NONE, FIXED_INCREASE, FIXED_DECREASE, PERCENTAGE): No FX or MRP gate. `RatePeriodGenerator.generate()` runs once per project.
+- **Floating tariffs** (REBASED_MARKET_PRICE, FLOATING_GRID, etc.): Requires FX rates + MRP data. `RebasedMarketPriceEngine.calculate_and_store()` runs per tariff.
+- **US_CPI**: Explicitly blocked — external CPI feed not yet supported.
+- **Mixed projects**: Deterministic tariffs generate successfully even when floating prerequisites are missing.
+
+### 32.6 Service Implementation Files
+
+| File | Purpose |
+|------|---------|
+| `python-backend/models/billing_cycle.py` | Request/response models for tariff generation, performance compute, billing cycle |
+| `python-backend/models/reference_price_ingest.py` | Canonical model for `POST /api/ingest/reference-prices` |
+| `python-backend/services/billing/tariff_rate_service.py` | Dispatches to RatePeriodGenerator or RebasedMarketPriceEngine per tariff type |
+| `python-backend/services/billing/performance_service.py` | Computes plant_performance from meter_aggregate + production_forecast |
+| `python-backend/services/billing/invoice_service.py` | Extracted invoice generation (single source of truth, replaces inline SQL in api/billing.py) |
+| `python-backend/services/billing/billing_cycle_orchestrator.py` | Dependency-graph runner: verify inputs → compute → generate |
+| `data-ingestion/processing/adapters/generic_billing_adapter.py` | Passthrough adapter for non-CBE clients sending canonical fields |
+| `data-ingestion/processing/adapters/__init__.py` | Adapter registry (`snowflake` → CBE, `generic` → Generic, fallback → Generic) |

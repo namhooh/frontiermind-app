@@ -74,7 +74,7 @@ database/
 │   ├── 030_seed_billing_period_calendar.sql           # Phase 7.1: Full billing period calendar (Jan 2024 - Dec 2027)
 │   ├── 031_generated_report_invoice_direction.sql     # Phase 7.1: Add invoice_direction to generated_report
 │   ├── 032_email_notification_engine.sql              # Phase 8.0: Email notifications, scheduling, submission tokens
-│   ├── 033_project_onboarding.sql                     # Phase 9.0: COD data capture, amendment versioning, reference_price, contract_amendment, upsert indexes, preview table
+│   ├── 033_project_onboarding.sql                     # Phase 9.0: COD data capture, amendment versioning, reference_price, contract_amendment, upsert indexes, preview table, forecast_pr_poa
 │   ├── 034_billing_product_and_rate_period.sql         # Phase 9: billing_product, contract_billing_product, tariff_annual_rate (was tariff_rate_period), CBE seed data, tariff classification cleanup, payment_terms
 │   ├── 036_monthly_tariff_and_fx.sql                  # Phase 9.1: Rename tariff_rate_period→tariff_annual_rate, final_effective_tariff, tariff_monthly_rate
 │   ├── 037_grp_ingestion.sql                          # Phase 9.3: MRP ingestion — monthly observations, file upload, submission_token extensions
@@ -96,6 +96,9 @@ database/
 │   ├── 054_sage_id_aliases_and_data_fixes.sql        # Sage ID reversal, data fixes, additional_external_ids, phase_cod_date, XF-AB→XFAB split (4 projects), ZL02 contracts
 │   ├── 055_step4_billing_product_tariff_structure.sql # Step 4: billing_product linking, contract_billing_product junction, clause_tariff placeholders
 │   ├── 056_billing_tax_rule_project_scope.sql        # Step 8: Add project_id to billing_tax_rule for project-specific overrides
+│   ├── 058_sage_bp_import.sql                        # SAGE BP import data
+│   ├── 059_tariff_taxonomy_restructure.sql           # Tariff classification taxonomy restructure: tariff_type→offtake model, energy_sale_type→revenue type, escalation_type→expanded with FLOATING_* flat codes
+│   ├── 060_tariff_rate_billing_period.sql            # tariff_rate cleanup: add billing_period_id FK, drop fx_rate_hard_id, rename fx_rate_local_id → exchange_rate_id
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -1038,11 +1041,11 @@ database/
 
 **v7.0 (CBE Schema Design Review)** - Completed
 - Migrations: `027-029_*.sql`
-- New: `tariff_structure_type`, `energy_sale_type`, `escalation_type` — org-scoped lookup tables with platform canonical seeds
+- New: `energy_sale_type`, `escalation_type` — org-scoped lookup tables (repurposed in migration 059; `tariff_structure_type` dropped in migration 034)
 - New: `customer_contact` — 1:many contacts per counterparty with role, invoice email, escalation flags
 - New: `production_forecast` — monthly time-series per project (forecast energy, GHI, PR, degradation)
 - New: `production_guarantee` — annual per project (guaranteed kWh, P50 %, actual/shortfall tracking)
-- Extended: `clause_tariff` with `tariff_structure_id`, `energy_sale_type_id`, `escalation_type_id`, `market_ref_currency_id`
+- Extended: `clause_tariff` with `energy_sale_type_id`, `escalation_type_id`, `market_ref_currency_id` (`tariff_structure_id` dropped in 034)
 - Deferred energy calculation deferred to pricing calculator / rules engine (not a DB view)
 - Reference: `CBE_data_extracts/CBE_TO_FRONTIERMIND_MAPPING.md`
 
@@ -1063,7 +1066,7 @@ database/
 
 **v9.0 (Project Onboarding — COD Data Capture, Amendment Versioning)** - Completed
 - Migration: `033_project_onboarding.sql`
-- Extended: `project`, `contract`, `counterparty`, `asset`, `meter`, `production_forecast`, `production_guarantee`, `clause`, `clause_tariff`
+- Extended: `project`, `contract`, `counterparty`, `asset`, `meter`, `production_forecast` (forecast_poa_irradiance, forecast_pr_poa), `production_guarantee`, `clause`, `clause_tariff`
 - New tables: `contract_amendment`, `reference_price`, `onboarding_preview`
 - New enums: `verification_status`, `change_action`
 - Amendment tracking: `is_current`, `supersedes_clause_id`, `contract_amendment_id` on clause/clause_tariff
@@ -1092,7 +1095,8 @@ database/
 - New enums: `rate_granularity` (annual/monthly), `calc_status` (pending/computed/approved/superseded), `contract_ccy_role` (hard/local/billing)
 - Four-currency effective rate: `effective_rate_contract_ccy`, `_hard_ccy`, `_local_ccy`, `_billing_ccy` with `contract_role` role designator
 - JSONB `calc_detail` for formula-specific intermediaries (floor/ceiling/discounted_base for REBASED_MARKET_PRICE; escalation_value/years_elapsed for deterministic)
-- FX audit trail: `fx_rate_hard_id`, `fx_rate_local_id` (NULL when currency=USD)
+- `billing_period_id` FK for monthly rows (added in migration 060)
+- FX audit trail: `exchange_rate_id` (renamed from `fx_rate_local_id` in migration 060; `fx_rate_hard_id` dropped — always NULL)
 - Calculation lineage: `reference_price_id`, `discount_pct_applied`, `formula_version`
 - All engines and APIs write/read exclusively from `tariff_rate`
 
@@ -1146,6 +1150,26 @@ database/
 - 15 contract_line rows, 4 clause_tariff placeholders, 94 meter_aggregate rows, 8 contract_billing_product junction rows
 - All `meter_id = NULL` (meters back-filled when actual meter data available)
 - Bug fix: EXC-004 resolved — `cbe_billing_adapter.py` N/A misclassification fixed with product-pattern matching
+
+**v10.17 (Live Data Pipeline & Billing Cycle Services)** - Complete
+- No new migration — application-layer services and API endpoints only
+- New package: `python-backend/services/billing/` with 4 services:
+  - `tariff_rate_service.py` — dispatches deterministic (`RatePeriodGenerator`) and floating (`RebasedMarketPriceEngine`) tariff generation
+  - `performance_service.py` — computes `plant_performance` from `meter_aggregate` + `production_forecast`
+  - `invoice_service.py` — extracted from `api/billing.py` inline SQL; single source of truth for invoice generation
+  - `billing_cycle_orchestrator.py` — dependency-graph runner (verify inputs → compute → generate)
+- New models: `models/billing_cycle.py`, `models/reference_price_ingest.py`
+- New adapter: `data-ingestion/processing/adapters/generic_billing_adapter.py` — passthrough for non-CBE clients
+- New enum values: `SourceType.GENERIC`, `IngestionScope.REFERENCE_PRICES`
+- New API endpoints:
+  - `POST /api/ingest/reference-prices` — external MRP ingestion with API-key auth
+  - `POST /api/projects/{id}/billing/generate-tariff-rates` — tariff rate generation
+  - `POST /api/projects/{id}/billing/run-cycle` — full billing cycle orchestration
+  - `POST /api/projects/{id}/plant-performance/compute` — automated performance computation
+- Existing `POST /api/projects/{id}/billing/generate-expected-invoice` now delegates to `InvoiceService`
+- Adapter registry expanded: `generic` source type falls through to `GenericBillingAdapter`
+- Frontend: `GenerateAPIKeyDialog.tsx` and `OnboardingSummary.tsx` updated with `reference_prices` scope
+- Client docs: `CLIENT_INSTRUCTIONS.md` updated with Sections 3 (FX Rates) and 4 (Reference Prices)
 
 ---
 

@@ -6,7 +6,7 @@ import { Button } from '@/app/components/ui/button'
 
 export const API_ENDPOINT =
   process.env.NEXT_PUBLIC_API_ENDPOINT ||
-  'https://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com'
+  'https://api.frontiermind.co'
 
 interface OnboardingParams {
   endpoint: string
@@ -39,14 +39,19 @@ export function buildOnboardingSections(params: OnboardingParams): string {
   ]
 
   if (shouldShow('meter_data', params)) {
-    lines.push('POST /api/ingest/meter-data      Push meter readings (JSON)')
-    lines.push('POST /api/ingest/upload           Upload meter data file (CSV/JSON)')
-  }
-  if (shouldShow('fx_rates', params)) {
-    lines.push('POST /api/ingest/fx-rates         Push FX rates (JSON)')
+    lines.push('POST /api/ingest/upload              Upload meter data file (CSV/JSON)')
   }
   if (shouldShow('billing_reads', params)) {
-    lines.push('POST /api/ingest/billing-reads    Push billing reads (JSON)')
+    lines.push('POST /api/ingest/billing-reads       Push billing reads (JSON)')
+  }
+  if (shouldShow('fx_rates', params)) {
+    lines.push('POST /api/ingest/fx-rates            Push FX rates (JSON)')
+  }
+  if (shouldShow('reference_prices', params)) {
+    lines.push('POST /api/ingest/reference-prices    Push MRP reference prices (JSON)')
+  }
+  if (shouldShow('invoice_export', params)) {
+    lines.push('GET  /api/export/expected-invoices   Export expected invoices (JSON)')
   }
 
   lines.push(

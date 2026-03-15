@@ -14,9 +14,9 @@ The Python backend for data processing is deployed to AWS ECS Fargate:
 
 | Endpoint | URL |
 |----------|-----|
-| **Backend API** | `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com` |
-| **Ingest API** | `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/api/ingest` |
-| **Health Check** | `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/health` |
+| **Backend API** | `https://api.frontiermind.co` |
+| **Ingest API** | `https://api.frontiermind.co/api/ingest` |
+| **Health Check** | `https://api.frontiermind.co/health` |
 
 **For full deployment documentation, see `CLAUDE.md` in the project root.**
 
@@ -94,7 +94,7 @@ DATA SOURCES                              ECS FARGATE BACKEND
 
 | Endpoint | Use Case | Input | Target Table |
 |----------|----------|-------|--------------|
-| `POST /api/ingest/meter-data` | Snowflake client, any API push partner | JSON body with readings array | `meter_reading` |
+| `POST /api/ingest/meter-data` | Snowflake client, any API push partner | JSON body with readings array | `meter_reading` | ⚠️ Reserved — not currently offered to clients |
 | `POST /api/ingest/upload` | Manual CSV/Parquet upload from UI | Multipart file | `meter_reading` |
 | `POST /api/ingest/sync/{site_id}` | Inverter API fetch (SolarEdge, Enphase, etc.) | Triggers fetch, feeds into pipeline | `meter_reading` |
 | `POST /api/ingest/billing-reads` | Monthly billing aggregates (CBE, future clients) | JSON body with billing readings | `meter_aggregate` |
@@ -705,3 +705,81 @@ project/
 ---
 
 *This document provides complete context for implementing the data ingestion and integration system.*
+
+---
+
+## 17. Live Data Pipeline & Billing Cycle Orchestrator
+
+### Architecture Overview
+
+The live data pipeline replaces one-time CBE population scripts with a recurring monthly workflow modeled as a **dependency graph** (not a linear chain).
+
+Three input types feed into two compute branches that produce one invoice output:
+
+```
+INPUTS → COMPUTE → OUTPUT
+  FX rates ─────┐
+  MRP prices ───┼→ tariff_rate → expected_invoice
+  meter data ───┼→ plant_performance (independent)
+  ops actuals ──┘
+```
+
+### Adapter Framework
+
+The billing-reads ingestion endpoint uses an adapter pattern for multi-client support:
+
+| Adapter | Source Type | Description |
+|---------|-----------|-------------|
+| `CBEBillingAdapter` | `snowflake` | Maps CBE SCREAMING_SNAKE_CASE → canonical |
+| `GenericBillingAdapter` | `generic` | Passthrough for clients sending canonical fields |
+
+Registry: `data-ingestion/processing/adapters/__init__.py`
+
+New adapters can be added by:
+1. Creating a new adapter class implementing `BillingAdapterBase` protocol
+2. Adding it to `ADAPTER_REGISTRY` in `__init__.py`
+
+### Canonical Billing-Reads Schema (including ops actuals)
+
+The generic adapter accepts these canonical fields:
+
+| Field | Required | Description |
+|-------|----------|-------------|
+| `meter_id` or `meter_sage_id` | Yes (one) | Meter identifier |
+| `period_start` | Yes | First day of billing period |
+| `total_production_kwh` | Yes | Total energy production |
+| `energy_category` | No | `metered`, `available`, `test` (default: `metered`) |
+| `opening_reading` | No | Opening meter reading |
+| `closing_reading` | No | Closing meter reading |
+| `available_energy_kwh` | No | Available energy kWh |
+| `ghi_irradiance_wm2` | No | GHI irradiance (Wh/m²) |
+| `poa_irradiance_wm2` | No | POA irradiance (Wh/m²) |
+| `actual_availability_pct` | No | Plant availability percentage |
+
+### Billing Cycle Orchestrator
+
+The orchestrator (`BillingCycleOrchestrator`) runs the monthly cycle:
+
+```
+Layer 1: Verify inputs exist (parallel checks)
+  ├── check_fx_rates
+  ├── check_mrp (conditional: only if floating tariffs)
+  └── check_meter_data
+
+Layer 2: Compute (parallel branches)
+  ├── Branch A: generate_tariff_rates (needs FX, MRP conditional)
+  └── Branch B: compute_plant_performance (needs meters, independent)
+
+Layer 3: Output (needs tariff + meters, NOT performance)
+  └── generate_expected_invoice
+```
+
+**API:** `POST /api/projects/{id}/billing/run-cycle`
+
+### New External Ingest Endpoint
+
+**Reference Prices:** `POST /api/ingest/reference-prices`
+- API-key auth with `reference_prices` scope
+- Resolves `project_sage_id` → `project_id`, `currency_code` → `currency_id`
+- Computes `calculated_mrp_per_kwh = total_variable_charges / total_kwh_invoiced`
+- Upserts `reference_price` on `(project_id, observation_type, period_start)`

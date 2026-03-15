@@ -1193,6 +1193,7 @@ and token-based external submission collection.
 
 **Extended production_forecast table:**
 - `forecast_poa_irradiance` - DECIMAL — POA irradiance from PVSyst
+- `forecast_pr_poa` - DECIMAL — Forecast Performance Ratio based on POA irradiance (0-1 range)
 
 **Extended production_guarantee table:**
 - `shortfall_cap_usd` - DECIMAL — Annual shortfall payment cap in USD
@@ -1380,10 +1381,10 @@ and token-based external submission collection.
 **Dropped table:**
 - `tariff_structure_type`
 
-**clause_tariff classification FKs (3 remaining):**
-- `tariff_type_id` → "Contract Service/Product Type" (ENERGY_SALES, LOAN, etc.)
-- `energy_sale_type_id` → "Energy Sales Tariff Type" (FIXED_SOLAR, FLOATING_GRID, etc.)
-- `escalation_type_id` → "Price Adjustment Type" (FIXED_INCREASE, PERCENTAGE, US_CPI, etc.)
+**clause_tariff classification FKs (3 remaining) — _Superseded by migration 059:_**
+- `tariff_type_id` → ~~"Contract Service/Product Type"~~ **Post-059: Offtake/Billing Model** (TAKE_OR_PAY, TAKE_AND_PAY, MINIMUM_OFFTAKE, etc.)
+- `energy_sale_type_id` → ~~"Energy Sales Tariff Type"~~ **Post-059: Revenue/Product Type** (ENERGY_SALES, EQUIPMENT_RENTAL_LEASE, LOAN, BESS_LEASE, etc.)
+- `escalation_type_id` → "Price Adjustment Type" (FIXED_INCREASE, PERCENTAGE, US_CPI, REBASED_MARKET_PRICE, FLOATING_GRID, FLOATING_GENERATOR, etc.)
 
 **Updated onboard_project.sql:**
 - `stg_tariff_lines`: added `energy_sale_type_code` column (alongside `tariff_type_code`)
@@ -1407,10 +1408,10 @@ and token-based external submission collection.
 - Tariff snapshot query: added energy_sale_type JOIN + column
 
 **Design Notes:**
-- `tariff_type` = "Contract Service/Product Type" — classifies WHAT the contract is for
-- `energy_sale_type` = pricing mechanism within energy sales (FIXED_SOLAR, FLOATING_GRID, etc.)
-- `tariff_structure_type` dropped — no Excel field, structure derivable from energy_sale_type
-- GH-MOH01 after re-onboarding: tariff_type_id = ENERGY_SALES, energy_sale_type_id = FIXED_SOLAR
+- ~~`tariff_type` = "Contract Service/Product Type"~~ **Superseded by migration 059**: tariff_type is now Offtake/Billing Model
+- ~~`energy_sale_type` = pricing mechanism (FIXED_SOLAR, FLOATING_GRID)~~ **Superseded by migration 059**: energy_sale_type is now Revenue/Product Type; FLOATING_* codes moved to escalation_type
+- `tariff_structure_type` dropped — no Excel field, structure derivable from escalation_type
+- GH-MOH01 after re-onboarding: energy_sale_type_id = ENERGY_SALES, escalation_type_id = FLOATING_GRID (post-059)
 
 ---
 
@@ -2364,7 +2365,7 @@ per-meter performance detail, and restructured frontend tabs.
 - `allowed_scopes TEXT[]` — New column. NULL = all scopes allowed. Non-null = restricted to listed values (`meter_data`, `fx_rates`, `billing_reads`). CHECK constraint validates values.
 - `api_key_hash VARCHAR(64)` — New column. SHA-256 hash of the plaintext API key for indexed O(1) lookup. Partial index on non-NULL values.
 
-**Constraint:** `chk_allowed_scopes_valid` — ensures `allowed_scopes` values are a subset of `{meter_data, fx_rates, billing_reads}`.
+**Constraint:** `chk_allowed_scopes_valid` — ensures `allowed_scopes` values are a subset of `{meter_data, fx_rates, billing_reads, invoice_export}`.
 
 **Index:** `idx_credential_api_key_hash` — partial index on `api_key_hash WHERE api_key_hash IS NOT NULL`.
 
@@ -2454,5 +2455,167 @@ per-meter performance detail, and restructured frontend tabs.
 **Application Impact:**
 - Billing API lookup should check project-specific rule first, then fall back to country default (`project_id IS NULL`)
 - Step 8 script populates country defaults + project-specific overrides from invoice PDF extraction
+
+---
+
+### Migration 058 - Sage Business Partner Import + Amendment Date Cleanup (2026-03-14)
+
+**Migration:** `database/migrations/058_sage_bp_import.sql`
+
+**Description:** Adds `sage_bp_code` to counterparty, imports all Sage business partners (offtakers, internal entities, takeon placeholders), and consolidates redundant `amendment_date`/`effective_date` columns on `contract_amendment`.
+
+**Sections 1–6:** Sage BP import (see migration file for details).
+
+**Section 7 — Merge `amendment_date` into `effective_date`:**
+
+Consolidates redundant columns on `contract_amendment`. `amendment_date` held the signing date (17/20 rows populated) while `effective_date` was NULL for 19/20 rows — they represent the same concept.
+
+| Change | Detail |
+|--------|--------|
+| `effective_date` | Backfilled from `amendment_date` where previously NULL (17 rows) |
+| `amendment_date` | **Dropped** — redundant with `effective_date` |
+
+**Application Changes:**
+- `python-backend/api/entities.py` — Removed `ca.amendment_date` from amendments CTE
+- `app/projects/components/ProjectOverviewTab.tsx` — Changed `a.amendment_date` → `a.effective_date` for amendment date display
+- `add_source_workflow_columns.py` — Removed `amendment_date` mapping entry, updated `effective_date` description
+
+**Shared Utility (new):**
+- `python-backend/db/lookup_service.py` — Added `get_project_by_sage_id()` and `get_primary_contract_by_sage_id()` methods to `LookupService` for reusable sage_id → project/contract resolution
+- `python-backend/scripts/step11_ppa_parsing.py` — Refactored local `get_contract_id_by_sage()` to delegate to `LookupService.get_primary_contract_by_sage_id()`
+
+---
+
+### Migration 059 - Tariff Classification Taxonomy Restructure (2026-03-15)
+
+**Migration:** `database/migrations/059_tariff_taxonomy_restructure.sql`
+
+**Description:** Separates three orthogonal classification dimensions on `clause_tariff` that were previously conflated. All three lookup tables (`tariff_type`, `energy_sale_type`, `escalation_type`) are repurposed with clean semantics. Only `clause_tariff` references these tables (~60 rows).
+
+**Phase 1 — Expand `escalation_type` (Pricing Mechanism + Escalation):**
+
+Flat codes (no `parent_id` hierarchy) — grouped by `IN (...)` in queries when needed:
+
+| Change | Detail |
+|--------|--------|
+| `FLOATING_GRID` | New flat code — grid utility tariff discount (MRP sub-type) |
+| `FLOATING_GENERATOR` | New flat code — diesel/gas generator cost discount (MRP sub-type) |
+| `FLOATING_GRID_GENERATOR` | New flat code — combined grid + generator baseline (MRP sub-type) |
+| `NOT_ENERGY_SALES` | New code — non-energy arrangements (lease, O&M) |
+
+MRP-family grouping convention: `esc.code IN ('REBASED_MARKET_PRICE', 'FLOATING_GRID', 'FLOATING_GENERATOR', 'FLOATING_GRID_GENERATOR')`
+
+**Phase 2 — Migrate `clause_tariff.escalation_type_id`:**
+- Rows with `energy_sale_type` = FLOATING_* moved to corresponding `escalation_type` flat codes (~7 rows)
+- Rows with `energy_sale_type` = NOT_ENERGY_SALES moved to `escalation_type` NOT_ENERGY_SALES (~12 rows)
+
+**Phase 3 — Repurpose `energy_sale_type` → Revenue/Product Type (what is being sold):**
+
+Old values (FIXED_SOLAR, FLOATING_GRID, FLOATING_GENERATOR, NOT_ENERGY_SALES, ENERGY, CAPACITY) deleted. New values:
+
+| Code | Name |
+|------|------|
+| ENERGY_SALES | Energy Sales |
+| EQUIPMENT_RENTAL_LEASE | Equipment Rental/Lease/Boot |
+| LOAN | Loan |
+| BESS_LEASE | Battery Lease (BESS) |
+| ENERGY_AS_SERVICE | Energy as a Service |
+| OTHER_SERVICE | Other |
+| NOT_APPLICABLE | N/A |
+
+Source: PO Summary col D "Revenue Type"
+
+**Phase 4 — Repurpose `tariff_type` → Offtake/Billing Model (how the buyer pays):**
+
+Old values (ENERGY_SALES, EQUIPMENT_RENTAL_LEASE, LOAN, etc.) deleted. New values:
+
+| Code | Name |
+|------|------|
+| TAKE_OR_PAY | Take or Pay |
+| TAKE_AND_PAY | Take and Pay |
+| MINIMUM_OFFTAKE | Minimum Offtake |
+| FINANCE_LEASE | Finance Lease |
+| OPERATING_LEASE | Operating Lease |
+| NOT_APPLICABLE | N/A |
+
+Source: PO Summary col E "Energy Sale Type" (offtake model)
+
+**Phase 5 — Fix remaining NULL `escalation_type_id`:** Populated from PO Summary col AD "Indexation Rate/Method".
+
+**Phase 6 — Drop `parent_id`:** Removes `parent_id` column from `escalation_type` if it exists (cleanup from earlier draft).
+
+**Application Changes:**
+- `python-backend/services/tariff/tariff_bridge.py` — Merged FLOATING_* codes into `ESCALATION_TYPE_MAP`, removed `ENERGY_SALE_TYPE_MAP` and `TARIFF_TYPE_TO_ENERGY_SALE` constants, `energy_sale_type_id` defaults to ENERGY_SALES for PPA parsing, `tariff_type_id` set to NULL (populated from PO Summary)
+- `python-backend/services/tariff/rebased_market_price_engine.py` — Updated `_fetch_tariff()` query to use `esc.code IN ('REBASED_MARKET_PRICE', 'FLOATING_GRID', 'FLOATING_GENERATOR', 'FLOATING_GRID_GENERATOR')` instead of `= 'REBASED_MARKET_PRICE'`
+- `app/projects/components/PricingTariffsTab.tsx` — Updated `isRebased` checks to use module-level `REBASED_CODES` Set with all MRP-family codes
+- `add_source_workflow_columns.py` — Updated MAPPING and FK_TARGET_POPULATION entries for `tariff_type_id`, `energy_sale_type_id`, `escalation_type_id`, `meter_id`
+
+---
+
+### v10.16 - 2026-03-15 (tariff_rate Schema Cleanup)
+
+**Description:** Schema cleanup for `tariff_rate`: add `billing_period_id` FK (aligns with 6 other tables), drop always-NULL `fx_rate_hard_id`, rename `fx_rate_local_id` → `exchange_rate_id`.
+
+**Migrations:**
+- `database/migrations/060_tariff_rate_billing_period.sql`
+
+**tariff_rate changes:**
+- **Added:** `billing_period_id` BIGINT FK → `billing_period(id)` — backfilled from `billing_month` for existing monthly rows
+- **Added:** Partial index `idx_tariff_rate_billing_period` on `billing_period_id WHERE billing_period_id IS NOT NULL`
+- **Dropped:** `fx_rate_hard_id` — always NULL everywhere, hard currency is always USD
+- **Renamed:** `fx_rate_local_id` → `exchange_rate_id` — clearer name for the surviving FX column
+
+**Application Changes:**
+- `python-backend/scripts/step10b_tariff_rate_population.py` — Added `billing_period_id` to monthly INSERT, renamed `fx_rate_local_id` → `exchange_rate_id`
+- `python-backend/services/tariff/rebased_market_price_engine.py` — Added `billing_period_id` to monthly INSERT/UPSERT, removed `fx_rate_hard_id`, renamed `fx_rate_local_id` → `exchange_rate_id` in annual + monthly INSERTs and ON CONFLICT clauses
+- `python-backend/api/entities.py` — Renamed JOIN column `tr.fx_rate_local_id` → `tr.exchange_rate_id`
+- `python-backend/api/spreadsheet.py` — Updated protected columns list: removed `fx_rate_hard_id`, `fx_rate_local_id`; column already listed as `exchange_rate_id`
+
+---
+
+### v10.17 - 2026-03-15 (Live Data Pipeline & Billing Cycle Services)
+
+**Description:** Application-layer implementation of the live data pipeline: billing cycle orchestrator, compute services, reference price ingestion, and generic billing adapter. No schema migration — all changes are in Python services, API endpoints, and frontend.
+
+**Migrations:** None — application code only.
+
+**New Python Packages/Modules:**
+- `python-backend/services/billing/__init__.py` — billing compute services package
+- `python-backend/services/billing/tariff_rate_service.py` — dispatches tariff rate generation per escalation type (deterministic → `RatePeriodGenerator`, floating → `RebasedMarketPriceEngine`, CPI → blocked)
+- `python-backend/services/billing/performance_service.py` — computes `plant_performance` from existing `meter_aggregate` + `production_forecast` data
+- `python-backend/services/billing/invoice_service.py` — extracted invoice generation logic from `api/billing.py`; now single source of truth for expected invoice writes
+- `python-backend/services/billing/billing_cycle_orchestrator.py` — models monthly billing as dependency graph: verify inputs → compute (parallel) → generate output
+- `python-backend/models/billing_cycle.py` — request/response models (`GenerateTariffRatesRequest`, `ComputePerformanceRequest`, `RunCycleRequest`, `BillingCycleResult`)
+- `python-backend/models/reference_price_ingest.py` — canonical model for reference price external ingestion (`ReferencePriceEntry`, `ReferencePriceBatchRequest`)
+- `data-ingestion/processing/adapters/generic_billing_adapter.py` — passthrough adapter for non-CBE clients sending canonical meter_aggregate fields
+
+**New API Endpoints:**
+- `POST /api/ingest/reference-prices` — external MRP ingestion with API-key auth, `reference_prices` scope; resolves `project_sage_id` → `project_id`, computes `calculated_mrp_per_kwh`, derives `operating_year` from COD, writes `period_end`
+- `POST /api/projects/{id}/billing/generate-tariff-rates` — tariff rate generation per billing month
+- `POST /api/projects/{id}/billing/run-cycle` — full billing cycle orchestration with step-by-step status
+- `POST /api/projects/{id}/plant-performance/compute` — automated performance computation from meter data
+
+**Modified Modules:**
+- `python-backend/models/ingestion.py` — added `GENERIC` to `SourceType`, `REFERENCE_PRICES` to `IngestionScope`
+- `python-backend/api/billing.py` — added tariff-rate and run-cycle endpoints; existing `generate-expected-invoice` handler refactored to delegate to `InvoiceService` (removed ~500 lines of inline SQL)
+- `python-backend/api/performance.py` — added compute endpoint
+- `python-backend/api/ingest.py` — added reference-prices endpoint
+- `data-ingestion/processing/adapters/__init__.py` — expanded registry with `GenericBillingAdapter`, default fallback changed from CBE to Generic
+
+**Frontend Changes:**
+- `app/client-setup/components/GenerateAPIKeyDialog.tsx` — added `reference_prices` and `invoice_export` to available scopes
+- `app/client-setup/components/OnboardingSummary.tsx` — added `reference_prices` endpoint to onboarding text
+
+**Documentation Changes:**
+- `data-ingestion/sources/snowflake/CLIENT_INSTRUCTIONS.md` — added Sections 3 (FX Rates) and 4 (Reference Prices / MRP) with full JSON schemas, examples, field references
+- `CBE_data_extracts/CBE_DATA_POPULATION_WORKFLOW.md` — added Part B (lifecycle categories, dependency graph, API reference, recompute rules, adapter framework, ops actuals data path)
+- `CBE_data_extracts/CBE_TO_FRONTIERMIND_MAPPING.md` — added Section 32 (live pipeline architecture, lifecycle classification, compute services, orchestrator prerequisite logic)
+- `data-ingestion/docs/IMPLEMENTATION_GUIDE_ARCHITECTURE.md` — added Section 17 (live pipeline, adapter framework, billing cycle orchestrator, reference price endpoint)
+
+**Key Design Decisions:**
+- Orchestrator prerequisite gates are **per tariff family**: deterministic tariffs never block on FX/MRP
+- `plant_performance` and `expected_invoice` are parallel branches — performance failure does not block invoice
+- `actual_availability_pct` is a `plant_performance` column, not `meter_aggregate` — the generic adapter routes it to `source_metadata`
+- `InvoiceService` uses `with get_db_connection()` for standalone calls and accepts pre-opened `conn` for transaction sharing
 
 ---

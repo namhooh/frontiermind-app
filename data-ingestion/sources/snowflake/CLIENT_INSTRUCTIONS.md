@@ -1,6 +1,6 @@
 # Snowflake Data Ingestion — Client Instructions
 
-This guide covers everything you need to export data from your Snowflake data warehouse to FrontierMind. There are two ingestion endpoints — one for raw meter readings and one for monthly billing aggregates.
+This guide covers everything you need to export data from your Snowflake data warehouse to FrontierMind. There are four ingestion endpoints — one for raw meter readings, one for monthly billing aggregates, one for FX rates, and one for reference prices (MRP).
 
 ---
 
@@ -20,14 +20,31 @@ Before starting, we'll provide you with:
 
 | Endpoint | Path | Use When | Units |
 |----------|------|----------|-------|
-| **Raw Meter Readings** | `/api/ingest/meter-data` | Sending 15-min or hourly interval readings from inverters/meters | Wh (Watt-hours) |
+| **Raw Meter Readings** | `/api/ingest/meter-data` | Sending 15-min or hourly interval readings from inverters/meters | Wh (Watt-hours) | ⚠️ Reserved — not currently offered |
 | **Monthly Billing Aggregates** | `/api/ingest/billing-reads` | Sending monthly billing data with opening/closing/utilized readings tied to contract tariff lines | kWh (kilowatt-hours) |
+| **FX Rates** | `/api/ingest/fx-rates` | Sending exchange rates (e.g. USD/GHS) used for tariff rate calculations | Decimal rate |
+| **Reference Prices (MRP)** | `/api/ingest/reference-prices` | Sending utility invoice data for Market Reference Price computation | Currency/kWh |
 
-> **Rule of thumb:** If your data has a `BILL_DATE` and comes from your ERP billing system, use `billing-reads`. If it has granular timestamps from monitoring equipment, use `meter-data`.
+> **Rule of thumb:** If your data has a `BILL_DATE` and comes from your ERP billing system, use `billing-reads`. If it has granular timestamps from monitoring equipment, use `meter-data`. FX rates and reference prices are supplementary inputs for the billing cycle.
+
+---
+
+## API Key Scopes
+
+Each API key can be scoped to specific endpoints. Request the appropriate scopes when setting up your integration:
+
+| Scope | Endpoint | Description |
+|-------|----------|-------------|
+| `meter_data` | `/api/ingest/meter-data` | Raw meter readings |
+| `billing_reads` | `/api/ingest/billing-reads` | Monthly billing aggregates |
+| `fx_rates` | `/api/ingest/fx-rates` | Exchange rates |
+| `reference_prices` | `/api/ingest/reference-prices` | Utility MRP data |
 
 ---
 
 ## 1. Raw Meter Readings (meter-data)
+
+> **⚠️ Reserved for future use.** This endpoint is live but not currently offered to clients. Contact the FrontierMind team if you have a use case for granular meter data ingestion. For monthly billing data, use the `billing-reads` endpoint in Section 2.
 
 Push granular meter data directly to our REST API.
 
@@ -361,9 +378,201 @@ AS
 
 ---
 
+## 3. FX Rates (fx-rates)
+
+Push exchange rates used for tariff rate calculations (e.g. USD/GHS monthly rates for floor/ceiling conversion).
+
+### Endpoint
+
+```
+POST {API_ENDPOINT}/api/ingest/fx-rates
+Authorization: Bearer {YOUR_API_KEY}
+Content-Type: application/json
+```
+
+### JSON Schema
+
+```json
+{
+  "type": "object",
+  "required": ["rates"],
+  "properties": {
+    "rates": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 5000,
+      "items": {
+        "type": "object",
+        "required": ["currency_code", "rate_date", "rate"],
+        "properties": {
+          "currency_code": { "type": "string", "description": "ISO 4217 currency code (e.g. 'GHS', 'KES')" },
+          "rate_date":     { "type": "string", "format": "date", "description": "Date the rate applies (YYYY-MM-DD)" },
+          "rate":          { "type": "number", "description": "Exchange rate value (units of local currency per 1 USD)" }
+        }
+      }
+    },
+    "source": {
+      "type": "string",
+      "default": "api",
+      "description": "Source label for audit trail"
+    }
+  }
+}
+```
+
+### Example Payload
+
+```json
+{
+  "rates": [
+    { "currency_code": "GHS", "rate_date": "2026-01-15", "rate": 14.85 },
+    { "currency_code": "GHS", "rate_date": "2026-02-15", "rate": 15.02 }
+  ],
+  "source": "treasury_system"
+}
+```
+
+### Field Reference
+
+| Field | Required? | Notes |
+|-------|-----------|-------|
+| `currency_code` | **Yes** | ISO 4217 code — must exist in FrontierMind's currency table |
+| `rate_date` | **Yes** | YYYY-MM-DD — the date this rate applies |
+| `rate` | **Yes** | Positive decimal — units of local currency per 1 USD |
+
+### Response
+
+```json
+{
+  "success": true,
+  "inserted": 2,
+  "updated": 0,
+  "rejected": 0,
+  "errors": null
+}
+```
+
+### Key Rules
+
+- **Idempotent:** Re-sending the same (currency_code, rate_date) pair updates the existing rate
+- **Batch deduplication:** If the same (currency_code, rate_date) appears multiple times in one batch, last-write-wins
+- **Rate limit:** 30 requests per minute
+- **Max 5,000 entries per batch**
+- API key must have `fx_rates` scope
+
+---
+
+## 4. Reference Prices / MRP (reference-prices)
+
+Push utility invoice data for computing the Market Reference Price (MRP). This is used for projects with REBASED_MARKET_PRICE tariff escalation where the solar rate is benchmarked against grid electricity prices.
+
+### Endpoint
+
+```
+POST {API_ENDPOINT}/api/ingest/reference-prices
+Authorization: Bearer {YOUR_API_KEY}
+Content-Type: application/json
+```
+
+### JSON Schema
+
+```json
+{
+  "type": "object",
+  "required": ["entries"],
+  "properties": {
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": {
+        "type": "object",
+        "required": ["project_sage_id", "period_start", "total_variable_charges", "total_kwh_invoiced", "currency_code"],
+        "properties": {
+          "project_sage_id":        { "type": "string", "description": "SAGE project identifier (e.g. 'MB01')" },
+          "period_start":           { "type": "string", "format": "date", "description": "First day of the billing period (YYYY-MM-DD)" },
+          "observation_type":       { "type": "string", "enum": ["monthly", "annual"], "default": "monthly" },
+          "total_variable_charges": { "type": "number", "description": "Total variable energy charges from utility invoice" },
+          "total_kwh_invoiced":     { "type": "number", "description": "Total kWh invoiced by utility (must be > 0)" },
+          "currency_code":          { "type": "string", "description": "ISO 4217 currency code for the charges (e.g. 'GHS')" },
+          "source_document_path":   { "type": "string", "description": "Optional S3 path or reference to source document" },
+          "metadata":               { "type": "object", "description": "Optional additional metadata" }
+        }
+      }
+    },
+    "source": {
+      "type": "string",
+      "default": "api",
+      "description": "Source label for audit trail"
+    }
+  }
+}
+```
+
+### Example Payload
+
+```json
+{
+  "entries": [
+    {
+      "project_sage_id": "MB01",
+      "period_start": "2026-01-01",
+      "observation_type": "monthly",
+      "total_variable_charges": 125000.50,
+      "total_kwh_invoiced": 450000,
+      "currency_code": "GHS"
+    }
+  ],
+  "source": "utility_invoice_extract"
+}
+```
+
+### Field Reference
+
+| Field | Required? | Notes |
+|-------|-----------|-------|
+| `project_sage_id` | **Yes** | Must match a project's `sage_id` in FrontierMind |
+| `period_start` | **Yes** | YYYY-MM-DD — first day of the billing month |
+| `total_variable_charges` | **Yes** | Total variable energy charges from the utility invoice |
+| `total_kwh_invoiced` | **Yes** | Total kWh invoiced — must be greater than zero |
+| `currency_code` | **Yes** | ISO 4217 code — must exist in FrontierMind's currency table |
+| `observation_type` | No | `monthly` (default) or `annual` |
+| `source_document_path` | No | S3 path or reference to the source invoice |
+
+### How MRP is Computed
+
+```
+calculated_mrp_per_kwh = total_variable_charges / total_kwh_invoiced
+```
+
+This value is stored in the `reference_price` table and used by the tariff rate engine to compute effective solar rates for REBASED_MARKET_PRICE contracts.
+
+### Response
+
+```json
+{
+  "success": true,
+  "inserted": 1,
+  "updated": 0,
+  "rejected": 0,
+  "errors": null
+}
+```
+
+### Key Rules
+
+- **Idempotent:** Re-sending the same (project_sage_id, observation_type, period_start) updates the existing entry
+- `total_kwh_invoiced` must be greater than zero (division by zero is rejected)
+- Unknown `project_sage_id` or `currency_code` values are rejected with an error in the response
+- **Rate limit:** 30 requests per minute
+- **Max 500 entries per batch**
+- API key must have `reference_prices` scope
+
+---
+
 ## Checking Ingestion Status
 
-> These endpoints work for both `meter-data` and `billing-reads` ingestions.
+> These endpoints work for all ingestion endpoints (`meter-data`, `billing-reads`, `fx-rates`, `reference-prices`).
 
 All status endpoints require the same `Authorization: Bearer` header as the ingestion endpoint. The organization is derived from your API key — no `organization_id` query parameter is needed.
 

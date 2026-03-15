@@ -7,6 +7,7 @@ and per-product billing amounts computed as kWh × effective_rate.
 Invoice generation endpoint writes to expected_invoice_* tables with
 full tax/levy/withholding calculations.
 """
+from __future__ import annotations
 
 import io
 import json
@@ -21,6 +22,7 @@ from pydantic import BaseModel, Field
 
 from db.database import get_db_connection, init_connection_pool
 from services.audit_service import log_business_event
+from models.billing_cycle import GenerateTariffRatesRequest, RunCycleRequest
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +90,7 @@ class MonthlyBillingRow(BaseModel):
     product_rates_hard_ccy: dict[str, Optional[float]] = {}    # product_code -> rate used (hard ccy)
     total_billing_amount: Optional[float] = None
     total_billing_amount_hard_ccy: Optional[float] = None
+    expected_invoice: Optional[ExpectedInvoiceSummary] = None
 
 
 class MonthlyBillingResponse(BaseModel):
@@ -388,555 +391,54 @@ async def generate_expected_invoice(
 ) -> dict:
     """Generate expected invoice from meter_aggregate + tariff_rate + tax config.
 
+    Delegates to InvoiceService for the actual computation.
     Writes atomically to expected_invoice_header and expected_invoice_line_item.
     Supports versioning: if a current invoice exists, it's superseded.
     """
     if not USE_DATABASE:
         raise HTTPException(status_code=503, detail="Database not available")
 
-    # Parse billing_month
+    # Validate billing_month format
     try:
         parts = body.billing_month.split("-")
-        bm_year, bm_month = int(parts[0]), int(parts[1])
-        bm_date = date(bm_year, bm_month, 1)
+        int(parts[0]), int(parts[1])
     except Exception:
         raise HTTPException(status_code=400, detail="billing_month must be YYYY-MM")
 
+    from services.billing.invoice_service import InvoiceService
+    svc = InvoiceService()
+
     try:
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                # ----------------------------------------------------------
-                # 1. Resolve project, org, contract, billing_period
-                # ----------------------------------------------------------
-                cur.execute("""
-                    SELECT p.id, p.organization_id, p.country,
-                           c.id AS contract_id
-                    FROM project p
-                    JOIN contract c ON c.project_id = p.id
-                      AND c.parent_contract_id IS NULL
-                    WHERE p.id = %(pid)s
-                    LIMIT 1
-                """, {"pid": project_id})
-                proj = cur.fetchone()
-                if not proj:
-                    raise HTTPException(status_code=404, detail="Project or contract not found")
-                org_id = proj["organization_id"]
-                contract_id = proj["contract_id"]
-                country_code = _country_to_code(proj.get("country"))
+        result = svc.generate(
+            project_id=project_id,
+            billing_month=body.billing_month,
+            invoice_direction=body.invoice_direction or "payable",
+            idempotency_key=body.idempotency_key,
+        )
 
-                cur.execute("""
-                    SELECT id FROM billing_period
-                    WHERE start_date <= %(bm)s AND end_date >= %(bm)s
-                    LIMIT 1
-                """, {"bm": bm_date})
-                bp_row = cur.fetchone()
-                if not bp_row:
-                    raise HTTPException(status_code=404, detail=f"No billing_period for {body.billing_month}")
-                billing_period_id = bp_row["id"]
+        if not result.get("success"):
+            error = result.get("error", "Invoice generation failed")
+            # Map service errors to appropriate HTTP status codes
+            if "not found" in error.lower():
+                raise HTTPException(status_code=404, detail=error)
+            elif "already generated" in error.lower():
+                raise HTTPException(status_code=409, detail=error)
+            elif "no billing tax" in error.lower() or "no energy data" in error.lower():
+                raise HTTPException(status_code=422, detail=error)
+            else:
+                raise HTTPException(status_code=422, detail=error)
 
-                # ----------------------------------------------------------
-                # 2. Get contract lines + clause_tariff
-                # ----------------------------------------------------------
-                cur.execute("""
-                    SELECT cl.id, cl.contract_line_number, cl.product_desc,
-                           cl.energy_category::text AS energy_category,
-                           cl.meter_id, cl.clause_tariff_id,
-                           m.name AS meter_name
-                    FROM contract_line cl
-                    LEFT JOIN meter m ON m.id = cl.meter_id
-                    WHERE cl.contract_id = %(cid)s AND cl.is_active = true
-                      AND cl.parent_contract_line_id IS NULL
-                    ORDER BY cl.contract_line_number
-                """, {"cid": contract_id})
-                contract_lines = cur.fetchall()
-                if not contract_lines:
-                    raise HTTPException(status_code=404, detail="No active contract lines found")
+        log_business_event(
+            background_tasks, request,
+            action="CREATE",
+            resource_type="expected_invoice",
+            resource_id=str(result.get("header_id")),
+            organization_id=None,  # resolved inside service
+            compliance_relevant=True,
+            details={"project_id": project_id, "billing_month": body.billing_month, "version": result.get("version_no")},
+        )
 
-                # Project-level fallback tariff
-                cur.execute("""
-                    SELECT ct.id, ct.base_rate, ct.currency_id, ct.logic_parameters,
-                           cur.code AS currency_code
-                    FROM clause_tariff ct
-                    JOIN currency cur ON cur.id = ct.currency_id
-                    WHERE ct.project_id = %(pid)s AND ct.is_current = true
-                    LIMIT 1
-                """, {"pid": project_id})
-                project_tariff = cur.fetchone()
-                if not project_tariff:
-                    raise HTTPException(status_code=404, detail="No current clause_tariff for project")
-
-                currency_code = project_tariff["currency_code"]
-                currency_id = project_tariff["currency_id"]
-
-                # ----------------------------------------------------------
-                # 3. Resolve tariff rates per contract_line
-                # ----------------------------------------------------------
-                tariff_ids = set()
-                for cl in contract_lines:
-                    ct_id = cl.get("clause_tariff_id") or project_tariff["id"]
-                    tariff_ids.add(ct_id)
-
-                resolved = _resolve_effective_rates(cur, list(tariff_ids), bm_date)
-                rate_by_tariff: dict[int, Decimal] = {
-                    ct_id: pair[0] for ct_id, pair in resolved.items() if pair[0] is not None
-                }
-
-                # ----------------------------------------------------------
-                # 4. Get meter_aggregate data for this billing period
-                # ----------------------------------------------------------
-                meter_ids = [cl["meter_id"] for cl in contract_lines if cl["meter_id"]]
-                agg_by_cl: dict[int, dict] = {}  # contract_line_id → aggregate row
-
-                if meter_ids:
-                    cur.execute("""
-                        SELECT ma.contract_line_id, ma.meter_id,
-                               COALESCE(ma.energy_kwh, ma.total_production, 0) AS metered_kwh,
-                               COALESCE(ma.available_energy_kwh, 0) AS available_kwh,
-                               m.name AS meter_name
-                        FROM meter_aggregate ma
-                        JOIN meter m ON m.id = ma.meter_id
-                        WHERE ma.meter_id = ANY(%(mids)s)
-                          AND ma.billing_period_id = %(bp)s
-                    """, {"mids": meter_ids, "bp": billing_period_id})
-                    for row in cur.fetchall():
-                        cl_id = row["contract_line_id"]
-                        if cl_id:
-                            agg_by_cl[cl_id] = row
-
-                # Also pick up meterless contract lines (e.g. test energy)
-                meterless_cl_ids = [cl["id"] for cl in contract_lines if not cl["meter_id"]]
-                if meterless_cl_ids:
-                    cur.execute("""
-                        SELECT ma.contract_line_id, ma.meter_id,
-                               COALESCE(ma.energy_kwh, ma.total_production, 0) AS metered_kwh,
-                               COALESCE(ma.available_energy_kwh, 0) AS available_kwh,
-                               NULL AS meter_name
-                        FROM meter_aggregate ma
-                        WHERE ma.contract_line_id = ANY(%(cl_ids)s)
-                          AND ma.billing_period_id = %(bp)s
-                    """, {"cl_ids": meterless_cl_ids, "bp": billing_period_id})
-                    for row in cur.fetchall():
-                        cl_id = row["contract_line_id"]
-                        if cl_id:
-                            agg_by_cl[cl_id] = row
-
-                # ----------------------------------------------------------
-                # 5. Resolve billing taxes config
-                # ----------------------------------------------------------
-                logic_params = project_tariff.get("logic_parameters") or {}
-                tax_config = logic_params.get("billing_taxes")
-
-                if not tax_config:
-                    # Fallback: billing_tax_rule by org + country
-                    tax_rule_sql = """
-                        SELECT btr.rules
-                        FROM billing_tax_rule btr
-                        WHERE btr.organization_id = %(oid)s
-                          AND btr.is_active = true
-                          AND btr.effective_start_date <= %(bm)s
-                          AND (btr.effective_end_date IS NULL OR btr.effective_end_date >= %(bm)s)
-                    """
-                    tax_rule_params: dict[str, Any] = {"oid": org_id, "bm": bm_date}
-                    if country_code:
-                        tax_rule_sql += "  AND btr.country_code = %(cc)s\n"
-                        tax_rule_params["cc"] = country_code
-                    tax_rule_sql += "ORDER BY btr.effective_start_date DESC\nLIMIT 1"
-                    cur.execute(tax_rule_sql, tax_rule_params)
-                    tax_rule = cur.fetchone()
-                    if tax_rule:
-                        tax_config = tax_rule["rules"]
-
-                if not tax_config:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="No billing tax config found (checked clause_tariff.logic_parameters and billing_tax_rule)"
-                    )
-
-                rounding_precision = tax_config.get("rounding_precision", 2)
-                rounding_mode = tax_config.get("rounding_mode", "ROUND_HALF_UP")
-                avail_mode = tax_config.get("available_energy_line_mode", "single")
-
-                # Round rates to invoice precision (default 4dp) to match
-                # CBE billing system which truncates effective rates before
-                # multiplying by kWh quantities.
-                invoice_rate_precision = tax_config.get("invoice_rate_precision", 4)
-                invoice_rate_rounding = tax_config.get("invoice_rate_rounding_mode", rounding_mode)
-                rate_rounding = _ROUNDING_MODES.get(invoice_rate_rounding)
-                if rate_rounding is None:
-                    logger.warning(f"Unknown invoice_rate_rounding_mode '{invoice_rate_rounding}', falling back to ROUND_HALF_UP")
-                    rate_rounding = ROUND_HALF_UP
-                for ct_id in rate_by_tariff:
-                    rate_by_tariff[ct_id] = rate_by_tariff[ct_id].quantize(
-                        Decimal(10) ** -invoice_rate_precision, rounding=rate_rounding
-                    )
-
-                # ----------------------------------------------------------
-                # 6. Resolve line item type IDs
-                # ----------------------------------------------------------
-                cur.execute("SELECT id, code FROM invoice_line_item_type")
-                type_map: dict[str, int] = {r["code"]: r["id"] for r in cur.fetchall()}
-
-                # ----------------------------------------------------------
-                # 7. Compute energy line items
-                # ----------------------------------------------------------
-                line_items: list[dict] = []
-                sort_counter = 1
-
-                # Available energy line(s)
-                total_available_kwh = Decimal('0')
-                for cl in contract_lines:
-                    if cl["energy_category"] == 'available':
-                        agg = agg_by_cl.get(cl["id"])
-                        if agg:
-                            total_available_kwh += _to_decimal(agg["available_kwh"])
-
-                if avail_mode == "single" and total_available_kwh > 0:
-                    ct_id = contract_lines[0].get("clause_tariff_id") or project_tariff["id"]
-                    rate = rate_by_tariff.get(ct_id, Decimal('0'))
-                    line_total = _round_d(total_available_kwh * rate, rounding_precision, rounding_mode)
-                    line_items.append({
-                        "type_code": "AVAILABLE_ENERGY",
-                        "type_id": type_map.get("AVAILABLE_ENERGY"),
-                        "component_code": None,
-                        "description": "Available Energy",
-                        "quantity": total_available_kwh,
-                        "unit_price": rate,
-                        "basis_amount": None,
-                        "rate_pct": None,
-                        "line_total_amount": line_total,
-                        "amount_sign": 1,
-                        "sort_order": sort_counter,
-                        "contract_line_id": None,
-                        "meter_name": None,
-                    })
-                    sort_counter += 1
-
-                elif avail_mode == "per_meter":
-                    for cl in contract_lines:
-                        if cl["energy_category"] != 'available':
-                            continue
-                        agg = agg_by_cl.get(cl["id"])
-                        if not agg:
-                            continue
-                        avail_kwh = _to_decimal(agg["available_kwh"])
-                        if avail_kwh <= 0:
-                            continue
-
-                        ct_id = cl.get("clause_tariff_id") or project_tariff["id"]
-                        rate = rate_by_tariff.get(ct_id, Decimal('0'))
-                        line_total = _round_d(avail_kwh * rate, rounding_precision, rounding_mode)
-
-                        desc = cl.get("product_desc") or agg.get("meter_name") or f"Meter {cl['meter_id']}"
-                        line_items.append({
-                            "type_code": "AVAILABLE_ENERGY",
-                            "type_id": type_map.get("AVAILABLE_ENERGY"),
-                            "component_code": None,
-                            "description": f"Available - {desc}",
-                            "quantity": avail_kwh,
-                            "unit_price": rate,
-                            "basis_amount": None,
-                            "rate_pct": None,
-                            "line_total_amount": line_total,
-                            "amount_sign": 1,
-                            "sort_order": sort_counter,
-                            "contract_line_id": cl["id"],
-                            "meter_name": agg.get("meter_name"),
-                        })
-                        sort_counter += 1
-
-                # Metered energy lines
-                for cl in contract_lines:
-                    if cl["energy_category"] != 'metered':
-                        continue
-                    agg = agg_by_cl.get(cl["id"])
-                    if not agg:
-                        continue
-                    metered_kwh = _to_decimal(agg["metered_kwh"])
-                    if metered_kwh <= 0:
-                        continue
-
-                    ct_id = cl.get("clause_tariff_id") or project_tariff["id"]
-                    rate = rate_by_tariff.get(ct_id, Decimal('0'))
-                    line_total = _round_d(metered_kwh * rate, rounding_precision, rounding_mode)
-
-                    desc = cl.get("product_desc") or agg.get("meter_name") or f"Meter {cl['meter_id']}"
-                    line_items.append({
-                        "type_code": "ENERGY",
-                        "type_id": type_map.get("ENERGY"),
-                        "component_code": None,
-                        "description": f"Metered - {desc}",
-                        "quantity": metered_kwh,
-                        "unit_price": rate,
-                        "basis_amount": None,
-                        "rate_pct": None,
-                        "line_total_amount": line_total,
-                        "amount_sign": 1,
-                        "sort_order": sort_counter,
-                        "contract_line_id": cl["id"],
-                        "meter_name": agg.get("meter_name"),
-                    })
-                    sort_counter += 1
-
-                if not line_items:
-                    raise HTTPException(
-                        status_code=422,
-                        detail="No energy data found for this billing period. Ensure meter_aggregate has data."
-                    )
-
-                # ----------------------------------------------------------
-                # 8. Compute energy subtotal
-                # ----------------------------------------------------------
-                energy_subtotal = sum(li["line_total_amount"] for li in line_items)
-
-                # ----------------------------------------------------------
-                # 9. Compute tax chain with deterministic rounding
-                # ----------------------------------------------------------
-                levies = tax_config.get("levies", [])
-                vat_config = tax_config.get("vat")
-                withholdings = tax_config.get("withholdings", [])
-
-                levies_total = Decimal('0')
-                for levy in levies:
-                    basis = _resolve_basis(levy, energy_subtotal, levies_total)
-                    rate_pct = _to_decimal(levy.get("rate", 0))
-                    levy_amount = _round_d(basis * rate_pct, rounding_precision, rounding_mode)
-                    levies_total += levy_amount
-
-                    line_items.append({
-                        "type_code": "LEVY",
-                        "type_id": type_map.get("LEVY"),
-                        "component_code": levy["code"],
-                        "description": f"{levy['name']} ({float(rate_pct)*100:.1f}%)",
-                        "quantity": None,
-                        "unit_price": None,
-                        "basis_amount": basis,
-                        "rate_pct": rate_pct,
-                        "line_total_amount": levy_amount,
-                        "amount_sign": 1,
-                        "sort_order": levy.get("sort_order", 10),
-                        "contract_line_id": None,
-                        "meter_name": None,
-                    })
-
-                subtotal_after_levies = energy_subtotal + levies_total
-
-                # VAT
-                vat_amount = Decimal('0')
-                if vat_config:
-                    vat_basis = _resolve_basis(vat_config, energy_subtotal, levies_total, subtotal_after_levies)
-                    vat_rate = _to_decimal(vat_config.get("rate", 0))
-                    vat_amount = _round_d(vat_basis * vat_rate, rounding_precision, rounding_mode)
-
-                    line_items.append({
-                        "type_code": "TAX",
-                        "type_id": type_map.get("TAX"),
-                        "component_code": vat_config.get("code", "VAT"),
-                        "description": f"{vat_config.get('name', 'VAT')} ({float(vat_rate)*100:.0f}%)",
-                        "quantity": None,
-                        "unit_price": None,
-                        "basis_amount": vat_basis,
-                        "rate_pct": vat_rate,
-                        "line_total_amount": vat_amount,
-                        "amount_sign": 1,
-                        "sort_order": vat_config.get("sort_order", 20),
-                        "contract_line_id": None,
-                        "meter_name": None,
-                    })
-
-                invoice_total = subtotal_after_levies + vat_amount
-
-                # Withholdings (negative amounts)
-                withholdings_total = Decimal('0')
-                for wh in withholdings:
-                    wh_basis = _resolve_basis(wh, energy_subtotal, levies_total, subtotal_after_levies)
-                    wh_rate = _to_decimal(wh.get("rate", 0))
-                    wh_amount = _round_d(wh_basis * wh_rate, rounding_precision, rounding_mode)
-                    wh_signed = -wh_amount  # store as negative
-                    withholdings_total += wh_amount
-
-                    line_items.append({
-                        "type_code": "WITHHOLDING",
-                        "type_id": type_map.get("WITHHOLDING"),
-                        "component_code": wh["code"],
-                        "description": f"{wh['name']} ({float(wh_rate)*100:.0f}%)",
-                        "quantity": None,
-                        "unit_price": None,
-                        "basis_amount": wh_basis,
-                        "rate_pct": wh_rate,
-                        "line_total_amount": wh_signed,
-                        "amount_sign": -1,
-                        "sort_order": wh.get("sort_order", 30),
-                        "contract_line_id": None,
-                        "meter_name": None,
-                    })
-
-                net_due = invoice_total - withholdings_total
-
-                # ----------------------------------------------------------
-                # 10. Build source_metadata audit trail
-                # ----------------------------------------------------------
-                source_metadata = {
-                    "generator_version": "1.0.0",
-                    "rounding_policy": {
-                        "mode": rounding_mode,
-                        "precision": rounding_precision,
-                    },
-                    "rates_full_precision": {
-                        str(ct_id): str(rate)
-                        for ct_id, rate in rate_by_tariff.items()
-                    },
-                    "calculation_steps": {
-                        "energy_subtotal": str(energy_subtotal),
-                        "levies_total": str(levies_total),
-                        "subtotal_after_levies": str(subtotal_after_levies),
-                        "vat_amount": str(vat_amount),
-                        "invoice_total": str(invoice_total),
-                        "withholdings_total": str(withholdings_total),
-                        "net_due": str(net_due),
-                    },
-                    "billing_taxes_snapshot": tax_config,
-                }
-
-                # ----------------------------------------------------------
-                # 11. Resolve counterparty + invoice direction
-                # ----------------------------------------------------------
-                cur.execute("""
-                    SELECT counterparty_id
-                    FROM contract WHERE id = %(cid)s
-                """, {"cid": contract_id})
-                contract_info = cur.fetchone()
-                counterparty_id = contract_info["counterparty_id"] if contract_info else None
-                invoice_direction = body.invoice_direction or "payable"
-                if invoice_direction not in ("payable", "receivable"):
-                    raise HTTPException(status_code=400, detail="invoice_direction must be 'payable' or 'receivable'")
-
-                # ----------------------------------------------------------
-                # 12. Idempotency + versioning
-                # ----------------------------------------------------------
-                if body.idempotency_key:
-                    cur.execute("""
-                        SELECT id FROM expected_invoice_header
-                        WHERE idempotency_key = %(key)s
-                    """, {"key": body.idempotency_key})
-                    if cur.fetchone():
-                        raise HTTPException(
-                            status_code=409,
-                            detail=f"Invoice already generated with idempotency_key={body.idempotency_key}"
-                        )
-
-                # Supersede existing current invoice
-                new_version = 1
-                cur.execute("""
-                    SELECT id, version_no FROM expected_invoice_header
-                    WHERE project_id = %(pid)s
-                      AND billing_period_id = %(bp)s
-                      AND invoice_direction = %(dir)s
-                      AND is_current = true
-                """, {"pid": project_id, "bp": billing_period_id, "dir": invoice_direction})
-                existing = cur.fetchone()
-                if existing:
-                    new_version = existing["version_no"] + 1
-                    cur.execute("""
-                        UPDATE expected_invoice_header
-                        SET is_current = false
-                        WHERE id = %(id)s
-                    """, {"id": existing["id"]})
-
-                # ----------------------------------------------------------
-                # 13. Write header
-                # ----------------------------------------------------------
-                cur.execute("""
-                    INSERT INTO expected_invoice_header (
-                        project_id, contract_id, billing_period_id,
-                        counterparty_id, currency_id,
-                        invoice_direction, total_amount,
-                        version_no, is_current, generated_at,
-                        idempotency_key, source_metadata
-                    ) VALUES (
-                        %(pid)s, %(cid)s, %(bp)s,
-                        %(cp)s, %(cur)s,
-                        %(dir)s, %(total)s,
-                        %(ver)s, true, NOW(),
-                        %(ikey)s, %(meta)s
-                    )
-                    RETURNING id
-                """, {
-                    "pid": project_id,
-                    "cid": contract_id,
-                    "bp": billing_period_id,
-                    "cp": counterparty_id,
-                    "cur": currency_id,
-                    "dir": invoice_direction,
-                    "total": net_due,  # pass Decimal directly for NUMERIC column
-                    "ver": new_version,
-                    "ikey": body.idempotency_key,
-                    "meta": json.dumps(source_metadata, default=str),
-                })
-                header_id = cur.fetchone()["id"]
-
-                # ----------------------------------------------------------
-                # 14. Write line items
-                # ----------------------------------------------------------
-                for li in line_items:
-                    cur.execute("""
-                        INSERT INTO expected_invoice_line_item (
-                            expected_invoice_header_id,
-                            invoice_line_item_type_id,
-                            component_code,
-                            description,
-                            quantity, line_unit_price,
-                            basis_amount, rate_pct,
-                            line_total_amount, amount_sign,
-                            sort_order, contract_line_id
-                        ) VALUES (
-                            %(hid)s, %(type_id)s, %(comp)s, %(desc)s,
-                            %(qty)s, %(price)s,
-                            %(basis)s, %(rate)s,
-                            %(total)s, %(sign)s,
-                            %(sort)s, %(cl_id)s
-                        )
-                    """, {
-                        "hid": header_id,
-                        "type_id": li["type_id"],
-                        "comp": li["component_code"],
-                        "desc": li["description"],
-                        "qty": li["quantity"],  # pass Decimal directly for NUMERIC columns
-                        "price": li["unit_price"],
-                        "basis": li["basis_amount"],
-                        "rate": li["rate_pct"],
-                        "total": li["line_total_amount"],
-                        "sign": li["amount_sign"],
-                        "sort": li["sort_order"],
-                        "cl_id": li["contract_line_id"],
-                    })
-
-                result = {
-                    "success": True,
-                    "header_id": header_id,
-                    "version_no": new_version,
-                    "billing_month": body.billing_month,
-                    "energy_subtotal": float(energy_subtotal),
-                    "levies_total": float(levies_total),
-                    "subtotal_after_levies": float(subtotal_after_levies),
-                    "vat_amount": float(vat_amount),
-                    "invoice_total": float(invoice_total),
-                    "withholdings_total": float(withholdings_total),
-                    "net_due": float(net_due),
-                    "line_count": len(line_items),
-                    "currency_code": currency_code,
-                }
-
-                log_business_event(
-                    background_tasks, request,
-                    action="CREATE",
-                    resource_type="expected_invoice",
-                    resource_id=str(header_id),
-                    organization_id=org_id,
-                    compliance_relevant=True,
-                    details={"project_id": project_id, "billing_month": body.billing_month, "version": new_version},
-                )
-
-                return result
+        return result
 
     except HTTPException:
         raise
@@ -959,6 +461,94 @@ def _resolve_basis(
     elif base == "subtotal_after_levies":
         return subtotal_after_levies if subtotal_after_levies is not None else (energy_subtotal + levies_total)
     return energy_subtotal
+
+
+# ============================================================================
+# POST /projects/{project_id}/billing/generate-tariff-rates
+# ============================================================================
+
+@router.post(
+    "/projects/{project_id}/billing/generate-tariff-rates",
+    response_model=dict,
+    summary="Generate tariff rates for a billing month",
+)
+async def generate_tariff_rates(
+    project_id: int = Path(..., description="Project ID"),
+    body: "GenerateTariffRatesRequest" = ...,
+) -> dict:
+    """Generate tariff rates from clause_tariff + FX + MRP.
+
+    Dispatches to appropriate generator based on escalation type:
+    - Deterministic → RatePeriodGenerator
+    - Floating → RebasedMarketPriceEngine (requires FX + MRP)
+    """
+    if not USE_DATABASE:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    from models.billing_cycle import GenerateTariffRatesRequest as _GTR
+    if not isinstance(body, _GTR):
+        body = _GTR(**body.dict() if hasattr(body, 'dict') else body)
+
+    from services.billing.tariff_rate_service import TariffRateService
+    svc = TariffRateService()
+
+    try:
+        result = svc.generate(
+            project_id=project_id,
+            billing_month=body.billing_month,
+            operating_year=body.operating_year,
+            force_refresh=body.force_refresh,
+        )
+        if not result.get("success"):
+            raise HTTPException(status_code=422, detail=result.get("error", "Tariff rate generation failed"))
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error generating tariff rates for project {project_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ============================================================================
+# POST /projects/{project_id}/billing/run-cycle
+# ============================================================================
+
+@router.post(
+    "/projects/{project_id}/billing/run-cycle",
+    response_model=dict,
+    summary="Run full billing cycle for a billing month",
+)
+async def run_billing_cycle(
+    project_id: int = Path(..., description="Project ID"),
+    body: "RunCycleRequest" = ...,
+) -> dict:
+    """Run the full monthly billing cycle as a dependency graph.
+
+    Layer 1: Verify inputs (FX, MRP conditional, meter data)
+    Layer 2: Compute (tariff rates + plant performance in parallel branches)
+    Layer 3: Generate expected invoice
+    """
+    if not USE_DATABASE:
+        raise HTTPException(status_code=503, detail="Database not available")
+
+    from models.billing_cycle import RunCycleRequest as _RCR
+    if not isinstance(body, _RCR):
+        body = _RCR(**body.dict() if hasattr(body, 'dict') else body)
+
+    from services.billing.billing_cycle_orchestrator import BillingCycleOrchestrator
+    orchestrator = BillingCycleOrchestrator()
+
+    try:
+        result = orchestrator.run_cycle(
+            project_id=project_id,
+            billing_month=body.billing_month,
+            force_refresh=body.force_refresh,
+            invoice_direction=body.invoice_direction,
+        )
+        return result.model_dump()
+    except Exception as e:
+        logger.error(f"Error running billing cycle for project {project_id}: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # Guard against double-counted kWh when both a meter_id=NULL row (from
@@ -1224,16 +814,14 @@ async def get_monthly_billing(
                             if p.is_metered:
                                 if product_kwh is not None:
                                     amount = product_kwh * rate
-                                elif bm_str not in months_with_product_data and actual is not None:
-                                    amount = actual * rate  # fallback only for months without per-product data
+                                # No fallback: without per-product kWh, leave amount as None
+                                # to avoid duplicating total actual across every metered product
                             else:
                                 amount = rate
                         if rate_hard is not None:
                             if p.is_metered:
                                 if product_kwh is not None:
                                     amount_hard = product_kwh * rate_hard
-                                elif bm_str not in months_with_product_data and actual is not None:
-                                    amount_hard = actual * rate_hard  # fallback only for months without per-product data
                             else:
                                 amount_hard = rate_hard
 
@@ -1251,9 +839,15 @@ async def get_monthly_billing(
                     totals["total_billing"] += row_total
                     totals["total_billing_hard"] += row_total_hard
 
+                    # Load expected invoice if billing_period_id exists
+                    exp_inv = None
+                    bp_id = mr.get("billing_period_id")
+                    if bp_id is not None:
+                        exp_inv = _read_expected_invoice(cur, project_id, bp_id)
+
                     rows.append(MonthlyBillingRow(
                         billing_month=bm_str,
-                        billing_period_id=mr.get("billing_period_id"),
+                        billing_period_id=bp_id,
                         actual_kwh=actual,
                         forecast_kwh=forecast,
                         variance_kwh=variance_kwh,
@@ -1264,6 +858,7 @@ async def get_monthly_billing(
                         product_rates_hard_ccy=product_rates_hard_out,
                         total_billing_amount=row_total if row_total > 0 else None,
                         total_billing_amount_hard_ccy=row_total_hard if row_total_hard > 0 else None,
+                        expected_invoice=exp_inv,
                     ))
 
                 return MonthlyBillingResponse(

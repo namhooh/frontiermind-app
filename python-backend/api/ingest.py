@@ -53,6 +53,10 @@ from models.ingestion import (
     SourceType,
     IngestionStatus,
 )
+from models.reference_price_ingest import (
+    ReferencePriceBatchRequest,
+    ReferencePriceBatchResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -287,9 +291,9 @@ async def generate_presigned_url(
 )
 @limiter.limit("30/minute")
 async def ingest_meter_data(
-    http_request: Request,
+    request: Request,
     background_tasks: BackgroundTasks,
-    request: MeterDataBatchRequest,
+    body: MeterDataBatchRequest,
     auth: dict = Depends(require_api_key),
 ) -> IngestionResultResponse:
     """
@@ -300,7 +304,7 @@ async def ingest_meter_data(
     """
     repository = get_repository()
     organization_id = auth["organization_id"]
-    _authorize_source_for_token(auth, request.source_type)
+    _authorize_source_for_token(auth, body.source_type)
     _authorize_scope(auth, "meter_data")
 
     try:
@@ -312,13 +316,13 @@ async def ingest_meter_data(
         )
 
     # Convert Pydantic models to dicts for the pipeline
-    records = [r.model_dump(exclude_none=True) for r in request.readings]
+    records = [r.model_dump(exclude_none=True) for r in body.readings]
 
     result = svc.ingest_records(
         records=records,
-        source_type=request.source_type.value,
+        source_type=body.source_type.value,
         organization_id=organization_id,
-        metadata=request.metadata,
+        metadata=body.metadata,
         credential_id=auth.get("credential_id"),
     )
 
@@ -335,12 +339,12 @@ async def ingest_meter_data(
     )
 
     log_business_event(
-        background_tasks, http_request,
+        background_tasks, request,
         action="IMPORT",
         resource_type="meter_data",
         organization_id=organization_id,
         records_affected=result.rows_accepted,
-        details={"source_type": request.source_type.value, "rows_rejected": result.rows_rejected},
+        details={"source_type": body.source_type.value, "rows_rejected": result.rows_rejected},
     )
 
     return resp
@@ -446,9 +450,9 @@ async def upload_meter_data(
 )
 @limiter.limit("30/minute")
 async def ingest_billing_reads(
-    http_request: Request,
+    request: Request,
     background_tasks: BackgroundTasks,
-    request: BillingReadsBatchRequest,
+    body: BillingReadsBatchRequest,
     auth: dict = Depends(require_api_key),
 ) -> IngestionResultResponse:
     """
@@ -462,7 +466,7 @@ async def ingest_billing_reads(
     Max 5,000 readings per batch.
     """
     organization_id = auth["organization_id"]
-    _authorize_source_for_token(auth, request.source_type)
+    _authorize_source_for_token(auth, body.source_type)
     _authorize_scope(auth, "billing_reads")
 
     try:
@@ -474,10 +478,10 @@ async def ingest_billing_reads(
         )
 
     result = svc.ingest_billing_records(
-        records=request.readings,
-        source_type=request.source_type.value,
+        records=body.readings,
+        source_type=body.source_type.value,
         organization_id=organization_id,
-        metadata=request.metadata,
+        metadata=body.metadata,
         credential_id=auth.get("credential_id"),
     )
 
@@ -494,12 +498,12 @@ async def ingest_billing_reads(
     )
 
     log_business_event(
-        background_tasks, http_request,
+        background_tasks, request,
         action="IMPORT",
         resource_type="billing_reads",
         organization_id=organization_id,
         records_affected=result.rows_accepted,
-        details={"source_type": request.source_type.value, "rows_rejected": result.rows_rejected},
+        details={"source_type": body.source_type.value, "rows_rejected": result.rows_rejected},
     )
 
     return resp
@@ -518,9 +522,9 @@ async def ingest_billing_reads(
 )
 @limiter.limit("30/minute")
 async def ingest_fx_rates(
-    http_request: Request,
+    request: Request,
     background_tasks: BackgroundTasks,
-    request: FXRateBatchRequest,
+    body: FXRateBatchRequest,
     auth: dict = Depends(require_api_key),
 ) -> FXRateBatchResponse:
     """
@@ -534,7 +538,7 @@ async def ingest_fx_rates(
     repository = get_repository()
 
     # Collect unique currency codes and resolve to IDs
-    unique_codes = list({entry.currency_code for entry in request.rates})
+    unique_codes = list({entry.currency_code for entry in body.rates})
     code_to_id = repository.resolve_currency_codes(unique_codes)
 
     unknown_codes = [c for c in unique_codes if c not in code_to_id]
@@ -546,7 +550,7 @@ async def ingest_fx_rates(
 
     # Deduplicate within batch: last-write-wins for same (currency_code, rate_date)
     seen = {}
-    for entry in request.rates:
+    for entry in body.rates:
         key = (entry.currency_code, entry.rate_date)
         seen[key] = entry
 
@@ -564,7 +568,7 @@ async def ingest_fx_rates(
         inserted, updated = repository.upsert_exchange_rates(
             organization_id=organization_id,
             rates=upsert_records,
-            source=request.source,
+            source=body.source,
         )
     except Exception as e:
         logger.error(f"FX rate ingestion failed: {e}", exc_info=True)
@@ -574,18 +578,174 @@ async def ingest_fx_rates(
         )
 
     log_business_event(
-        background_tasks, http_request,
+        background_tasks, request,
         action="IMPORT",
         resource_type="fx_rates",
         organization_id=organization_id,
         records_affected=inserted + updated,
-        details={"inserted": inserted, "updated": updated, "source": request.source},
+        details={"inserted": inserted, "updated": updated, "source": body.source},
     )
 
     return FXRateBatchResponse(
         success=True,
         inserted=inserted,
         updated=updated,
+    )
+
+
+# ============================================================================
+# Reference Price Ingestion Endpoint
+# ============================================================================
+
+
+@router.post(
+    "/reference-prices",
+    response_model=ReferencePriceBatchResponse,
+    summary="Push reference price data via API",
+    description="Ingest MRP reference prices. Resolves project_sage_id → project_id, "
+                "computes calculated_mrp_per_kwh, and upserts into reference_price table.",
+)
+@limiter.limit("30/minute")
+async def ingest_reference_prices(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    body: ReferencePriceBatchRequest,
+    auth: dict = Depends(require_api_key),
+) -> ReferencePriceBatchResponse:
+    """Ingest a batch of reference price entries.
+
+    Resolves project_sage_id → project_id, currency_code → currency_id.
+    Computes calculated_mrp_per_kwh = total_variable_charges / total_kwh_invoiced.
+    Upserts into reference_price on (project_id, observation_type, period_start).
+    """
+    _authorize_scope(auth, "reference_prices")
+    organization_id = auth["organization_id"]
+
+    from db.database import get_db_connection
+
+    inserted = 0
+    updated = 0
+    rejected = 0
+    errors = []
+
+    try:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Pre-resolve all unique sage_ids → (project_id, cod_date)
+                sage_ids = list({e.project_sage_id for e in body.entries})
+                cur.execute("""
+                    SELECT sage_id, id, cod_date FROM project
+                    WHERE sage_id = ANY(%s) AND organization_id = %s
+                """, (sage_ids, organization_id))
+                sage_to_project = {r["sage_id"]: {"id": r["id"], "cod_date": r["cod_date"]} for r in cur.fetchall()}
+
+                # Pre-resolve currency codes → ids
+                ccy_codes = list({e.currency_code for e in body.entries})
+                cur.execute("SELECT code, id FROM currency WHERE code = ANY(%s)", (ccy_codes,))
+                code_to_ccy = {r["code"]: r["id"] for r in cur.fetchall()}
+
+                for idx, entry in enumerate(body.entries):
+                    proj_info = sage_to_project.get(entry.project_sage_id)
+                    if not proj_info:
+                        errors.append({"row": idx, "error": f"Unknown project_sage_id: {entry.project_sage_id}"})
+                        rejected += 1
+                        continue
+                    pid = proj_info["id"]
+                    cod_date = proj_info["cod_date"]
+
+                    ccy_id = code_to_ccy.get(entry.currency_code)
+                    if not ccy_id:
+                        errors.append({"row": idx, "error": f"Unknown currency_code: {entry.currency_code}"})
+                        rejected += 1
+                        continue
+
+                    if entry.total_kwh_invoiced == 0:
+                        errors.append({"row": idx, "error": "total_kwh_invoiced cannot be zero"})
+                        rejected += 1
+                        continue
+
+                    mrp_per_kwh = entry.total_variable_charges / entry.total_kwh_invoiced
+
+                    # Derive operating_year from COD if not provided
+                    oy = entry.operating_year
+                    if oy is None and cod_date:
+                        from datetime import date as _date
+                        ps = entry.period_start
+                        months_since = (ps.year - cod_date.year) * 12 + (ps.month - cod_date.month)
+                        oy = max(1, (months_since // 12) + 1) if months_since >= 0 else None
+
+                    # Compute period_end: for monthly = last day of month, for annual = period_start + 1 year - 1 day
+                    from datetime import timedelta
+                    if entry.observation_type == "annual" and oy is not None and cod_date:
+                        try:
+                            period_end = cod_date.replace(year=cod_date.year + oy) - timedelta(days=1)
+                        except ValueError:
+                            period_end = cod_date.replace(year=cod_date.year + oy, day=28) - timedelta(days=1)
+                    else:
+                        # Monthly: last day of the period_start month
+                        ps = entry.period_start
+                        if ps.month == 12:
+                            period_end = _date(ps.year + 1, 1, 1) - timedelta(days=1)
+                        else:
+                            period_end = _date(ps.year, ps.month + 1, 1) - timedelta(days=1)
+
+                    cur.execute("""
+                        INSERT INTO reference_price (
+                            project_id, organization_id, period_start, period_end,
+                            operating_year, observation_type, calculated_mrp_per_kwh,
+                            currency_id, total_variable_charges,
+                            total_kwh_invoiced, verification_status,
+                            source_document_path
+                        ) VALUES (
+                            %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, 'pending', %s
+                        )
+                        ON CONFLICT (project_id, observation_type, period_start)
+                        DO UPDATE SET
+                            calculated_mrp_per_kwh = EXCLUDED.calculated_mrp_per_kwh,
+                            total_variable_charges = EXCLUDED.total_variable_charges,
+                            total_kwh_invoiced = EXCLUDED.total_kwh_invoiced,
+                            currency_id = EXCLUDED.currency_id,
+                            period_end = EXCLUDED.period_end,
+                            operating_year = EXCLUDED.operating_year,
+                            source_document_path = EXCLUDED.source_document_path,
+                            verification_status = 'pending',
+                            updated_at = NOW()
+                        RETURNING (xmax = 0) AS is_insert
+                    """, (
+                        pid, organization_id, entry.period_start, period_end,
+                        oy, entry.observation_type, mrp_per_kwh,
+                        ccy_id, float(entry.total_variable_charges),
+                        float(entry.total_kwh_invoiced),
+                        entry.source_document_path,
+                    ))
+                    row = cur.fetchone()
+                    if row and row["is_insert"]:
+                        inserted += 1
+                    else:
+                        updated += 1
+
+    except Exception as e:
+        logger.error(f"Reference price ingestion failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Reference price ingestion failed: {e}",
+        )
+
+    log_business_event(
+        background_tasks, request,
+        action="IMPORT",
+        resource_type="reference_prices",
+        organization_id=organization_id,
+        records_affected=inserted + updated,
+        details={"inserted": inserted, "updated": updated, "rejected": rejected, "source": body.source},
+    )
+
+    return ReferencePriceBatchResponse(
+        success=rejected == 0,
+        inserted=inserted,
+        updated=updated,
+        rejected=rejected,
+        errors=errors[:10] if errors else None,
     )
 
 

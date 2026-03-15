@@ -22,8 +22,10 @@ import { OnboardingSummary, API_ENDPOINT, buildOnboardingSections } from './Onbo
 
 const AVAILABLE_SCOPES = [
   { value: 'meter_data', label: 'Meter Data' },
-  { value: 'fx_rates', label: 'FX Rates' },
   { value: 'billing_reads', label: 'Billing Reads' },
+  { value: 'fx_rates', label: 'FX Rates' },
+  { value: 'reference_prices', label: 'Reference Prices (MRP)' },
+  { value: 'invoice_export', label: 'Invoice Export' },
 ] as const
 
 interface GenerateAPIKeyDialogProps {

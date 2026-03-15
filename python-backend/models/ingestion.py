@@ -24,6 +24,8 @@ class IngestionScope(str, Enum):
     METER_DATA = "meter_data"
     FX_RATES = "fx_rates"
     BILLING_READS = "billing_reads"
+    INVOICE_EXPORT = "invoice_export"
+    REFERENCE_PRICES = "reference_prices"
 
 
 class SourceType(str, Enum):
@@ -34,6 +36,7 @@ class SourceType(str, Enum):
     GOODWE = "goodwe"
     SNOWFLAKE = "snowflake"
     MANUAL = "manual"
+    GENERIC = "generic"
 
 
 class AuthType(str, Enum):

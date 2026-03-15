@@ -3,8 +3,8 @@
 > Consolidated guide for populating FrontierMind project data from CrossBoundary Energy (CBE) source documents.
 > Merges former `DATA_POPULATION_WORKFLOW.md` and `PROJECT_SOURCE_INVENTORY.md`.
 >
-> **Schema version:** v10.11+ (migration 049+)
-> **Last updated:** 2026-03-07
+> **Schema version:** v10.12+ (migration 049+, 033 updated with forecast_pr_poa)
+> **Last updated:** 2026-03-10
 >
 > **Companion documentation:**
 > - [`CBE_TO_FRONTIERMIND_MAPPING.md`](./CBE_TO_FRONTIERMIND_MAPPING.md) — Field-level schema mapping (CBE → FM)
@@ -341,22 +341,35 @@ STAGE D: Pricing & Enrichment (Steps 9-11)
 ### Step 5: Plant Performance Workbook — Summary Tabs (Stage B)
 
 **Source:** Operations Plant Performance Workbook.xlsx
-**Tables:** `project` (verify/update), `production_forecast` (preliminary)
+**Script:** `python-backend/scripts/step5_summary_tabs.py`
+**Tables:** `project` (verify/update), `production_forecast` (columns: `forecast_energy_kwh`, `forecast_ghi_irradiance`, `forecast_poa_irradiance`, `forecast_pr`, `forecast_pr_poa`)
 
 #### 5a. "Summary - Performance" tab
 
 Extract per-project monthly time series for each of the following blocks. Each block repeats the project list (~30 projects, Tab ID in col E):
 
-| Row Range | Section | Target Table/Field |
-|-----------|---------|-------------------|
-| 6-35 | ACTUAL INVOICED ENERGY (kWh) — Metered + Available | `meter_aggregate` / `plant_performance` validation |
-| 39-68 | EXPECTED OUTPUT (kWh) — Metered + Available | `production_forecast.forecast_energy_kwh` |
-| 72-101 | VARIANCE (kWh) — Energy Output | Derived (actual - expected) |
-| 107-134 | ACTUAL IRRADIANCE (Wh/m2) | `meter_aggregate.actual_ghi_irradiance` validation |
-| 141-168 | EXPECTED IRRADIANCE (Wh/m2) | `production_forecast.forecast_ghi_irradiance` |
-| 175-202 | VARIANCE (Wh/m2) — Irradiation | Derived |
-| 209+ | PLANT AVAILABILITY (%) | `plant_performance.actual_availability_pct` |
-| (further) | EXPECTED PR (%) | `production_forecast.forecast_pr` |
+The PPW Summary-Performance tab has **10 data blocks** per project-month. The parser (`SUMMARY_BLOCK_HEADERS`) must capture all of them. Row ranges are approximate (vary by workbook version):
+
+| # | Block Keyword | Section | Target Table/Field | Unit Conversion |
+|---|--------------|---------|-------------------|-----------------|
+| 1 | ACTUAL INVOICED ENERGY | Metered + Available energy | `meter_aggregate` / `plant_performance` validation | — |
+| 2 | EXPECTED OUTPUT | Forecast energy | `production_forecast.forecast_energy_kwh` | — |
+| 3 | VARIANCE (Energy) | Energy output variance | Derived (actual - expected) — **skip** (set field=None) | — |
+| 4 | ACTUAL IRRADIANCE | Measured GHI irradiance | `meter_aggregate.ghi_irradiance_wm2` validation | — |
+| 5 | EXPECTED IRRADIANCE | Forecast GHI irradiance | `production_forecast.forecast_ghi_irradiance` | Wh/m² → kWh/m² (÷1000) |
+| 6 | VARIANCE (Irradiation) | Irradiance variance | Derived — **skip** (set field=None) | — |
+| 7 | EXPECTED POA | Forecast POA irradiance | `production_forecast.forecast_poa_irradiance` | Wh/m² → kWh/m² (÷1000) |
+| 8 | PLANT AVAILABILITY | Availability % | `plant_performance.actual_availability_pct` | ÷100 if >1 |
+| 9 | EXPECTED PR POA | Forecast PR based on POA | `production_forecast.forecast_pr_poa` | ÷100 if >1 |
+| 10 | EXPECTED PR | Forecast PR based on GHI | `production_forecast.forecast_pr` | ÷100 if >1 |
+
+**Parser ordering rules:**
+- `VARIANCE` blocks map to `field=None` to skip data rows between blocks
+- `EXPECTED PR POA` must come **before** `EXPECTED PR` in the header list (substring match — "EXPECTED PR" would match both otherwise)
+- `EXPECTED POA` is distinct from `EXPECTED OUTPUT` (no substring collision)
+- Summary/total rows (`TOTAL AGREGATED`, `WEIGHTED AVERAGE`) are skipped — they contain block keywords but are NOT block headers
+
+**Script:** `step5_summary_tabs.py` — the INSERT includes `forecast_poa_irradiance` and `forecast_pr_poa` alongside `forecast_ghi_irradiance` and `forecast_pr`. All four fields use `COALESCE(EXCLUDED, existing)` on upsert conflict to preserve non-null values from other sources.
 
 **HYBRID PLANTS:** ERG (Molo Graphite) and UNSOS (Baidoa) are listed separately as hybrid plants in irradiance sections. If hybrid billing lines (sub-projects) are captured under the same project/SAGE ID, capture them as separate `contract_line` entries following the multi-contract rules in Section 2. Their expected output uses the hybrid-specific calculation formula (includes genset component), not the standard PV-only calculation.
 
@@ -376,7 +389,8 @@ Extract per project (one row per Tab ID):
 ### Step 6: Plant Performance Workbook — Project Tabs (Stage B)
 
 **Source:** Operations Plant Performance Workbook.xlsx — ~30 per-project tabs (GBL01, KAS01, MOH01, etc.)
-**Tables:** `project`, `production_forecast`, `production_guarantee`
+**Script:** `python-backend/scripts/step6_project_tabs.py`
+**Tables:** `project`, `production_forecast` (enriches: `forecast_poa_irradiance`, `forecast_pr_poa`, `degradation_factor`, `operating_year`, `source_metadata`), `production_guarantee`
 
 Each project tab has a consistent structure:
 
@@ -419,16 +433,28 @@ Headers at row 23: Date, Year, Month, OY, Forecast Energy Phase 1 (kWh), Forecas
 
 Monthly rows organized by Operating Year (OY 1, OY 2, ... up to contract term):
 
-| Column | Field | Target |
-|--------|-------|--------|
-| E | Operating Year (OY) | `production_forecast.operating_year` |
-| F | Forecast Energy Phase 1 (kWh) | `production_forecast.forecast_energy_kwh` (phase 1) |
-| G | Forecast Energy Phase 2 (kWh) | `production_forecast.forecast_energy_kwh` (phase 2) |
-| H | Forecast Combined (kWh) | `production_forecast.forecast_energy_kwh` (combined) |
-| I-J | GHI Irr Phase 1/2 (Wh/m2) | `production_forecast.forecast_ghi_irradiance` |
-| K-L | POA Irr Phase 1/2 (Wh/m2) | `production_forecast.forecast_poa_irradiance` |
-| M | PR GHI % | `production_forecast.source_metadata.pr_ghi_pct` |
-| N | PR POA % | `production_forecast.source_metadata.pr_poa_pct` |
+| Column | Field | DB Column | Notes |
+|--------|-------|-----------|-------|
+| D | Date | `production_forecast.forecast_month` | First-of-month |
+| E | Operating Year (OY) | `production_forecast.operating_year` | — |
+| F | Forecast Energy Phase 1 (kWh) | `source_metadata.phase1_kwh` | Per-phase in JSONB |
+| G | Forecast Energy Phase 2 (kWh) | `source_metadata.phase2_kwh` | Per-phase in JSONB |
+| H | Forecast Combined (kWh) | `production_forecast.forecast_energy_kwh` | Operational column |
+| I-J | GHI Irr Phase 1/2 (Wh/m2) | `production_forecast.forecast_ghi_irradiance` | Wh/m² → kWh/m² (÷1000) for Step 5; raw Wh/m² in Step 6 enrichment |
+| K-L | POA Irr Phase 1/2 (Wh/m2) | `production_forecast.forecast_poa_irradiance` | Wh/m² → kWh/m² (÷1000) for Step 5; raw Wh/m² in Step 6 enrichment |
+| M | PR GHI % | **`production_forecast.forecast_pr`** | Normalize: ÷100 if >1. **First-class DB column, NOT source_metadata.** |
+| N | PR POA % | **`production_forecast.forecast_pr_poa`** | Normalize: ÷100 if >1. **First-class DB column, NOT source_metadata.** |
+
+**Parser column patterns** (`TECH_MODEL_COLUMNS` in `plant_performance_parser.py`):
+- `"poa irr phase 1"` → `forecast_poa_wm2` (most specific, first)
+- `"poa irr phase"` → `forecast_poa_wm2` (phase-generic)
+- `"poa irr"` → `forecast_poa_wm2` (broadest — catches headers without "phase" suffix, e.g., "POA Irr (Wh/m2)")
+- `"pr ghi"` → `forecast_pr`
+- `"pr poa"` → `forecast_pr_poa`
+
+**Ordering matters:** More specific patterns must come before broader patterns (first match wins in the loop).
+
+**Step 6 enrichment** (`step6_project_tabs.py`): For each existing `production_forecast` row, if `forecast_poa_irradiance` is NULL and the Tech Model has a value, fill it. Same for `forecast_pr_poa`. Values are stored in `source_metadata.tech_model` JSONB as well for audit trail.
 
 **Formula extraction:** Extract the full calculation formula for Forecast Energy (e.g., `= installed_capacity * annual_specific_yield * monthly_energy_pct * (1 - degradation)^(OY-1)`). Store formula in `production_forecast.source_metadata.formula`. Compute and store the result in `production_forecast.forecast_energy_kwh`.
 
@@ -707,6 +733,39 @@ Three phases run sequentially:
 
 Import endpoint: `POST /api/projects/{project_id}/plant-performance/import`
 
+### Step 10b: Tariff Rate Population
+
+**Source:** `clause_tariff` rows with `base_rate` populated (from Step 11 or manual entry)
+**Tables:** `tariff_rate`, `clause_tariff` (update `valid_from`)
+**Script:** `python-backend/scripts/step10b_tariff_rate_population.py`
+
+Generates tariff_rate rows for all clause_tariff entries that have a `base_rate` but no corresponding tariff_rate rows.
+
+**Two row types:**
+
+1. **Annual rows** — standing/escalated rate per contract year
+   - For PERCENTAGE escalation: creates rows for Years 1..N (up to current+1)
+   - Formula: `rate_year_n = base_rate × (1 + escalation_rate)^(n-1)`
+   - For flat tariffs (NONE/unknown): single row for current year
+   - Period boundaries: `valid_from + (year-1)` to `valid_from + year - 1 day`
+   - Conflict key: `(clause_tariff_id, contract_year) WHERE rate_granularity = 'annual'`
+
+2. **Monthly rows** — FX-converted amounts for local-currency tariffs (non-USD only)
+   - One row per exchange_rate record for that currency
+   - `local_rate` = escalated rate for that month's operating year
+   - `hard_rate` = `local_rate / fx_rate` (USD equivalent)
+   - Conflict key: `(clause_tariff_id, billing_month) WHERE rate_granularity = 'monthly'`
+
+**Date resolution order:** `clause_tariff.valid_from` → `project.cod_date` → `contract.effective_date` → derived from `end_date - term_years`
+
+**Skipped:** REBASED_MARKET_PRICE escalation type (needs external MRP data feed, handled by MRP engine)
+
+**Currency 4-column model:**
+- USD tariffs: all 4 effective_rate columns = same value, `contract_role = 'hard'`
+- Local-currency tariffs: annual rows set `hard_rate = local_rate` (placeholder); monthly rows compute actual FX conversion, `contract_role = 'local'`
+
+**Side effects:** Updates `clause_tariff.valid_from` where NULL but resolvable from project/contract dates.
+
 ### Step 11: Contract Digitization — PPA Parsing (Stage D, Final)
 
 **Source:** Customer Offtake Agreements/*.pdf
@@ -723,6 +782,41 @@ Import endpoint: `POST /api/projects/{project_id}/plant-performance/import`
 6. Update `clause_tariff.base_rate` from PRICING clauses (for Year 1 / contractual base rate)
 7. Update `production_guarantee` if contractual guaranteed kWh found in PPA
 
+#### Parsing Principles (established from MB01 review)
+
+| Rule | Detail |
+|------|--------|
+| **Annexure extraction** | Two-pass mode now runs post-processing (targeted extraction + validation) which explicitly scans exhibits/schedules/appendices. Annexures C (Pricing), E (Energy Output), F (Early Termination), H (Required Energy Output) contain critical tariff formulas. |
+| **SSA → PPA alias** | SSA (Solar Service Agreement) maps to PPA contract_type in the lookup. No separate contract_type row needed. |
+| **Counterparty = buyer** | The buyer/offtaker/customer is the counterparty. The seller (CBE/Starsight subsidiary) is the organization — never auto-create as counterparty. Matching order: buyer first, then seller. |
+| **Dual-date extraction** | Extract both `execution_date` (signature) and `effective_date` (commencement/COD) separately. `contract.effective_date` stores the signature date. Both stored in `extraction_metadata`. |
+| **clause_tariff required fields** | Every clause_tariff must have: `organization_id`, non-null `tariff_group_key`, `valid_from`/`valid_to` (from COD + term_years), `market_ref_currency_id` (for MRP-based tariffs). |
+| **OY derivation** | Operating Year is always computed from COD: `OY_n = floor(months_since_cod / 12) + 1`. Months before COD = OY 0 (early_ops). Never let stale DB values override. |
+| **Billing allocation** | When per-product kWh breakdown is unavailable, leave product amounts as null. Never multiply total actual kWh by rate for every metered product (duplicates amounts). |
+| **Available energy** | SAGE meter_readings.csv may not include available energy lines — fall back to Operations Plant Performance Workbook. Performance queries must include `energy_category IN ('metered', 'available')`. |
+
+### Step 12: Sage Business Partner Import
+
+**Source:** `CBE_data_extracts/SageBPs.csv`
+**Tables:** `counterparty` (insert new rows with `sage_bp_code`)
+**Script:** `python-backend/scripts/step12_sage_bp_import.py`
+**Prerequisite:** Migration `058_sage_bp_import.sql` (adds `sage_bp_code` column, counterparty_types)
+
+Imports all Sage business partners as counterparties, classifying each into one of four types:
+
+| Type | Rule | Examples |
+|------|------|----------|
+| **INTERNAL** | Sage code matches `^CB*`, country codes (`KEN00`, `GHA00`, etc.), or known CBE entities | CBEH0, CBMM0, KEN00 |
+| **TAKEON** | Matches `^Z[A-Z]{2}T(OC\|OS)$` pattern (Sage takeon placeholders) | ZEHTOC, ZNITOC |
+| **OFFTAKER** | In `KNOWN_OFFTAKER_CODES` set (~35 project sage_ids + sub-customer codes) | MB01, NC02, XFAB |
+| **VENDOR** | Default fallback — everything else | Suppliers, service providers |
+
+**Country inference:** Derived from Sage code prefix (e.g., `KES*` → Kenya, `GHS*` → Ghana, `NIS*` → Nigeria, ~20 prefix mappings).
+
+**Idempotency:** Skips entries where `sage_bp_code` already exists in DB. Also deduplicates within the CSV itself.
+
+**Note:** Step 12 is org-wide (not per-project). Run once per batch, not per project.
+
 ---
 
 ## 6. Pipeline by Project Type
@@ -730,7 +824,7 @@ Import endpoint: `POST /api/projects/{project_id}/plant-performance/import`
 ### Type A: Full Pipeline (CSV + PPA)
 
 Projects with contract lines, meter readings, AND PPA documents.
-**Pipeline:** Steps 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11
+**Pipeline:** Steps 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 10b → 11 → 12
 
 Projects: KAS01, NBL01, LOI01, CAL01, ERG, GBL01, GC01, IVL01, JAB01, MB01, MF01, MIR01, MP01, MP02, NBL02, NC02, NC03, QMM01, TBM01, UGL01, UNSOS, UTK01, XF-AB
 
@@ -915,11 +1009,31 @@ Sonnet 4.5 max output ~16K tokens. Contracts with 130+ clauses may truncate. Rep
 
 The Plant Performance Workbook contains actual GHI irradiance and available energy data not present in meter readings CSV. Import endpoint must run after meter_aggregate base load (Step 3) to avoid overwriting CSV-sourced readings.
 
-**Status (2026-03-09):**
+**Status (2026-03-10):**
 - `meter_aggregate` base load COMPLETE (600 rows from CSV, Step 9 Phase A)
 - `energy_comparison` computed from meter_aggregate + production_forecast (Step 9 Phase C)
-- **Still needed:** GHI irradiance import from PPW project tabs → `meter_aggregate.ghi_irradiance_wm2` / `poa_irradiance_wm2`
-- Once irradiance is populated: `actual_pr`, `irr_comparison`, `pr_comparison` can be computed in `plant_performance`
+- **Forecast POA + PR POA now captured** (2026-03-10): Steps 5 and 6 updated to extract `forecast_poa_irradiance` and `forecast_pr_poa` from Summary-Performance tab blocks and Tech Model columns. DB column `production_forecast.forecast_pr_poa` added in migration 033.
+- **Still needed:** GHI/POA irradiance import from PPW project tabs → `meter_aggregate.ghi_irradiance_wm2` / `poa_irradiance_wm2` (actual measured values, not forecast)
+- Once actuals irradiance is populated: `actual_pr`, `irr_comparison`, `pr_comparison` can be computed in `plant_performance`
+
+### 9.11 PPW Data Completeness Checklist
+
+The PPW contains **10 data fields per project-month** across Summary-Performance blocks and Tech Model columns. Use this checklist to verify that all fields are captured in the pipeline:
+
+| # | PPW Source | DB Column | Captured By | Status |
+|---|-----------|-----------|-------------|--------|
+| 1 | Date | `forecast_month` | Step 5 (Summary), Step 6 (Tech Model) | ✅ |
+| 2 | OY | `operating_year` | Step 5 (gap-fill), Step 6 (Tech Model) | ✅ |
+| 3 | Forecast Energy (kWh) | `forecast_energy_kwh` | Step 5 | ✅ |
+| 4 | GHI Irradiance (Wh/m²) | `forecast_ghi_irradiance` | Step 5 (÷1000), Step 6 (enrichment) | ✅ |
+| 5 | POA Irradiance (Wh/m²) | `forecast_poa_irradiance` | Step 5 (÷1000), Step 6 (enrichment) | ✅ |
+| 6 | PR GHI (%) | `forecast_pr` | Step 5 (normalize), Step 6 (enrichment) | ✅ |
+| 7 | PR POA (%) | `forecast_pr_poa` | Step 5 (normalize), Step 6 (enrichment) | ✅ |
+| 8 | Degradation Factor | `degradation_factor` | Step 6 (from site_params) | ✅ |
+| 9 | Per-phase breakdown | `source_metadata.tech_model` | Step 6 (JSONB) | ✅ |
+| 10 | Days in month | — | Not needed (derivable from date) | N/A |
+
+**Frontend display:** The Performance tab shows Forecast POA and PR POA columns alongside GHI equivalents. The API (`GET /api/projects/{id}/plant-performance`) returns `forecast_pr_poa` in the `PerformanceMonth` response.
 
 ---
 
@@ -1050,3 +1164,162 @@ When a project has a site-level available line that decomposes into per-meter ch
 - Children: `parent_contract_line_id = mother.id`, `meter_id` set when available
 
 Established in migration 047 (MOH01).
+
+---
+
+## Batch Rollout Runner
+
+The batch runner script `python-backend/scripts/run_cbe_rollout.py` automates executing Steps 5→6→8→10b→11→12 across 21 projects in complexity-ordered batches:
+
+| Batch | Description | Projects |
+|-------|-------------|----------|
+| 0 | Re-run Pilots (PPA on hold) | LOI01, NBL01 |
+| 1 | Single-PPA Kenya/KES | MF01, MP01, MP02, NC02, NC03 |
+| 2 | Multi-PPA + simple non-Kenya | UTK01, ERG, TBM01, NBL02, IVL01 |
+| 3 | Multi-PPA, more lines | CAL01, MIR01, UNSOS, JAB01 |
+| 4 | Ghana cluster (GHS) | GC01, UGL01, GBL01 |
+| 5 | Most complex | QMM01, XF-AB |
+
+```bash
+cd python-backend
+python scripts/run_cbe_rollout.py --plan                          # Show rollout plan
+python scripts/run_cbe_rollout.py --batch 1 --dry-run             # Dry run Batch 1
+python scripts/run_cbe_rollout.py --project MF01                  # Single project
+python scripts/run_cbe_rollout.py --batch 1                       # Run Batch 1
+python scripts/run_cbe_rollout.py --batch 1 --steps 5,6           # Specific steps only
+python scripts/run_cbe_rollout.py --batch 1 --resume-from NC02    # Resume mid-batch
+python scripts/run_cbe_rollout.py --all                           # Run all batches
+```
+
+Reports written to `python-backend/reports/cbe-population/rollout_YYYY-MM-DD_HHMMSS.json`.
+
+---
+
+# Part B: Recurring Monthly Live Operations
+
+> This section documents the live data pipeline that replaces the one-time CBE scripts for ongoing monthly billing.
+
+## B.1 Lifecycle Categories
+
+All FrontierMind data tables fall into one of five lifecycle categories:
+
+| Category | Description | Examples |
+|----------|-------------|---------|
+| **Baseline Master** | Set once during project onboarding | `project`, `contract`, `contract_line`, `meter`, `production_forecast` |
+| **Slow-Changing Config** | Updated when contracts change or tax rules recalibrated | `contract_amendment`, `clause_tariff`, `billing_tax_rule` |
+| **Live External Input** | Pushed by clients/operations monthly via API | `exchange_rate`, `reference_price`, `meter_aggregate` |
+| **Live Derived** | Computed by FM services from upstream inputs | `tariff_rate`, `plant_performance`, `expected_invoice_header/line_item` |
+| **System / Lookup** | Seeded once, rarely changes | `billing_period`, `currency`, `tariff_type`, `meter_type` |
+
+## B.2 Monthly Dependency Graph (DAG)
+
+```
+                    ┌──────────────────┐
+                    │   LIVE INPUTS    │
+                    │   (external)     │
+                    └────────┬─────────┘
+           ┌─────────┬──────┼──────┬─────────┐
+           ▼         ▼      ▼      ▼         ▼
+      exchange_   reference  meter_    ops actuals
+      rate        _price     aggregate (irradiance
+      (floating   (floating            via meter_
+       only)       only)               aggregate)
+           │         │      │              │
+           └────┬────┘      └──────┬───────┘
+                │                  │
+                ▼                  ▼
+         ┌─────────────┐   ┌──────────────────┐
+         │ tariff_rate  │   │ plant_performance │
+         │ generation   │   │ computation       │
+         └──────┬──────┘   └──────────────────┘
+                │                  │
+                ▼                  │ (independent)
+         ┌─────────────────┐      │
+         │ expected_invoice │      │
+         │ generation       │      │
+         │ Does NOT depend  │      │
+         │ on plant_perf ───┼──────┘
+         └─────────────────┘
+```
+
+**Key design decisions:**
+- `plant_performance` and `expected_invoice_*` are **parallel branches**, not sequential
+- `reference_price → tariff_rate` is **conditional** (only for REBASED_MARKET_PRICE; deterministic tariffs skip MRP and FX)
+- `exchange_rate` is only a prerequisite for **floating tariffs** — deterministic-only projects never block on FX
+- `expected_invoice_header` + `_line_item` are **one generation step**
+- `actual_availability_pct` is a `plant_performance` column, not `meter_aggregate` — ops availability enters via manual performance input or source_metadata on billing-reads
+- Irradiance (`ghi_irradiance_wm2`, `poa_irradiance_wm2`) is stored on `meter_aggregate` and read by `PerformanceService`
+
+## B.2.1 Prerequisite Gates by Tariff Family
+
+| Tariff Family | FX Required? | MRP Required? | Meter Data Required? |
+|--------------|-------------|--------------|---------------------|
+| Deterministic (NONE, FIXED_INCREASE, FIXED_DECREASE, PERCENTAGE) | No | No | Yes (for invoice) |
+| Floating (REBASED_MARKET_PRICE, FLOATING_GRID, etc.) | Yes | Yes | Yes (for invoice) |
+| US_CPI | Blocked — external CPI feed not yet supported | N/A | Yes (for invoice) |
+
+## B.3 API Endpoint Reference
+
+### Live Input Endpoints (API-key auth via `require_api_key`)
+
+| Endpoint | Table | Scope |
+|----------|-------|-------|
+| `POST /api/ingest/fx-rates` | `exchange_rate` | `fx_rates` |
+| `POST /api/ingest/reference-prices` | `reference_price` | `reference_prices` |
+| `POST /api/ingest/billing-reads` | `meter_aggregate` | `billing_reads` |
+
+### Compute Endpoints (org-header auth)
+
+| Endpoint | Service | Table |
+|----------|---------|-------|
+| `POST /api/projects/{id}/billing/generate-tariff-rates` | `TariffRateService` | `tariff_rate` |
+| `POST /api/projects/{id}/plant-performance/compute` | `PerformanceService` | `plant_performance` |
+| `POST /api/projects/{id}/billing/generate-expected-invoice` | `InvoiceService` | `expected_invoice_*` |
+| `POST /api/projects/{id}/billing/run-cycle` | `BillingCycleOrchestrator` | All derived tables |
+
+## B.4 Recompute Rules
+
+| Upstream Change | Downstream Effect |
+|----------------|-------------------|
+| `exchange_rate` updated | Supersede `tariff_rate` → re-generate `expected_invoice_*` |
+| `reference_price` updated | Supersede `tariff_rate` → re-generate `expected_invoice_*` |
+| `meter_aggregate` updated | Recompute `plant_performance` AND re-generate `expected_invoice_*` |
+| `billing_tax_rule` updated | Re-generate `expected_invoice_*` |
+| `tariff_rate` updated | Re-generate `expected_invoice_*` |
+
+Use `force_refresh=true` on the `run-cycle` endpoint to trigger full recomputation.
+
+## B.5 Service Implementation Files
+
+| Service | File |
+|---------|------|
+| `TariffRateService` | `python-backend/services/billing/tariff_rate_service.py` |
+| `PerformanceService` | `python-backend/services/billing/performance_service.py` |
+| `InvoiceService` | `python-backend/services/billing/invoice_service.py` |
+| `BillingCycleOrchestrator` | `python-backend/services/billing/billing_cycle_orchestrator.py` |
+| `GenericBillingAdapter` | `data-ingestion/processing/adapters/generic_billing_adapter.py` |
+
+## B.6 Adapter Framework
+
+The billing-reads ingestion endpoint uses an adapter pattern for multi-client support.
+The adapter registry is in `data-ingestion/processing/adapters/__init__.py`.
+
+| Adapter | Source Type | Description |
+|---------|-----------|-------------|
+| `CBEBillingAdapter` | `snowflake` | Maps CBE SCREAMING_SNAKE_CASE → canonical; resolves via `tariff_group_key` / `bill_date` |
+| `GenericBillingAdapter` | `generic` | Passthrough for clients sending canonical fields; resolves via `bill_date` derived from `period_end`, or pre-resolved FKs |
+
+**Generic adapter FK resolution strategy:**
+- If caller provides `billing_period_id` and `contract_line_id` directly, they pass through unchanged
+- Otherwise, `bill_date` is derived from `period_end` for the standard resolver, and `tariff_group_key`/`contract_line_number` drive contract_line resolution
+- `meter_sage_id` resolves to `meter_id` via the resolver
+
+## B.7 Ops Actuals Data Path
+
+| Field | Storage Location | Ingestion Path |
+|-------|-----------------|----------------|
+| `ghi_irradiance_wm2` | `meter_aggregate` column | `billing-reads` or manual performance API |
+| `poa_irradiance_wm2` | `meter_aggregate` column | `billing-reads` or manual performance API |
+| `actual_availability_pct` | `plant_performance` column | Manual performance API (`POST .../plant-performance/manual`) or `source_metadata` on billing-reads for downstream use |
+
+**Note:** `actual_availability_pct` is NOT a `meter_aggregate` column. The generic adapter accepts it in the payload for validation but routes it to `source_metadata` JSONB rather than a top-level column.
