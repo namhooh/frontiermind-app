@@ -105,13 +105,24 @@ TECH_MODEL_COLUMNS: List[Tuple[str, str]] = [
     ("forcast combined", "forecast_energy_combined_kwh"),
     ("forecast combined", "forecast_energy_combined_kwh"),
     ("forecast energy", "forecast_energy_combined_kwh"),
-    # Forecast irradiance
+    # Irradiance — "irrad" (actual) MUST come before "irr" (forecast) since
+    # "ghi irr" is a substring of "ghi irrad" and would greedily match actual columns.
+    # Phase-specific forecast patterns are safe (contain "phase" which actual columns lack).
+    ("ghi irr phase 2", "forecast_ghi_phase2_wm2"),
     ("ghi irr phase 1", "forecast_ghi_wm2"),
     ("ghi irr phase", "forecast_ghi_wm2"),
+    ("poa irr phase 2", "forecast_poa_phase2_wm2"),
     ("poa irr phase 1", "forecast_poa_wm2"),
     ("poa irr phase", "forecast_poa_wm2"),
+    # Actual irradiance — before generic "irr" to prevent greedy match
+    ("ghi irrad", "actual_ghi_wm2"),
+    ("poa irrad", "actual_poa_wm2"),
+    # Generic forecast irradiance (fallback — only matches "GHI Irr", not "GHI Irrad")
+    ("ghi irr", "forecast_ghi_wm2"),
+    ("poa irr", "forecast_poa_wm2"),
     # Forecast PR
     ("pr ghi", "forecast_pr"),
+    ("pr poa", "forecast_pr_poa"),
     # Actual per-phase meter readings
     ("phase-1 invoiced", "phase1_invoiced_kwh"),
     ("phase 1 invoiced", "phase1_invoiced_kwh"),
@@ -120,12 +131,12 @@ TECH_MODEL_COLUMNS: List[Tuple[str, str]] = [
     # Actual aggregated
     ("phase 1 and 2 metered", "total_metered_kwh"),
     ("phase 1+2 metered", "total_metered_kwh"),
+    ("total metered energy", "total_metered_kwh"),
+    ("metered energy", "total_metered_kwh"),
     ("available energy", "available_energy_kwh"),
     ("total energy", "total_energy_kwh"),
-    # Actual irradiance
-    ("ghi irrad", "actual_ghi_wm2"),
-    ("poa irrad", "actual_poa_wm2"),
     # Actual PR / Availability
+    ("pr %", "actual_pr"),
     ("availability %", "actual_availability_pct"),
     ("availability%", "actual_availability_pct"),
     # Comparisons
@@ -306,8 +317,8 @@ class PlantPerformanceParser:
         for i, row in enumerate(rows):
             if not row:
                 continue
-            # Stringify all cells for matching
-            cells = [str(c).strip() if c is not None else "" for c in row]
+            # Stringify all cells for matching — normalize Excel newlines
+            cells = [str(c).strip().replace('\n', ' ').replace('\r', '') if c is not None else "" for c in row]
             cells_lower = [c.lower() for c in cells]
 
             # Must have "Date" and "OY" columns
@@ -331,14 +342,13 @@ class PlantPerformanceParser:
                 # Check against Technical Model column patterns
                 for pattern, field_name in TECH_MODEL_COLUMNS:
                     if pattern in cell_lower:
-                        # Avoid duplicate assignments — first match wins
                         if field_name not in col_map.values():
                             col_map[j] = field_name
+                        elif field_name == "total_metered_kwh":
+                            # Additional metered energy column → sub-meter
+                            # Store as _sub_meter:<header> for per-meter extraction
+                            col_map[j] = f"_sub_meter:{cells[j]}"
                         break
-
-                # Also detect PR % column (exact "pr %" match for actual PR)
-                if cell_lower == "pr %" and "actual_pr" not in col_map.values():
-                    col_map[j] = "actual_pr"
 
             # Need at least 3 mapped columns plus date + oy
             if date_col is not None and oy_col is not None and len(col_map) >= 3:
@@ -431,8 +441,15 @@ class PlantPerformanceParser:
 
             # Extract all mapped fields
             values: Dict[str, Any] = {}
+            sub_meters: Dict[str, Any] = {}
             for j, field in col_map.items():
-                if field.startswith("_"):
+                if field == "_date" or field == "_oy":
+                    continue
+                if field.startswith("_sub_meter:"):
+                    # Named sub-meter column → store in sub_meter_kwh dict
+                    if j < len(row):
+                        header_name = field[len("_sub_meter:"):]
+                        sub_meters[header_name] = _safe_float(row[j])
                     continue
                 if j >= len(row):
                     continue
@@ -440,7 +457,7 @@ class PlantPerformanceParser:
                 if field == "comments":
                     val = row[j]
                     values[field] = str(val).strip() if val else None
-                elif field in ("forecast_pr", "actual_pr", "actual_availability_pct"):
+                elif field in ("forecast_pr", "forecast_pr_poa", "actual_pr", "actual_availability_pct"):
                     val = _safe_float(row[j])
                     if val is not None:
                         values[field] = val if val <= 1.0 else val / 100.0
@@ -454,8 +471,13 @@ class PlantPerformanceParser:
                 else:
                     values[field] = _safe_float(row[j])
 
+            if sub_meters:
+                values["sub_meter_kwh"] = sub_meters
+
             # Need at least one data value beyond date/oy
-            if not any(v is not None for v in values.values()):
+            data_values = [v for k, v in values.items() if k != "sub_meter_kwh"]
+            has_sub_data = any(v is not None for v in sub_meters.values())
+            if not any(v is not None for v in data_values) and not has_sub_data:
                 continue
 
             tech_rows.append(TechnicalModelRow(
@@ -535,7 +557,9 @@ class PlantPerformanceParser:
         ("VARIANCE", None),  # Skip variance blocks — set current_block_field=None
         ("ACTUAL IRRADIANCE", "actual_irradiance_wm2"),
         ("EXPECTED IRRADIANCE", "expected_irradiance_wm2"),
+        ("EXPECTED POA", "expected_poa_irradiance_wm2"),
         ("PLANT AVAILABILITY", "plant_availability_pct"),
+        ("EXPECTED PR POA", "expected_pr_poa_pct"),
         ("EXPECTED PR", "expected_pr_pct"),
     ]
 
@@ -646,7 +670,7 @@ class PlantPerformanceParser:
                     continue
 
                 # Normalize percentage fields
-                if current_block_field in ("plant_availability_pct", "expected_pr_pct"):
+                if current_block_field in ("plant_availability_pct", "expected_pr_pct", "expected_pr_poa_pct"):
                     if val > 1.0:
                         val = val / 100.0
 

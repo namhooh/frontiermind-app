@@ -484,8 +484,10 @@ class SummaryPerformanceRow(BaseModel):
     expected_output_kwh: Optional[float] = None
     actual_irradiance_wm2: Optional[float] = None
     expected_irradiance_wm2: Optional[float] = None
+    expected_poa_irradiance_wm2: Optional[float] = None
     plant_availability_pct: Optional[float] = None
     expected_pr_pct: Optional[float] = None
+    expected_pr_poa_pct: Optional[float] = None
 
 
 class WaterfallRow(BaseModel):
@@ -518,7 +520,10 @@ class TechnicalModelRow(BaseModel):
     forecast_energy_combined_kwh: Optional[float] = None
     forecast_ghi_wm2: Optional[float] = None
     forecast_poa_wm2: Optional[float] = None
+    forecast_ghi_phase2_wm2: Optional[float] = None
+    forecast_poa_phase2_wm2: Optional[float] = None
     forecast_pr: Optional[float] = None
+    forecast_pr_poa: Optional[float] = None
     # Actuals — per phase
     phase1_meter_opening: Optional[float] = None
     phase1_meter_closing: Optional[float] = None
@@ -534,6 +539,8 @@ class TechnicalModelRow(BaseModel):
     actual_poa_wm2: Optional[float] = None
     actual_pr: Optional[float] = None
     actual_availability_pct: Optional[float] = None
+    # Per-sub-meter kWh (named meters: header fragment → kWh)
+    sub_meter_kwh: Dict[str, Optional[float]] = Field(default_factory=dict)
     # Derived
     energy_comparison: Optional[float] = None
     irr_comparison: Optional[float] = None
@@ -595,11 +602,16 @@ class FieldVerification(BaseModel):
 
 
 class TariffTypeResult(BaseModel):
-    """Result of tariff type detection."""
-    energy_sale_type_id: Optional[str] = None  # FIXED_SOLAR, FLOATING_GRID, etc.
-    escalation_type_id: Optional[str] = None   # NONE, PERCENTAGE, US_CPI, etc.
-    formula_type: Optional[str] = None         # For logic_parameters
-    mrp_method: Optional[str] = None           # MRP calculation method for tariff engine
+    """Result of tariff type detection.
+
+    Post-059 taxonomy:
+      - escalation_type_code: pricing mechanism (FLOATING_GRID, PERCENTAGE, US_CPI, etc.)
+      - energy_sale_type_code: revenue/product type (ENERGY_SALES, BESS_LEASE, etc.)
+    """
+    escalation_type_code: Optional[str] = None   # NONE, PERCENTAGE, US_CPI, FLOATING_GRID, etc.
+    energy_sale_type_code: Optional[str] = None   # ENERGY_SALES, EQUIPMENT_RENTAL_LEASE, etc.
+    formula_type: Optional[str] = None            # For logic_parameters
+    mrp_method: Optional[str] = None              # MRP calculation method for tariff engine
     signals: Dict[str, Any] = Field(default_factory=dict)
     confidence: float = 0.75
 
