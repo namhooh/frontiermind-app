@@ -44,7 +44,69 @@ function getLocationUrl(raw: unknown): string | null {
 
 const fmtNum2 = (v: number) => fmtNum(v, 2)
 const SUM_KEYS = ['forecast_energy_kwh', 'forecast_ghi_irradiance', 'forecast_poa_irradiance'] as const
-const AVG_KEY = 'forecast_pr'
+const AVG_KEYS = ['forecast_pr', 'forecast_pr_poa'] as const
+
+interface PhaseData {
+  capacity_kwp?: number
+  ghi_kwh_m2?: number
+  poa_kwh_m2?: number
+  energy_kwh?: number
+  pr_ghi?: number
+  pr_poa?: number
+}
+
+function PerPhaseSection({ forecasts }: { forecasts: Record<string, unknown>[] }) {
+  // Collect phase data from source_metadata.phases across filtered forecasts
+  const phaseRows = useMemo(() => {
+    // Find the first forecast row that has phases data
+    for (const f of forecasts) {
+      const meta = f.source_metadata as Record<string, unknown> | null
+      if (!meta) continue
+      const phases = meta.phases as Record<string, PhaseData> | undefined
+      if (!phases || Object.keys(phases).length < 2) continue
+      return phases
+    }
+    return null
+  }, [forecasts])
+
+  if (!phaseRows) return null
+
+  const entries = Object.entries(phaseRows).sort(([a], [b]) => a.localeCompare(b))
+
+  return (
+    <CollapsibleSection title="Per-Phase Irradiance & PR" defaultOpen={false}>
+      <div className="border border-slate-200 rounded-lg overflow-hidden">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-slate-50 border-b border-slate-200">
+              <th className="text-left px-4 py-2 font-medium text-slate-600">Phase</th>
+              <th className="text-right px-4 py-2 font-medium text-slate-600">Capacity (kWp)</th>
+              <th className="text-right px-4 py-2 font-medium text-slate-600">GHI (kWh/m²)</th>
+              <th className="text-right px-4 py-2 font-medium text-slate-600">POA (kWh/m²)</th>
+              <th className="text-right px-4 py-2 font-medium text-slate-600">PR GHI (%)</th>
+              <th className="text-right px-4 py-2 font-medium text-slate-600">PR POA (%)</th>
+              <th className="text-right px-4 py-2 font-medium text-slate-600">Energy (kWh)</th>
+            </tr>
+          </thead>
+          <tbody>
+            {entries.map(([phase, data]) => (
+              <tr key={phase} className="border-b border-slate-100 last:border-b-0">
+                <td className="px-4 py-2.5 text-slate-800 font-medium capitalize">{phase.replace('phase', 'Phase ')}</td>
+                <td className="px-4 py-2.5 text-right font-mono text-xs text-slate-900">{formatNumber(data.capacity_kwp)}</td>
+                <td className="px-4 py-2.5 text-right font-mono text-xs text-slate-900">{data.ghi_kwh_m2 != null ? fmtNum(data.ghi_kwh_m2, 1) : '—'}</td>
+                <td className="px-4 py-2.5 text-right font-mono text-xs text-slate-900">{data.poa_kwh_m2 != null ? fmtNum(data.poa_kwh_m2, 1) : '—'}</td>
+                <td className="px-4 py-2.5 text-right font-mono text-xs text-slate-900">{data.pr_ghi != null ? `${fmtNum(data.pr_ghi * 100, 1)}%` : '—'}</td>
+                <td className="px-4 py-2.5 text-right font-mono text-xs text-slate-900">{data.pr_poa != null ? `${fmtNum(data.pr_poa * 100, 1)}%` : '—'}</td>
+                <td className="px-4 py-2.5 text-right font-mono text-xs text-slate-900">{data.energy_kwh != null ? formatNumber(data.energy_kwh) : '—'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-xs text-slate-400 mt-2">PR = forecast_energy_kwh / (irradiance_kWh_m² × capacity_kWp)</p>
+    </CollapsibleSection>
+  )
+}
 
 export function TechnicalTab({ project, contracts, assets, meters, tariffs, forecasts: rawForecasts, guarantees, assetColumns, meterColumns, forecastColumns, guaranteeColumns, projectId, onSaved, editMode }: TechnicalTabProps) {
   // Derive summary values from project + assets + contracts
@@ -168,20 +230,31 @@ export function TechnicalTab({ project, contracts, assets, meters, tariffs, fore
       const total = forecasts.reduce((sum, r) => sum + (Number(r[key]) || 0), 0)
       footer[key] = fmtNum2(total)
     }
-    const prValues = forecasts.map((r) => Number(r[AVG_KEY])).filter((v) => !isNaN(v) && v > 0)
-    if (prValues.length > 0) {
-      const avg = prValues.reduce((s, v) => s + v, 0) / prValues.length
-      footer[AVG_KEY] = `${fmtNum2(avg * 100)} (avg)`
+    for (const key of AVG_KEYS) {
+      const prValues = forecasts.map((r) => Number(r[key])).filter((v) => !isNaN(v) && v > 0)
+      if (prValues.length > 0) {
+        const avg = prValues.reduce((s, v) => s + v, 0) / prValues.length
+        footer[key] = `${fmtNum2(avg * 100)} (avg)`
+      }
     }
     return footer
   }, [forecasts])
 
+  const capacityBreakdown = project.installed_capacity_breakdown as { label: string; kwp: number }[] | null
+
   const summaryRows: { label: string; detail: string; value: React.ReactNode; indent?: boolean }[] = [
-    {
-      label: 'Installed DC capacity',
-      detail: 'Installed capacity in kWp',
-      value: `${formatNumber(dcCapacity)} kWp`,
-    },
+    ...(Array.isArray(capacityBreakdown) && capacityBreakdown.length > 0
+      ? capacityBreakdown.map(entry => ({
+          label: `Installed DC capacity – ${entry.label}`,
+          detail: 'Installed capacity in kWp',
+          value: `${formatNumber(entry.kwp)} kWp`,
+        }))
+      : [{
+          label: 'Installed DC capacity',
+          detail: 'Installed capacity in kWp',
+          value: `${formatNumber(dcCapacity)} kWp`,
+        }]
+    ),
     {
       label: 'Number of PV modules',
       detail: '# of modules',
@@ -370,6 +443,9 @@ export function TechnicalTab({ project, contracts, assets, meters, tariffs, fore
           footerRow={forecastFooter}
         />
       </CollapsibleSection>
+
+      {/* Per-Phase Irradiance & PR (multi-phase projects only) */}
+      <PerPhaseSection forecasts={forecasts} />
 
       {/* Production Guarantees */}
       <CollapsibleSection

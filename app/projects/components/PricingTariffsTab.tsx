@@ -4,7 +4,7 @@ import { useState, useMemo, Fragment } from 'react'
 import { ChevronRight, Plus, Trash2 } from 'lucide-react'
 import { toast } from 'sonner'
 import { IS_DEMO } from '@/lib/demoMode'
-import type { ProjectDashboardResponse, MRPObservation, SubmissionTokenItem } from '@/lib/api/adminClient'
+import type { ProjectDashboardResponse, MRPObservation, SubmissionTokenItem, TariffFormula, TariffFormulaVariable } from '@/lib/api/adminClient'
 import { adminClient } from '@/lib/api/adminClient'
 import { CollapsibleSection } from './CollapsibleSection'
 import { EditableCell } from './EditableCell'
@@ -24,7 +24,18 @@ function formatBillingMonth(v: unknown): string {
   return formatMonth(String(v)).replace('—', '')
 }
 
+/** Format a per-kWh rate to consistent 4 decimal places. */
+function fmtRate(v: unknown): string {
+  if (v == null || v === '') return '—'
+  const n = Number(v)
+  if (isNaN(n)) return '—'
+  return n.toFixed(4)
+}
+
 // ---------------------------------------------------------------------------
+// MRP-family escalation codes (REBASED_MARKET_PRICE + FLOATING sub-types)
+const REBASED_CODES = new Set(['REBASED_MARKET_PRICE', 'FLOATING_GRID', 'FLOATING_GENERATOR', 'FLOATING_GRID_GENERATOR'])
+
 // Static option sets for fields not backed by DB lookup tables
 // ---------------------------------------------------------------------------
 
@@ -42,6 +53,7 @@ const BILLING_FREQUENCY_OPTS = [
   { value: 'Annually', label: 'Annually' },
 ]
 
+// Legacy codes (ENERGY, CAPACITY from migration 022) no longer exist after 059 — keep as safety filter
 const HIDDEN_TARIFF_CODES = new Set(['ENERGY', 'CAPACITY'])
 
 /** Country → local currency fallback map (last-resort when tariff_rates has no currency). */
@@ -60,10 +72,31 @@ const TARIFF_COMPONENTS_TO_ADJUST_OPTS = [
   { value: 'Solar Tariff + Floor Tariff + Ceiling Tariff', label: 'Solar Tariff + Floor Tariff + Ceiling Tariff' },
 ]
 
-/** Normalize legacy "Tarrif" misspellings to "Tariff" so stored values match dropdown options. */
+/** Normalize legacy "Tarrif" misspellings and snake_case to match dropdown options. */
 function normalizeTariffComponent(v: unknown): string | undefined {
   if (v == null) return undefined
-  return String(v).replace(/Tarrif/g, 'Tariff')
+  let s = String(v)
+  // snake_case → Title Case (e.g. "floor_tariff" → "Floor Tariff")
+  if (s.includes('_')) s = s.split('_').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ')
+  // Fix misspelling "Tarrif" → "Tariff"
+  s = s.replace(/Tarrif/gi, 'Tariff')
+  // Capitalize first letter of each word for consistency
+  s = s.replace(/\b[a-z]/g, c => c.toUpperCase())
+  return s
+}
+
+/** Normalize legacy frequency values (lowercase/variant) to match dropdown options. */
+const FREQUENCY_ALIASES: Record<string, string> = {
+  'annual': 'Annually', 'annually': 'Annually',
+  'quarterly': 'Quarterly', 'quarter': 'Quarterly',
+  'monthly': 'Monthly', 'month': 'Monthly',
+  'semi-annually': 'Semi-Annually', 'semi-annual': 'Semi-Annually',
+  'semiannually': 'Semi-Annually', 'biannually': 'Semi-Annually',
+}
+function normalizeFrequency(v: unknown): string | undefined {
+  if (v == null) return undefined
+  const s = String(v).trim()
+  return FREQUENCY_ALIASES[s.toLowerCase()] ?? s
 }
 
 // Component tariff suffixes / patterns to exclude from display (keep only MAIN tariffs)
@@ -101,7 +134,7 @@ function TariffDetailPanel({ t, pid, rate_periods, monthly_rates, onSaved, editM
   const localCurrency = currentMonthlyRate?.currency_code ? ` (${currentMonthlyRate.currency_code})` : ''
   const baseCurrency = t.currency_code ? ` (${t.currency_code})` : ''
   const hardCcy = hardCurrencyCode ? ` (${hardCurrencyCode})` : baseCurrency
-  const isRebased = String(t.escalation_type_code ?? '') === 'REBASED_MARKET_PRICE'
+  const isRebased = REBASED_CODES.has(String(t.escalation_type_code ?? ''))
   const monthSuffix = currentMonthlyRate?.billing_month ? ` — ${formatBillingMonth(currentMonthlyRate.billing_month)}` : ''
   const fxRate = currentMonthlyRate?.exchange_rate != null ? Number(currentMonthlyRate.exchange_rate) : null
   const effectiveLocal = currentMonthlyRate?.effective_tariff_local != null ? Number(currentMonthlyRate.effective_tariff_local) : null
@@ -113,7 +146,7 @@ function TariffDetailPanel({ t, pid, rate_periods, monthly_rates, onSaved, editM
         ...(currentMonthlyRate ? [[`Effective Rate${localCurrency}${monthSuffix}`, currentMonthlyRate.effective_tariff_local] as FieldDef] : []),
         ...(isRebased && fxRate != null ? [
           [`Exchange Rate${localCurrency}/${baseCurrency || ' (USD)'}${monthSuffix}`, fxRate] as FieldDef,
-          [`Effective Rate${baseCurrency || ' (USD)'}${monthSuffix}`, effectiveUsd != null ? Number(effectiveUsd.toFixed(6)) : null] as FieldDef,
+          [`Effective Rate${baseCurrency || ' (USD)'}${monthSuffix}`, effectiveUsd != null ? Number(effectiveUsd.toFixed(4)) : null] as FieldDef,
         ] : [
           [`Base Rate${baseCurrency}`, t.base_rate, { fieldKey: 'base_rate', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const }] as FieldDef,
         ]),
@@ -154,16 +187,17 @@ function TariffDetailPanel({ t, pid, rate_periods, monthly_rates, onSaved, editM
 // Non-energy tariff helpers & panel
 // ---------------------------------------------------------------------------
 
-const NON_ENERGY_TARIFF_CODES = new Set(['EQUIPMENT_RENTAL_LEASE', 'BESS_LEASE', 'LOAN'])
+// Post-059: revenue/product type codes live in energy_sale_type (not tariff_type)
+const NON_ENERGY_REVENUE_CODES = new Set(['EQUIPMENT_RENTAL_LEASE', 'BESS_LEASE', 'LOAN', 'OTHER_SERVICE'])
 
 function isNonEnergyTariff(t: R): boolean {
-  return NON_ENERGY_TARIFF_CODES.has(String(t.tariff_type_code ?? '').toUpperCase())
+  return NON_ENERGY_REVENUE_CODES.has(String(t.energy_sale_type_code ?? '').toUpperCase())
 }
 
-function NonEnergyTariffPanel({ t, pid, rate_periods, monthly_rates, onSaved, editMode, tariffTypeOpts, escalationTypeOpts }: {
+function NonEnergyTariffPanel({ t, pid, rate_periods, monthly_rates, onSaved, editMode, energySaleTypeOpts, escalationTypeOpts }: {
   t: R; pid: number; rate_periods: R[]; monthly_rates: R[]
   onSaved?: () => void; editMode?: boolean
-  tariffTypeOpts: { value: number | string; label: string }[]
+  energySaleTypeOpts: { value: number | string; label: string }[]
   escalationTypeOpts: { value: number | string; label: string }[]
 }) {
   const lp = (t.logic_parameters ?? {}) as R
@@ -180,7 +214,7 @@ function NonEnergyTariffPanel({ t, pid, rate_periods, monthly_rates, onSaved, ed
         [`Rate per Unit${baseCurrency}`, t.base_rate, { fieldKey: 'base_rate', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const }],
         ...(t.unit != null ? [['Unit', t.unit, { fieldKey: 'unit', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'text' as const }] as FieldDef] : []),
 
-        ['Service Type', t.tariff_type_code, { fieldKey: 'tariff_type_id', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'select' as const, options: tariffTypeOpts, selectValue: t.tariff_type_id }],
+        ['Revenue Type', t.energy_sale_type_name ?? t.energy_sale_type_code, { fieldKey: 'energy_sale_type_id', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'select' as const, options: energySaleTypeOpts, selectValue: t.energy_sale_type_id }],
         ...(t.currency_code != null ? [['Currency', t.currency_code] as FieldDef] : []),
         ['Escalation Type', t.escalation_type_code, { fieldKey: 'escalation_type_id', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'select' as const, options: escalationTypeOpts, selectValue: t.escalation_type_id }],
         ...(lp.escalation_value != null ? [['Escalation Value', lp.escalation_value, { fieldKey: 'lp_escalation_value', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const }] as FieldDef] : []),
@@ -366,6 +400,101 @@ function RateBoundsSchedule({ logicParameters, contractTermYears, codDate }: {
 }
 
 // ---------------------------------------------------------------------------
+// CPIEscalationSchedule — year-by-year CPI escalation from tariff_rate calc_detail
+// ---------------------------------------------------------------------------
+
+function CPIEscalationSchedule({ tariffRates, clauseTariffId, logicParameters, codDate }: {
+  tariffRates: R[]; clauseTariffId: unknown; logicParameters: R; codDate: string | null
+}) {
+  const cpiRates = tariffRates.filter((tr) =>
+    tr.clause_tariff_id === clauseTariffId &&
+    tr.rate_granularity === 'annual' &&
+    tr.formula_version === 'us_cpi_v1'
+  ).sort((a, b) => Number(a.contract_year) - Number(b.contract_year))
+
+  if (cpiRates.length === 0) return null
+
+  const subtype = String(logicParameters.cpi_escalation_subtype ?? 'base_rate')
+  const isFloorCeiling = subtype === 'floor_ceiling'
+
+  return (
+    <div className="mt-4">
+      <CollapsibleSection title={`CPI Escalation Schedule (${cpiRates.length} years)`} defaultOpen={false}>
+        <div className="mb-3">
+          <div className="flex flex-wrap gap-x-6 gap-y-1 text-xs text-slate-500">
+            {logicParameters.cpi_base_date != null && (
+              <span>CPI Base: <span className="font-medium text-slate-700">{String(logicParameters.cpi_base_date).slice(0, 7)}</span></span>
+            )}
+            {logicParameters.cpi_base_value != null && (
+              <span>Base Value: <span className="font-medium text-slate-700">{Number(logicParameters.cpi_base_value).toFixed(3)}</span></span>
+            )}
+            <span>Index: <span className="font-medium text-slate-700">CUUR0000SA0</span></span>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-slate-600">
+              <tr>
+                <th className="text-center px-4 py-2.5 font-medium">OY</th>
+                <th className="text-right px-4 py-2.5 font-medium">Period</th>
+                <th className="text-right px-4 py-2.5 font-medium">CPI Value</th>
+                <th className="text-right px-4 py-2.5 font-medium">CPI Factor</th>
+                {isFloorCeiling ? (<>
+                  <th className="text-right px-4 py-2.5 font-medium">Floor (USD)</th>
+                  <th className="text-right px-4 py-2.5 font-medium">Ceiling (USD)</th>
+                </>) : (
+                  <th className="text-right px-4 py-2.5 font-medium">Effective Rate</th>
+                )}
+                <th className="text-center px-4 py-2.5 font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {cpiRates.map((tr) => {
+                const cd = (tr.calc_detail ?? {}) as R
+                const cpiFactor = cd.cpi_factor != null ? Number(cd.cpi_factor) : null
+                const currentCpi = cd.current_cpi_value != null ? Number(cd.current_cpi_value) : null
+                const status = String(tr.calc_status ?? 'computed')
+                const periodStr = tr.period_start
+                  ? `${String(tr.period_start).slice(0, 10)}${tr.period_end ? ` — ${String(tr.period_end).slice(0, 10)}` : ''}`
+                  : '—'
+
+                return (
+                  <tr key={tr.contract_year as number} className={`hover:bg-slate-50 ${tr.is_current ? 'bg-blue-50/40' : ''}`}>
+                    <td className="px-4 py-2.5 text-center font-mono tabular-nums">{String(tr.contract_year)}</td>
+                    <td className="px-4 py-2.5 text-right text-xs text-slate-500 tabular-nums">{periodStr}</td>
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums">{currentCpi != null ? currentCpi.toFixed(3) : '—'}</td>
+                    <td className="px-4 py-2.5 text-right font-mono tabular-nums">{cpiFactor != null ? cpiFactor.toFixed(4) : '—'}</td>
+                    {isFloorCeiling ? (<>
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums font-medium">
+                        {cd.escalated_floor_usd != null ? `$${Number(cd.escalated_floor_usd).toFixed(4)}` : fmtRate(tr.effective_rate_contract_ccy)}
+                      </td>
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums font-medium">
+                        {cd.escalated_ceiling_usd != null ? `$${Number(cd.escalated_ceiling_usd).toFixed(4)}` : '—'}
+                      </td>
+                    </>) : (
+                      <td className="px-4 py-2.5 text-right font-mono tabular-nums font-medium">{fmtRate(tr.effective_rate_contract_ccy)}</td>
+                    )}
+                    <td className="px-4 py-2.5 text-center">
+                      {status === 'pending' ? (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">Pending CPI</span>
+                      ) : tr.is_current ? (
+                        <span className="inline-block w-2 h-2 rounded-full bg-blue-500" title="Current" />
+                      ) : (
+                        <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 text-green-700 border border-green-200">Computed</span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </CollapsibleSection>
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
 // ExcusedEventsList — bulleted list for excused_events
 // ---------------------------------------------------------------------------
 
@@ -449,9 +578,15 @@ function AddProductRow({ contractId, existingProductIds, billingProductOpts, onA
 // BillingProductCard — expandable card for a product + its tariffs
 // ---------------------------------------------------------------------------
 
-function BillingProductCard({ pw, pid, rate_periods, monthly_rates, contractLines, onSaved, editMode, isOpen, onToggle, onRemove, billingProductOpts, tariffTypeOpts, energySaleTypeOpts, escalationTypeOpts, currencyOpts, hardCurrencyCode }: {
+/** Formula types relevant to each product category — show only directly relevant formulas. */
+const ENERGY_PRODUCT_FORMULA_TYPES = new Set(['MRP_CALCULATION', 'MRP_BOUNDED', 'ENERGY_OUTPUT'])
+const AVAILABLE_ENERGY_FORMULA_TYPES = new Set(['DEEMED_ENERGY'])
+const MINIMUM_OFFTAKE_FORMULA_TYPES = new Set(['TAKE_OR_PAY'])
+
+function BillingProductCard({ pw, pid, rate_periods, monthly_rates, contractLines, tariffFormulas, onSaved, editMode, isOpen, onToggle, onRemove, billingProductOpts, tariffTypeOpts, energySaleTypeOpts, escalationTypeOpts, currencyOpts, hardCurrencyCode }: {
   pw: { product: R; tariffs: R[] }; pid: number; rate_periods: R[]; monthly_rates: R[]
   contractLines: R[]
+  tariffFormulas: TariffFormula[]
   onSaved?: () => void; editMode?: boolean; isOpen: boolean; onToggle: () => void; onRemove?: () => void
   billingProductOpts: { value: number | string; label: string }[]
   tariffTypeOpts: { value: number | string; label: string }[]
@@ -606,7 +741,7 @@ function BillingProductCard({ pw, pid, rate_periods, monthly_rates, contractLine
               pw.tariffs.map((t, j) => (
                 <div key={j} className={j > 0 ? 'mt-3 pt-3 border-t border-slate-100' : 'mt-2'}>
                   <div className="flex items-center gap-2 text-xs font-medium text-slate-400 uppercase mb-1">
-                    {str(t.tariff_type_name ?? t.tariff_type_code ?? 'Tariff')}
+                    {str(t.energy_sale_type_name ?? t.energy_sale_type_code ?? 'Tariff')}
                     {t.contract_amendment_id != null && (
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200 normal-case">
                         v{t.version != null ? String(t.version) : '2'} &mdash; Amended
@@ -617,7 +752,7 @@ function BillingProductCard({ pw, pid, rate_periods, monthly_rates, contractLine
                     <NonEnergyTariffPanel
                       t={t} pid={pid} rate_periods={rate_periods} monthly_rates={monthly_rates}
                       onSaved={onSaved} editMode={editMode}
-                      tariffTypeOpts={tariffTypeOpts} escalationTypeOpts={escalationTypeOpts}
+                      energySaleTypeOpts={energySaleTypeOpts} escalationTypeOpts={escalationTypeOpts}
                     />
                   ) : (
                     <TariffDetailPanel
@@ -631,97 +766,178 @@ function BillingProductCard({ pw, pid, rate_periods, monthly_rates, contractLine
             )
           )}
 
-          {/* Pricing Formula — shown for non-Available-Energy products */}
-          {!isAvailableEnergy && (() => {
-            const tariffWithFormula = pw.tariffs.find((t) => {
-              const lp = (t.logic_parameters ?? {}) as R
-              return lp.pricing_formula_text != null
-            })
-            if (!tariffWithFormula) return null
-            const lp = (tariffWithFormula.logic_parameters ?? {}) as R
-            return (
-              <div className="mt-3 pt-3 border-t border-slate-100">
-                <div className="text-xs font-medium text-slate-400 uppercase mb-2">Pricing Formula</div>
-                <div className="py-1">
-                  <dd className="text-sm text-slate-900">
-                    {editMode && tariffWithFormula.id != null ? (
-                      <EditableCell
-                        value={lp.pricing_formula_text as string | null ?? null}
-                        fieldKey="lp_pricing_formula_text"
-                        entity="tariffs"
-                        entityId={tariffWithFormula.id as number}
-                        projectId={pid}
-                        type="text"
-                        editMode={true}
-                        onSaved={onSaved}
-                      />
-                    ) : (
-                      <span className="whitespace-pre-line">{String(lp.pricing_formula_text).split('\n').map((line, i) => {
-                        const trimmed = line.trim().toLowerCase()
-                        const isMono = trimmed === 'or, if higher' || trimmed === 'but not exceeding'
-                        return (
-                          <Fragment key={i}>
-                            {i > 0 && '\n'}
-                            {isMono ? <span className="font-mono">{line}</span> : line}
-                          </Fragment>
-                        )
-                      })}</span>
-                    )}
-                  </dd>
-                </div>
-              </div>
-            )
-          })()}
-
-          {/* Available Energy Formula — only shown on the Available Energy product (ENER003) */}
+          {/* Billing Formulas — structured tariff_formula cards relevant to this product */}
           {(() => {
-            const productName = String(bp.product_name ?? bp.product_code ?? '')
-            if (!/available/i.test(productName)) return null
-            const aeTariff = pw.tariffs.find((t) => (t.logic_parameters as R)?.available_energy_method != null)
-            if (!aeTariff) return null
-            const lp = (aeTariff.logic_parameters ?? {}) as R
-            const formula = lp.available_energy_formula as string | undefined
-            const variables = lp.available_energy_variables as { symbol: string; definition: string; unit?: string }[] | undefined
-
+            const productCode = String(bp.product_code ?? '').toUpperCase()
+            const isMinOfftake = /offtake|take.or.pay/i.test(String(bp.product_name ?? '')) || productCode === 'ENER004'
+            const relevantTypes = isAvailableEnergy
+              ? AVAILABLE_ENERGY_FORMULA_TYPES
+              : isMinOfftake
+                ? MINIMUM_OFFTAKE_FORMULA_TYPES
+                : ENERGY_PRODUCT_FORMULA_TYPES
+            const productFormulas = tariffFormulas.filter(tf => relevantTypes.has(tf.formula_type))
+            if (productFormulas.length === 0) return null
             return (
-              <div className="mt-3 pt-3 border-t border-slate-100">
-                <div className="text-xs font-medium text-slate-400 uppercase mb-2">Available Energy Calculation</div>
-                <div className="py-1">
-                  <dd className="text-sm text-slate-900">
-                    {editMode && aeTariff.id != null ? (
-                      <EditableCell
-                        value={formula ?? null}
-                        fieldKey="lp_available_energy_formula"
-                        entity="tariffs"
-                        entityId={aeTariff.id as number}
-                        projectId={pid}
-                        type="text"
-                        editMode={true}
-                        onSaved={onSaved}
-                      />
-                    ) : (
-                      <span className="whitespace-pre-line">{formula ?? '—'}</span>
-                    )}
-                  </dd>
-                </div>
-
-                {/* Variable definitions */}
-                {variables && variables.length > 0 && (
-                  <div className="text-xs space-y-1.5 mt-3">
-                    <div className="text-slate-400 uppercase font-medium">Where:</div>
-                    {variables.map((v, j) => (
-                      <div key={j} className="flex gap-3">
-                        <span className="font-mono text-slate-700 shrink-0 w-28">{v.symbol}</span>
-                        <span className="text-slate-500">= {v.definition}{v.unit ? ` (${v.unit})` : ''}</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
+              <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
+                <div className="text-xs font-medium text-slate-400 uppercase mb-1">Billing Formulas</div>
+                {productFormulas.map(tf => (
+                  <FormulaCard key={tf.id} formula={tf} compact />
+                ))}
               </div>
             )
           })()}
         </div>
       )}
+    </div>
+  )
+}
+
+// ---------------------------------------------------------------------------
+// Formula Display
+// ---------------------------------------------------------------------------
+
+/** Human-readable label for formula_type codes. */
+const FORMULA_TYPE_LABELS: Record<string, string> = {
+  MRP_BOUNDED: 'Effective Rate (MRP Bounded)',
+  MRP_CALCULATION: 'Payment Calculation',
+  PERCENTAGE_ESCALATION: 'Rate Escalation',
+  FIXED_ESCALATION: 'Fixed Escalation',
+  CPI_ESCALATION: 'CPI Escalation',
+  FLOOR_CEILING_ESCALATION: 'Floor/Ceiling Escalation',
+  ENERGY_OUTPUT: 'Energy Output Definition',
+  DEEMED_ENERGY: 'Deemed/Available Energy',
+  ENERGY_DEGRADATION: 'Energy Degradation',
+  ENERGY_GUARANTEE: 'Energy Guarantee',
+  ENERGY_MULTIPHASE: 'Multi-Phase Energy',
+  SHORTFALL_PAYMENT: 'Shortfall Payment',
+  TAKE_OR_PAY: 'Take-or-Pay',
+  FX_CONVERSION: 'FX Conversion',
+}
+
+/** Category colour badges for formula types. */
+const FORMULA_CATEGORY_STYLE: Record<string, string> = {
+  MRP_BOUNDED: 'bg-blue-50 text-blue-700 border-blue-200',
+  MRP_CALCULATION: 'bg-blue-50 text-blue-700 border-blue-200',
+  PERCENTAGE_ESCALATION: 'bg-violet-50 text-violet-700 border-violet-200',
+  FIXED_ESCALATION: 'bg-violet-50 text-violet-700 border-violet-200',
+  CPI_ESCALATION: 'bg-violet-50 text-violet-700 border-violet-200',
+  FLOOR_CEILING_ESCALATION: 'bg-violet-50 text-violet-700 border-violet-200',
+  ENERGY_OUTPUT: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  DEEMED_ENERGY: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  ENERGY_DEGRADATION: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  ENERGY_GUARANTEE: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  ENERGY_MULTIPHASE: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  SHORTFALL_PAYMENT: 'bg-amber-50 text-amber-700 border-amber-200',
+  TAKE_OR_PAY: 'bg-amber-50 text-amber-700 border-amber-200',
+  FX_CONVERSION: 'bg-slate-50 text-slate-600 border-slate-200',
+}
+
+/** Render a formula_text with math-friendly formatting. */
+function FormulaText({ text }: { text: string }) {
+  // Highlight operators and structural keywords
+  const formatted = text
+    .replace(/\bMAX\b/g, '<b>MAX</b>')
+    .replace(/\bMIN\b/g, '<b>MIN</b>')
+    .replace(/\bIF\b/gi, '<b>IF</b>')
+    .replace(/\bThen:\s*/gi, '<b class="text-emerald-600">THEN</b> ')
+    .replace(/\bElse:\s*/gi, '<b class="text-amber-600">ELSE</b> ')
+    // Subscripts: E_metered → E<sub>metered</sub>
+    .replace(/([A-Z])_([a-z]+(?:\([^)]*\))?)/g, '$1<sub>$2</sub>')
+    // Summation symbol
+    .replace(/∑/g, '<span class="text-lg leading-none">∑</span>')
+
+  return (
+    <div
+      className="font-mono text-sm leading-relaxed bg-slate-50 border border-slate-200 rounded-md px-4 py-3 overflow-x-auto"
+      dangerouslySetInnerHTML={{ __html: formatted }}
+    />
+  )
+}
+
+/** Single formula card. compact=true shows only header + formula text. */
+function FormulaCard({ formula, compact = false }: { formula: TariffFormula; compact?: boolean }) {
+  const badge = FORMULA_CATEGORY_STYLE[formula.formula_type] ?? 'bg-slate-50 text-slate-600 border-slate-200'
+  const label = FORMULA_TYPE_LABELS[formula.formula_type] ?? formula.formula_type
+  const inputs = formula.variables.filter(v => v.role === 'input')
+  const outputs = formula.variables.filter(v => v.role === 'output')
+  const conditions = formula.conditions ?? []
+
+  return (
+    <div className="border border-slate-200 rounded-lg overflow-hidden">
+      {/* Header */}
+      <div className="flex items-center gap-2 px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${badge}`}>
+          {label}
+        </span>
+        <span className="text-sm font-medium text-slate-800">{formula.formula_name}</span>
+        {formula.section_ref && (
+          <span className="text-[10px] text-slate-400 ml-auto">{formula.section_ref}</span>
+        )}
+      </div>
+
+      <div className="px-4 py-3 space-y-3">
+        {/* Formula expression */}
+        <FormulaText text={formula.formula_text} />
+
+        {/* Conditions, variables, confidence — only in full mode */}
+        {!compact && (<>
+          {/* Conditions (if/then/else) */}
+          {conditions.length > 0 && conditions[0].compare && (
+            <div className="text-xs space-y-1 bg-amber-50/50 border border-amber-100 rounded px-3 py-2">
+              {conditions.map((c, i) => (
+                <div key={i}>
+                  <span className="font-medium text-slate-600">Condition:</span>{' '}
+                  <span className="font-mono text-slate-700">
+                    {c.compare} {c.operator} {c.against}
+                  </span>
+                  {c.description && (
+                    <div className="text-slate-500 mt-0.5">{c.description}</div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+
+          {/* Variables table */}
+          {(inputs.length > 0 || outputs.length > 0) && (
+            <div className="text-xs space-y-1.5">
+              <div className="text-slate-400 uppercase font-medium tracking-wide">Variables</div>
+              <div className="grid grid-cols-[auto_1fr_auto_auto] gap-x-4 gap-y-1">
+                {/* Header */}
+                <div className="text-[10px] text-slate-400 font-medium">Symbol</div>
+                <div className="text-[10px] text-slate-400 font-medium">Description</div>
+                <div className="text-[10px] text-slate-400 font-medium">Source</div>
+                <div className="text-[10px] text-slate-400 font-medium">Scope</div>
+                {/* Outputs first */}
+                {outputs.map((v, j) => (
+                  <Fragment key={`o-${j}`}>
+                    <span className="font-mono text-slate-800 font-medium">{v.symbol}</span>
+                    <span className="text-slate-500">{v.description}{v.unit ? ` (${v.unit})` : ''}</span>
+                    <span className="font-mono text-slate-400 text-[10px]">{v.maps_to ?? '—'}</span>
+                    <span className="text-slate-400">{v.lookup_key ?? 'static'}</span>
+                  </Fragment>
+                ))}
+                {/* Inputs */}
+                {inputs.map((v, j) => (
+                  <Fragment key={`i-${j}`}>
+                    <span className="font-mono text-slate-700">{v.symbol}</span>
+                    <span className="text-slate-500">{v.description}{v.unit ? ` (${v.unit})` : ''}</span>
+                    <span className="font-mono text-slate-400 text-[10px]">{v.maps_to ?? '—'}</span>
+                    <span className="text-slate-400">{v.lookup_key ?? 'static'}</span>
+                  </Fragment>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Confidence */}
+          {formula.extraction_confidence != null && (
+            <div className="text-[10px] text-slate-400">
+              Extraction confidence: {(formula.extraction_confidence * 100).toFixed(0)}%
+            </div>
+          )}
+        </>)}
+      </div>
     </div>
   )
 }
@@ -741,7 +957,7 @@ interface PricingTariffsTabProps {
 }
 
 export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonthly = [], mrpAnnual = [], mrpTokens = [] }: PricingTariffsTabProps) {
-  const { contracts, tariffs: rawTariffs, billing_products, rate_periods, monthly_rates, tariff_rates, exchange_rates, lookups } = data
+  const { contracts, tariffs: rawTariffs, billing_products, rate_periods, monthly_rates, tariff_rates, tariff_formulas = [], exchange_rates, lookups } = data
   const pid = data.project.id as number
 
   // Filter out component tariffs — only show consolidated MAIN tariffs (MOH01 pattern).
@@ -788,6 +1004,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
   // Derive hard (USD) and billing currency codes from tariff_rates
   const hardCurrencyCode = ((tariff_rates ?? []) as R[]).find((tr) => tr.hard_currency_code != null)?.hard_currency_code as string | undefined
   const billingCurrencyCode = ((tariff_rates ?? []) as R[]).find((tr) => tr.billing_currency_code != null)?.billing_currency_code as string | undefined
+  const isLocalCurrency = billingCurrencyCode != null && billingCurrencyCode !== 'USD'
 
   // Determine the local currency for this project's exchange rate display.
   // Fallback chain: tariff_rates → contract extraction_metadata → country lookup
@@ -853,7 +1070,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
               const periods = rate_periods
                 .filter((rp) => rp.clause_tariff_id === t.id)
                 .sort((a, b) => Number(a.contract_year) - Number(b.contract_year))
-              const isRebasedTariffHeader = String(t.escalation_type_code ?? '') === 'REBASED_MARKET_PRICE'
+              const isRebasedTariffHeader = REBASED_CODES.has(String(t.escalation_type_code ?? ''))
               const tariffMonthlyRates = (monthly_rates ?? [])
                     .filter((mr: R) => mr.clause_tariff_id === t.id)
                     .sort((a: R, b: R) => String(b.billing_month ?? '').localeCompare(String(a.billing_month ?? '')))
@@ -861,13 +1078,21 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
               const latestMonthLabel = isRebasedTariffHeader && tariffMonthlyRates.length > 0
                 ? formatBillingMonth(tariffMonthlyRates[0].billing_month)
                 : null
+              // For local-currency deterministic tariffs, enable FX expansion using exchange_rates
+              const showFxConversion = isLocalCurrency && !hasMonthlyTracking
+              const canExpand = hasMonthlyTracking || showFxConversion
+              const fxRatesForPeriod = showFxConversion
+                ? [...(exchange_rates ?? []) as R[]]
+                    .filter((er) => er.currency_code === projectFxCurrency)
+                    .sort((a, b) => String(b.rate_date ?? '').localeCompare(String(a.rate_date ?? '')))
+                : []
               return (
                 <div key={i} className={i > 0 ? 'pt-5 border-t border-slate-200' : ''}>
                   {/* Tariff summary line */}
                   <div className="flex items-baseline gap-3 mb-2">
-                    <span className="text-sm font-medium text-slate-800">{str(t.name ?? t.tariff_type_name)}</span>
+                    <span className="text-sm font-medium text-slate-800">{str(t.name ?? t.energy_sale_type_name)}</span>
                     <span className="text-xs text-slate-400">
-                      {[t.tariff_type_code, t.escalation_type_code].filter(Boolean).join(' / ')}
+                      {[t.energy_sale_type_code, t.escalation_type_code].filter(Boolean).join(' / ')}
                     </span>
                     {t.contract_amendment_id != null && (
                       <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
@@ -887,7 +1112,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                   {periods.length === 0 ? (
                     <div className="text-xs text-slate-400 italic pl-1">No rate periods</div>
                   ) : (() => {
-                    const isRebasedTariff = String(t.escalation_type_code ?? '') === 'REBASED_MARKET_PRICE'
+                    const isRebasedTariff = REBASED_CODES.has(String(t.escalation_type_code ?? ''))
                     const tLp = (t.logic_parameters ?? {}) as R
                     const discPctDisplay = tLp.discount_pct != null ? `${Number((Number(tLp.discount_pct) * 100).toFixed(2)).toString().replace(/\.?0+$/, '')}%` : ''
                     const basisOverride = isRebasedTariff && discPctDisplay
@@ -898,23 +1123,31 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                       <table className="w-full text-sm">
                         <thead>
                           <tr className="border-b border-slate-200">
-                            {hasMonthlyTracking && <th className="w-6" />}
+                            {canExpand && <th className="w-6" />}
                             <th className="text-left px-3 py-1.5 text-xs font-medium text-slate-500">Year</th>
                             <th className="text-left px-3 py-1.5 text-xs font-medium text-slate-500">Period</th>
-                            <th className="text-right px-3 py-1.5 text-xs font-medium text-slate-500">Rate</th>
-                            <th className="text-left px-3 py-1.5 text-xs font-medium text-slate-500">Currency</th>
+                            <th className="text-right px-3 py-1.5 text-xs font-medium text-slate-500">{isLocalCurrency ? `Rate (${billingCurrencyCode})` : 'Rate'}</th>
+                            {isLocalCurrency
+                              ? <th className="text-right px-3 py-1.5 text-xs font-medium text-slate-500">Rate (USD)</th>
+                              : <th className="text-left px-3 py-1.5 text-xs font-medium text-slate-500">Currency</th>}
                             <th className="text-left px-3 py-1.5 text-xs font-medium text-slate-500 max-w-[160px]">Basis</th>
                             <th className="text-center px-3 py-1.5 text-xs font-medium text-slate-500">Current</th>
                           </tr>
                         </thead>
                         <tbody>
                           {(() => {
-                            const currentPeriod = periods.find((rp) => rp.is_current === true) ?? periods[0]
-                            const historicalPeriods = periods.filter((rp) => rp !== currentPeriod)
+                            const currentPeriod = periods.find((rp) => rp.is_current === true) ?? periods[periods.length - 1]
+                            const currentYear = currentPeriod?.contract_year as number | undefined
+                            const historicalPeriods = periods.filter((rp) =>
+                              rp !== currentPeriod && currentYear != null && (rp.contract_year as number) < currentYear
+                            )
                             const historyKey = `history-${t.id}`
                             const showHistory = expandedPeriods.has(historyKey)
 
                             const renderPeriodRow = (rp: R, j: number) => {
+                            // Look up full tariff_rate row for USD rate
+                            const matchingTr = ((tariff_rates ?? []) as R[]).find((tr) =>
+                              tr.clause_tariff_id === rp.clause_tariff_id && tr.contract_year === rp.contract_year && tr.rate_granularity === 'annual')
                             const periodMonthlyRates = hasMonthlyTracking
                               ? (monthly_rates ?? [])
                                   .filter((mr: R) => mr.clause_tariff_id === rp.clause_tariff_id && mr.contract_year === rp.contract_year)
@@ -924,12 +1157,12 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                             return (
                               <Fragment key={j}>
                               <tr
-                                className={`border-b border-slate-50 ${rp.is_current ? 'bg-blue-50/40' : 'hover:bg-slate-50'} ${periodMonthlyRates.length > 0 ? 'cursor-pointer' : ''}`}
-                                onClick={periodMonthlyRates.length > 0 ? () => togglePeriod(rp.id) : undefined}
+                                className={`border-b border-slate-50 ${rp.is_current ? 'bg-blue-50/40' : 'hover:bg-slate-50'} ${(periodMonthlyRates.length > 0 || showFxConversion) ? 'cursor-pointer' : ''}`}
+                                onClick={(periodMonthlyRates.length > 0 || showFxConversion) ? () => togglePeriod(rp.id) : undefined}
                               >
-                                {hasMonthlyTracking && (
+                                {canExpand && (
                                   <td className="pl-2 py-1.5 w-6">
-                                    {periodMonthlyRates.length > 0 && (
+                                    {(periodMonthlyRates.length > 0 || showFxConversion) && (
                                       <ChevronRight className={`h-3.5 w-3.5 text-slate-400 transition-transform ${isExpanded ? 'rotate-90' : ''}`} />
                                     )}
                                   </td>
@@ -945,9 +1178,11 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                                 <td className="px-3 py-1.5 text-right text-slate-700 tabular-nums font-medium">
                                   {editMode && rp.id != null ? (
                                     <EditableCell value={rp.effective_rate_contract_ccy} fieldKey="effective_rate_contract_ccy" entity="rate-periods" entityId={rp.id as number} type="number" editMode onSaved={onSaved} />
-                                  ) : str(rp.effective_rate_contract_ccy)}
+                                  ) : fmtRate(rp.effective_rate_contract_ccy)}
                                 </td>
-                                <td className="px-3 py-1.5 text-slate-500 text-xs">{str(rp.currency_code)}</td>
+                                {isLocalCurrency
+                                  ? <td className="px-3 py-1.5 text-right text-slate-500 tabular-nums text-xs">{fmtRate(matchingTr?.effective_rate_hard_ccy)}</td>
+                                  : <td className="px-3 py-1.5 text-slate-500 text-xs">{str(rp.currency_code)}</td>}
                                 <td className="px-3 py-1.5 text-slate-500 text-xs whitespace-pre-line max-w-[160px] break-words">
                                   {editMode && rp.id != null ? (
                                     <EditableCell value={rp.calculation_basis} fieldKey="calculation_basis" entity="rate-periods" entityId={rp.id as number} type="text" editMode onSaved={onSaved} />
@@ -983,13 +1218,13 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                                       {str(mr.rate_binding)}
                                     </td>
                                     <td className="px-3 py-1 text-right text-xs text-slate-600 tabular-nums">
-                                      {str(mr.effective_tariff_local)}
+                                      {fmtRate(mr.effective_tariff_local)}
                                     </td>
                                     <td className="px-3 py-1 text-xs text-slate-500 tabular-nums">
-                                      {mrFx != null ? mrFx.toFixed(2) : '—'}
+                                      {mrFx != null ? mrFx.toFixed(4) : '—'}
                                     </td>
                                     <td className="px-3 py-1 text-xs text-slate-500 tabular-nums">
-                                      {mrUsd != null ? mrUsd.toFixed(6) : '—'}
+                                      {mrUsd != null ? mrUsd.toFixed(4) : '—'}
                                     </td>
                                     <td className="px-3 py-1 text-center">
                                       {mr.is_current === true && <span className="inline-block w-2 h-2 rounded-full bg-blue-400" title="Current" />}
@@ -997,6 +1232,44 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                                   </tr>
                                 )
                               })}
+                              {/* Monthly FX conversion rows for deterministic local-currency tariffs */}
+                              {isExpanded && showFxConversion && (() => {
+                                const contractRate = Number(rp.effective_rate_contract_ccy)
+                                if (isNaN(contractRate)) return null
+                                const periodFx = fxRatesForPeriod.filter((er) => {
+                                  const d = String(er.rate_date ?? '')
+                                  return d >= String(rp.period_start ?? '') && (!rp.period_end || d <= String(rp.period_end))
+                                })
+                                if (periodFx.length === 0) return null
+                                return (
+                                  <>
+                                    <tr className="bg-slate-100/60">
+                                      <td />{/* chevron col */}
+                                      <td className="px-3 py-1 text-[10px] font-medium text-slate-400 uppercase tracking-wider">Month</td>
+                                      <td />
+                                      <td className="px-3 py-1 text-right text-[10px] font-medium text-slate-400 uppercase tracking-wider">Rate ({billingCurrencyCode})</td>
+                                      <td className="px-3 py-1 text-right text-[10px] font-medium text-slate-400 uppercase tracking-wider">FX Rate</td>
+                                      <td className="px-3 py-1 text-right text-[10px] font-medium text-slate-400 uppercase tracking-wider">Rate (USD)</td>
+                                      <td />
+                                    </tr>
+                                    {periodFx.map((er, k) => {
+                                      const fx = Number(er.rate)
+                                      const usd = fx > 0 ? contractRate / fx : null
+                                      return (
+                                        <tr key={`fx-${k}`} className="border-b border-slate-50 bg-slate-50/50">
+                                          <td />{/* chevron col */}
+                                          <td className="px-3 py-1 text-xs text-slate-500 pl-6">{formatBillingMonth(er.rate_date)}</td>
+                                          <td />
+                                          <td className="px-3 py-1 text-right text-xs text-slate-600 tabular-nums">{fmtRate(contractRate)}</td>
+                                          <td className="px-3 py-1 text-right text-xs text-slate-500 tabular-nums">{fx.toFixed(4)}</td>
+                                          <td className="px-3 py-1 text-right text-xs text-slate-600 tabular-nums font-medium">{usd != null ? usd.toFixed(4) : '—'}</td>
+                                          <td />
+                                        </tr>
+                                      )
+                                    })}
+                                  </>
+                                )
+                              })()}
                               </Fragment>
                             )
                             }
@@ -1009,7 +1282,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                                     className="border-b border-slate-100 cursor-pointer hover:bg-slate-50/80"
                                     onClick={() => togglePeriod(historyKey)}
                                   >
-                                    <td colSpan={hasMonthlyTracking ? 7 : 6} className="px-3 py-1.5">
+                                    <td colSpan={canExpand ? 7 : 6} className="px-3 py-1.5">
                                       <div className="flex items-center gap-1.5 text-xs text-slate-400">
                                         <ChevronRight className={`h-3 w-3 transition-transform ${showHistory ? 'rotate-90' : ''}`} />
                                         <span>{showHistory ? 'Hide' : 'Show'} {historicalPeriods.length} historical year{historicalPeriods.length !== 1 ? 's' : ''}</span>
@@ -1145,20 +1418,22 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
         </CollapsibleSection>
       )})()}
 
-      {contracts.map((c, i) => {
+      {contracts.filter((c) => c.parent_contract_id == null).map((c, i) => {
         const cid = c.id as number
-        const contractTariffs = tariffs.filter((t) => t.contract_id === c.id)
+        // Include tariffs from this contract AND its amendments
+        const amendmentIds = new Set(contracts.filter((a) => a.parent_contract_id === c.id).map((a) => a.id))
+        const contractTariffs = tariffs.filter((t) => t.contract_id === c.id || amendmentIds.has(t.contract_id))
         const currentTariff = contractTariffs.find((t) => t.is_current === true) as R | undefined
         const firstTariff = (currentTariff ?? contractTariffs[0]) as R | undefined
         const firstLp = (firstTariff?.logic_parameters ?? {}) as R
         const energySalesTariff = contractTariffs.find(
-          (t) => String(t.tariff_type_code).toUpperCase() === 'ENERGY_SALES',
+          (t) => String(t.energy_sale_type_code).toUpperCase() === 'ENERGY_SALES',
         )
-        const { matched, unmatched } = groupProductsWithTariffs(billing_products, tariffs, c.id)
+        const { matched, unmatched } = groupProductsWithTariffs(billing_products, tariffs, c.id, amendmentIds)
 
         // Collect distinct tariff type names for tag badges
         const distinctTariffTypes = [
-          ...new Set(contractTariffs.map((t) => t.tariff_type_name).filter(Boolean)),
+          ...new Set(contractTariffs.map((t) => t.energy_sale_type_name).filter(Boolean)),
         ] as string[]
 
         return (
@@ -1167,7 +1442,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
             <CollapsibleSection title="Billing Information">
               <FieldGrid onSaved={onSaved} editMode={editMode} fields={[
                 ...(firstTariff && firstLp.billing_frequency != null
-                  ? [['Billing Frequency', firstLp.billing_frequency, { fieldKey: 'lp_billing_frequency', entity: 'tariffs' as const, entityId: firstTariff.id as number, projectId: pid, type: 'select' as const, options: BILLING_FREQUENCY_OPTS, selectValue: firstLp.billing_frequency }] as FieldDef]
+                  ? [['Billing Frequency', normalizeFrequency(firstLp.billing_frequency), { fieldKey: 'lp_billing_frequency', entity: 'tariffs' as const, entityId: firstTariff.id as number, projectId: pid, type: 'select' as const, options: BILLING_FREQUENCY_OPTS, selectValue: normalizeFrequency(firstLp.billing_frequency) }] as FieldDef]
                   : []),
                 ...(billingCurrencyCode != null || firstTariff != null ? [['Billing Currency', billingCurrencyCode ?? firstTariff?.currency_code] as FieldDef] : []),
                 ['Payment Terms', c.payment_terms, { fieldKey: 'payment_terms', entity: 'contracts' as const, entityId: cid, projectId: pid, type: 'select' as const, options: PAYMENT_TERMS_OPTS, selectValue: c.payment_terms }],
@@ -1194,6 +1469,26 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
               </div>
             </CollapsibleSection>
 
+            {/* Phase Breakdown — shown when logic_parameters has phases[] */}
+            {(() => {
+              const phases = firstLp.phases as { phase: number; kwp: number; cod_date: string; meter_serial?: string }[] | undefined
+              if (!Array.isArray(phases) || phases.length === 0) return null
+              return (
+                <CollapsibleSection title="Phase Breakdown">
+                  <div className="grid grid-cols-1 gap-2">
+                    {phases.map((p, idx) => (
+                      <div key={`phase-${p.phase ?? idx}`} className="flex items-center gap-4 px-3 py-2 bg-purple-50/50 rounded border border-purple-100">
+                        <span className="text-xs font-semibold text-purple-700">Phase {p.phase}</span>
+                        <span className="text-sm text-slate-700">{p.kwp.toLocaleString()} kWp</span>
+                        <span className="text-xs text-slate-500">COD {p.cod_date}</span>
+                        {p.meter_serial && <span className="text-xs text-slate-400">Meter: {p.meter_serial}</span>}
+                      </div>
+                    ))}
+                  </div>
+                </CollapsibleSection>
+              )
+            })()}
+
             {/* Section 3: Service & Product Classification */}
             <CollapsibleSection title="Service & Product Classification">
               <div className="space-y-3">
@@ -1201,14 +1496,14 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                 {editMode ? (
                   <FieldGrid onSaved={onSaved} editMode={editMode} fields={
                     contractTariffs.map((t) => [
-                      `Contract Service/Product Type${contractTariffs.length > 1 ? ` — ${str(t.name ?? t.tariff_type_name ?? 'Tariff')}` : ''}`,
-                      t.tariff_type_code,
-                      { fieldKey: 'tariff_type_id', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'select' as const, options: tariffTypeOpts, selectValue: t.tariff_type_id },
+                      `Revenue Type${contractTariffs.length > 1 ? ` — ${str(t.name ?? t.energy_sale_type_name ?? 'Tariff')}` : ''}`,
+                      t.energy_sale_type_code,
+                      { fieldKey: 'energy_sale_type_id', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'select' as const, options: energySaleTypeOpts, selectValue: t.energy_sale_type_id },
                     ] as FieldDef)
                   } />
                 ) : (
                   <div className="flex flex-col py-1">
-                    <dt className="text-xs text-slate-400">Contract Service/Product Type</dt>
+                    <dt className="text-xs text-slate-400">Revenue Type</dt>
                     <dd className="mt-1 flex flex-wrap gap-1.5">
                       {distinctTariffTypes.length > 0 ? (
                         distinctTariffTypes.map((name) => (
@@ -1223,10 +1518,10 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                   </div>
                 )}
 
-                {/* Energy Sales Tariff Type */}
+                {/* Energy Sale Type (post-059: tariff_type is offtake/billing model) */}
                 {energySalesTariff && (
                   <FieldGrid onSaved={onSaved} editMode={editMode} fields={[
-                    ['Energy Sales Tariff Type', energySalesTariff.energy_sale_type_name, { fieldKey: 'energy_sale_type_id', entity: 'tariffs' as const, entityId: energySalesTariff.id as number, projectId: pid, type: 'select' as const, options: energySaleTypeOpts, selectValue: energySalesTariff.energy_sale_type_id }],
+                    ['Energy Sale Type', energySalesTariff.tariff_type_name ?? energySalesTariff.tariff_type_code, { fieldKey: 'tariff_type_id', entity: 'tariffs' as const, entityId: energySalesTariff.id as number, projectId: pid, type: 'select' as const, options: tariffTypeOpts, selectValue: energySalesTariff.tariff_type_id }],
                   ]} />
                 )}
               </div>
@@ -1243,6 +1538,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                       key={pw.product.id as number}
                       pw={pw} pid={pid} rate_periods={rate_periods} monthly_rates={monthly_rates}
                       contractLines={data.contract_lines ?? []}
+                      tariffFormulas={tariff_formulas}
                       onSaved={onSaved} editMode={editMode}
                       isOpen={openProducts.has(pw.product.id)}
                       onToggle={() => toggleProduct(pw.product.id)}
@@ -1279,7 +1575,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                         <div key={j} className={j > 0 ? 'mt-4 pt-4 border-t border-slate-100' : ''}>
                           <div className="flex items-center gap-2 mb-1">
                             <div className="text-xs font-medium text-slate-500">
-                              {str(t.tariff_type_name ?? t.tariff_type_code ?? 'Tariff')}
+                              {str(t.energy_sale_type_name ?? t.energy_sale_type_code ?? 'Tariff')}
                             </div>
                             {isNonEnergyTariff(t) && (
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">Non-Energy</span>
@@ -1289,7 +1585,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                             <NonEnergyTariffPanel
                               t={t} pid={pid} rate_periods={rate_periods} monthly_rates={monthly_rates}
                               onSaved={onSaved} editMode={editMode}
-                              tariffTypeOpts={tariffTypeOpts} escalationTypeOpts={escalationTypeOpts}
+                              energySaleTypeOpts={energySaleTypeOpts} escalationTypeOpts={escalationTypeOpts}
                             />
                           ) : (
                             <TariffDetailPanel
@@ -1309,22 +1605,43 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
             {/* Section 4–7: Formula Parameters (visible only when data exists) */}
             {firstTariff != null && (<>
               {/* Section 4: Escalation Rules */}
-              {(firstTariff.escalation_type_code != null || hasAnyValue(firstLp, ['escalation_frequency', 'escalation_start_date', 'tariff_components_to_adjust', 'escalation_rules'])) && (
+              {(firstTariff.escalation_type_code != null || hasAnyValue(firstLp, ['escalation_frequency', 'escalation_start_date', 'tariff_components_to_adjust', 'escalation_rules', 'cpi_base_date'])) && (
                 <CollapsibleSection title="Escalation Rules">
                   <FieldGrid onSaved={onSaved} editMode={editMode} fields={[
                     ['Price Adjustment Type', firstTariff.escalation_type_code, { fieldKey: 'escalation_type_id', entity: 'tariffs' as const, entityId: firstTariff.id as number, projectId: pid, type: 'select' as const, options: escalationTypeOpts, selectValue: firstTariff.escalation_type_id }],
-                    ...(firstLp.escalation_frequency != null ? [['Escalation Frequency', firstLp.escalation_frequency, { fieldKey: 'lp_escalation_frequency', entity: 'tariffs' as const, entityId: firstTariff.id as number, projectId: pid, type: 'select' as const, options: ESCALATION_FREQUENCY_OPTS, selectValue: firstLp.escalation_frequency }] as FieldDef] : []),
+                    ...(firstLp.escalation_frequency != null ? [['Escalation Frequency', normalizeFrequency(firstLp.escalation_frequency), { fieldKey: 'lp_escalation_frequency', entity: 'tariffs' as const, entityId: firstTariff.id as number, projectId: pid, type: 'select' as const, options: ESCALATION_FREQUENCY_OPTS, selectValue: normalizeFrequency(firstLp.escalation_frequency) }] as FieldDef] : []),
                     ...(firstLp.escalation_start_date != null ? [['Escalation Start Date', firstLp.escalation_start_date, { fieldKey: 'lp_escalation_start_date', entity: 'tariffs' as const, entityId: firstTariff.id as number, projectId: pid, type: 'text' as const }] as FieldDef] : []),
 
                     ...(firstLp.tariff_components_to_adjust != null ? [['Energy Sales Tariff to Adjust', normalizeTariffComponent(firstLp.tariff_components_to_adjust), { fieldKey: 'lp_tariff_components_to_adjust', entity: 'tariffs' as const, entityId: firstTariff.id as number, projectId: pid, type: 'select' as const, options: TARIFF_COMPONENTS_TO_ADJUST_OPTS, selectValue: normalizeTariffComponent(firstLp.tariff_components_to_adjust) }] as FieldDef] : []),
 
                   ]} />
+                  {/* CPI-specific metadata fields */}
+                  {String(firstTariff.escalation_type_code ?? '') === 'US_CPI' && firstLp.cpi_base_date != null && (
+                    <FieldGrid fields={[
+                      ['CPI Index', 'CUUR0000SA0 (US CPI-U All Items)'],
+                      ['CPI Base Month', String(firstLp.cpi_base_date).slice(0, 7)],
+                      ['CPI Base Value', firstLp.cpi_base_value != null ? Number(firstLp.cpi_base_value).toFixed(3) : '—'],
+                      ['CPI Subtype', firstLp.cpi_escalation_subtype === 'floor_ceiling' ? 'Floor & Ceiling Escalation' : 'Base Rate Escalation'],
+                    ]} />
+                  )}
                   <EscalationRulesTable rules={firstLp.escalation_rules} logicParameters={firstLp} />
-                  <RateBoundsSchedule
-                    logicParameters={firstLp}
-                    contractTermYears={Number(c.contract_term_years ?? 0)}
-                    codDate={data.project.cod_date != null ? String(data.project.cod_date) : null}
-                  />
+                  {/* CPI Escalation Schedule — from actual tariff_rate rows */}
+                  {String(firstTariff.escalation_type_code ?? '') === 'US_CPI' && (
+                    <CPIEscalationSchedule
+                      tariffRates={(tariff_rates ?? []) as R[]}
+                      clauseTariffId={firstTariff.id}
+                      logicParameters={firstLp}
+                      codDate={data.project.cod_date != null ? String(data.project.cod_date) : null}
+                    />
+                  )}
+                  {/* RateBoundsSchedule — for non-CPI escalation with escalation_rules */}
+                  {String(firstTariff.escalation_type_code ?? '') !== 'US_CPI' && (
+                    <RateBoundsSchedule
+                      logicParameters={firstLp}
+                      contractTermYears={Number(c.contract_term_years ?? 0)}
+                      codDate={data.project.cod_date != null ? String(data.project.cod_date) : null}
+                    />
+                  )}
                 </CollapsibleSection>
               )}
             </>)}
@@ -1346,59 +1663,60 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
 
             {/* Available Energy — now displayed inside the ENER003 BillingProductCard */}
 
-            {firstTariff != null && (<>
-              {/* Section 7: Shortfall & Excused Events */}
-              {hasAnyValue(firstLp, ['shortfall_formula_type', 'shortfall_formula_text', 'shortfall_formula_variables']) && (
+            {/* Section 7: Shortfall Formula */}
+            {(() => {
+              const shortfallFormulas = tariff_formulas.filter(tf => tf.formula_type === 'SHORTFALL_PAYMENT' || tf.formula_type === 'TAKE_OR_PAY')
+              const hasLpShortfall = firstTariff != null && hasAnyValue(firstLp, ['shortfall_formula_type', 'shortfall_formula_text', 'shortfall_formula_variables'])
+              if (shortfallFormulas.length === 0 && !hasLpShortfall) return null
+              return (
                 <CollapsibleSection title="Shortfall Formula">
-                  {firstLp.shortfall_formula_type != null && (
-                    <FieldGrid onSaved={onSaved} editMode={editMode} fields={[
-                      ['Shortfall Formula', firstLp.shortfall_formula_type, { fieldKey: 'lp_shortfall_formula_type', entity: 'tariffs' as const, entityId: firstTariff.id as number, projectId: pid, type: 'text' as const }],
-                    ]} />
-                  )}
-                  {firstLp.shortfall_formula_text != null && (
-                    <div className="py-1">
-                      <dd className="text-sm text-slate-900">
-                        {editMode && firstTariff ? (
-                          <EditableCell
-                            value={firstLp.shortfall_formula_text as string | null ?? null}
-                            fieldKey="lp_shortfall_formula_text"
-                            entity="tariffs"
-                            entityId={firstTariff.id as number}
-                            projectId={pid}
-                            type="text"
-                            editMode={true}
-                            onSaved={onSaved}
-                          />
-                        ) : (
-                          <span className="whitespace-pre-line">{String(firstLp.shortfall_formula_text)}</span>
-                        )}
-                      </dd>
+                  {shortfallFormulas.length > 0 ? (
+                    <div className="space-y-2">
+                      {shortfallFormulas.map(tf => (
+                        <FormulaCard key={tf.id} formula={tf} compact />
+                      ))}
+                    </div>
+                  ) : firstTariff != null && (
+                    /* Fallback: legacy logic_parameters display */
+                    <div>
+                      {firstLp.shortfall_formula_type != null && (
+                        <FieldGrid onSaved={onSaved} editMode={editMode} fields={[
+                          ['Shortfall Formula', firstLp.shortfall_formula_type, { fieldKey: 'lp_shortfall_formula_type', entity: 'tariffs' as const, entityId: firstTariff.id as number, projectId: pid, type: 'text' as const }],
+                        ]} />
+                      )}
+                      {firstLp.shortfall_formula_text != null && (
+                        <div className="py-1">
+                          <dd className="text-sm text-slate-900">
+                            <span className="whitespace-pre-line">{String(firstLp.shortfall_formula_text)}</span>
+                          </dd>
+                        </div>
+                      )}
+                      {(() => {
+                        const vars = firstLp.shortfall_formula_variables as { symbol: string; definition: string; unit?: string }[] | undefined
+                        const cap = firstLp.shortfall_formula_cap as string | undefined
+                        if (!vars?.length && !cap) return null
+                        return (
+                          <div className="text-xs space-y-1.5 mt-3">
+                            {vars && vars.length > 0 && (<>
+                              <div className="text-slate-400 uppercase font-medium">Where:</div>
+                              {vars.map((v, j) => (
+                                <div key={j} className="flex gap-3">
+                                  <span className="font-mono text-slate-700 shrink-0 w-28">{v.symbol}</span>
+                                  <span className="text-slate-500">= {v.definition}{v.unit ? ` (${v.unit})` : ''}</span>
+                                </div>
+                              ))}
+                            </>)}
+                            {cap && (
+                              <div className="mt-2 text-slate-500 italic">{cap}</div>
+                            )}
+                          </div>
+                        )
+                      })()}
                     </div>
                   )}
-                  {(() => {
-                    const vars = firstLp.shortfall_formula_variables as { symbol: string; definition: string; unit?: string }[] | undefined
-                    const cap = firstLp.shortfall_formula_cap as string | undefined
-                    if (!vars?.length && !cap) return null
-                    return (
-                      <div className="text-xs space-y-1.5 mt-3">
-                        {vars && vars.length > 0 && (<>
-                          <div className="text-slate-400 uppercase font-medium">Where:</div>
-                          {vars.map((v, j) => (
-                            <div key={j} className="flex gap-3">
-                              <span className="font-mono text-slate-700 shrink-0 w-28">{v.symbol}</span>
-                              <span className="text-slate-500">= {v.definition}{v.unit ? ` (${v.unit})` : ''}</span>
-                            </div>
-                          ))}
-                        </>)}
-                        {cap && (
-                          <div className="mt-2 text-slate-500 italic">{cap}</div>
-                        )}
-                      </div>
-                    )
-                  })()}
                 </CollapsibleSection>
-              )}
-            </>)}
+              )
+            })()}
 
             {/* Section 8: Non-Energy Service Lines */}
             {(() => {
@@ -1420,7 +1738,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                           <div key={j} className={j > 0 ? 'pt-3 border-t border-slate-100' : ''}>
                             <div className="flex items-center gap-2 mb-2">
                               <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
-                                {str(t.tariff_type_name ?? t.tariff_type_code)}
+                                {str(t.energy_sale_type_name ?? t.energy_sale_type_code)}
                               </span>
                             </div>
                             <FieldGrid fields={[
@@ -1438,6 +1756,18 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                 </CollapsibleSection>
               )
             })()}
+
+            {/* Section 9: Contract Formulas — full reference (bottom of tab) */}
+            {tariff_formulas.length > 0 && (
+              <CollapsibleSection title={`Contract Formulas — Full Reference (${tariff_formulas.length})`}>
+                <p className="text-xs text-slate-400 mb-3">All extracted pricing formulas for this project. These are the source of truth for the billing engine.</p>
+                <div className="space-y-3">
+                  {tariff_formulas.map((tf) => (
+                    <FormulaCard key={tf.id} formula={tf} />
+                  ))}
+                </div>
+              </CollapsibleSection>
+            )}
           </div>
         )
       })}

@@ -841,8 +841,8 @@ POST /api/inbound-email/attachments/{attachment_id}/process — Trigger extracti
 ```bash
 aws sns subscribe \
   --topic-arn arn:aws:sns:us-east-1:724772070642:frontiermind-email-ingest \
-  --protocol http \
-  --endpoint http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/api/inbound-email/webhook
+  --protocol https \
+  --endpoint https://api.frontiermind.co/api/inbound-email/webhook
 ```
 
 ### Phase 3: Future Enhancements

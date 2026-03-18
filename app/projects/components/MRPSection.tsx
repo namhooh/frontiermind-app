@@ -302,9 +302,6 @@ export function MRPSection({
 
   const mrpActions = (
     <div className="flex items-center gap-2">
-      <Button variant="outline" size="sm" onClick={() => setTokenState(s => ({ ...s, show: true, result: null }))}>
-        <Link2 className="h-4 w-4" /> Generate Token
-      </Button>
       <Button variant="outline" size="sm" onClick={() => setShowUploadDialog(true)}>
         <Upload className="h-4 w-4" /> Upload Invoice
       </Button>
@@ -448,7 +445,7 @@ export function MRPSection({
               </dd>
             </div>
             <div>
-              <dt className="text-xs text-slate-400">Exclusions</dt>
+              <dt className="text-xs text-slate-400">Exclusions <span className="text-amber-500">(temporary)</span></dt>
               <dd className="mt-0.5 flex flex-wrap gap-1">
                 {editMode ? (
                   <>
@@ -507,7 +504,9 @@ export function MRPSection({
         <div className="rounded border border-slate-200 px-3 py-2">
           <div className="flex items-baseline gap-2">
             <span className="text-sm text-slate-600">Current Market Reference Price</span>
-            <span className="text-sm font-bold font-mono text-slate-900 tabular-nums">{mrpFormatMRP(baselineData.averageMrp)} /kWh</span>
+            <span className="text-sm font-bold font-mono text-slate-900 tabular-nums">
+              {firstTariff?.market_ref_currency_code ? `${String(firstTariff.market_ref_currency_code)} ` : ''}{mrpFormatMRP(baselineData.averageMrp)} /kWh
+            </span>
           </div>
           <p className="text-xs text-slate-500 mt-0.5">
             Weighted average of {baselineData.monthCount} {baselineData.isPreCod ? 'pre-COD' : 'most recent'} month{baselineData.monthCount !== 1 ? 's' : ''} (total variable charges &divide; total kWh invoiced).
@@ -531,8 +530,9 @@ export function MRPSection({
             {/* Annual MRP Cards */}
             {annualObs.map(obs => {
               const meta = obs.source_metadata?.aggregation as Record<string, unknown> | undefined
+              const mrpCcy = firstTariff?.market_ref_currency_code ? `${String(firstTariff.market_ref_currency_code)} ` : ''
               const cardFields: { label: string; value: string }[] = [
-                { label: 'MRP/kWh', value: mrpFormatMRP(obs.calculated_mrp_per_kwh) },
+                { label: 'MRP/kWh', value: `${mrpCcy}${mrpFormatMRP(obs.calculated_mrp_per_kwh)}` },
               ]
               if (hasCharges) cardFields.push({ label: 'Total Charges', value: mrpFormatNumber(obs.total_variable_charges) })
               if (hasKwh) cardFields.push({ label: 'Total kWh', value: mrpFormatNumber(obs.total_kwh_invoiced) })
@@ -560,7 +560,7 @@ export function MRPSection({
             {/* Monthly Observations Table */}
             {sortedMonthlyObs.length === 0 ? (
               <div className="text-center py-8 text-sm text-slate-400">
-                No monthly MRP observations yet. Upload an invoice or generate a collection token to get started.
+                No monthly MRP observations yet. Upload an invoice to get started.
               </div>
             ) : (
               <div className="overflow-x-auto rounded-lg border border-slate-200">
@@ -568,7 +568,7 @@ export function MRPSection({
                   <thead className="bg-slate-50 text-slate-600">
                     <tr>
                       <th className="text-left px-4 py-2.5 font-medium">Period</th>
-                      <th className="text-right px-4 py-2.5 font-medium">MRP/kWh</th>
+                      <th className="text-right px-4 py-2.5 font-medium">MRP/kWh{firstTariff?.market_ref_currency_code ? ` (${String(firstTariff.market_ref_currency_code)})` : ''}</th>
                       {hasCharges && <th className="text-right px-4 py-2.5 font-medium">Variable Charges</th>}
                       {hasKwh && <th className="text-right px-4 py-2.5 font-medium">kWh Invoiced</th>}
                       {hasSource && <th className="text-right px-4 py-2.5 font-medium">Source</th>}
@@ -668,7 +668,7 @@ export function MRPSection({
               <thead className="bg-slate-50 text-slate-600">
                 <tr>
                   <th className="text-left px-4 py-2.5 font-medium">Period</th>
-                  <th className="text-right px-4 py-2.5 font-medium">MRP/kWh</th>
+                  <th className="text-right px-4 py-2.5 font-medium">MRP/kWh{firstTariff?.market_ref_currency_code ? ` (${String(firstTariff.market_ref_currency_code)})` : ''}</th>
                   {baselineData.componentKeys.map(key => (
                     <th key={key} className="text-right px-4 py-2.5 font-medium capitalize">
                       {key.replace(/_/g, ' ')}

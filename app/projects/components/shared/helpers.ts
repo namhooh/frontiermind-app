@@ -47,6 +47,16 @@ export function formatConfidenceScores(scores: unknown): string {
 }
 
 // ---------------------------------------------------------------------------
+// Phase utilities
+// ---------------------------------------------------------------------------
+
+export function parsePhaseNumber(productDesc: string | null | undefined): number | null {
+  if (!productDesc) return null
+  const match = productDesc.match(/phase\s*(\d+)/i)
+  return match ? parseInt(match[1], 10) : null
+}
+
+// ---------------------------------------------------------------------------
 // Tariff ↔ Product mapping
 // ---------------------------------------------------------------------------
 
@@ -57,7 +67,8 @@ export interface ProductWithTariffs {
   tariffs: R[]
 }
 
-const PRODUCT_TARIFF_MAP: [RegExp, string][] = [
+// Post-059: revenue/product type codes now live in energy_sale_type (not tariff_type)
+const PRODUCT_REVENUE_MAP: [RegExp, string][] = [
   [/energy|metered|available/i, 'ENERGY_SALES'],
   [/bess|battery/i, 'BESS_LEASE'],
   [/equipment|rental|lease/i, 'EQUIPMENT_RENTAL_LEASE'],
@@ -66,7 +77,7 @@ const PRODUCT_TARIFF_MAP: [RegExp, string][] = [
 
 export function mapProductToTariffType(product: R): string | null {
   const name = String(product.product_name ?? product.product_code ?? '')
-  for (const [re, type] of PRODUCT_TARIFF_MAP) {
+  for (const [re, type] of PRODUCT_REVENUE_MAP) {
     if (re.test(name)) return type
   }
   return null
@@ -76,17 +87,19 @@ export function groupProductsWithTariffs(
   billingProducts: R[],
   tariffs: R[],
   contractId: unknown,
+  amendmentIds?: Set<unknown>,
 ): { matched: ProductWithTariffs[]; unmatched: R[] } {
-  const contractBps = billingProducts.filter((bp) => bp.contract_id === contractId)
-  const contractTariffs = tariffs.filter((t) => t.contract_id === contractId)
+  const idSet = new Set([contractId, ...(amendmentIds ?? [])])
+  const contractBps = billingProducts.filter((bp) => idSet.has(bp.contract_id))
+  const contractTariffs = tariffs.filter((t) => idSet.has(t.contract_id))
   const claimedTariffIds = new Set<unknown>()
 
   const matched: ProductWithTariffs[] = contractBps.map((bp) => {
-    const tariffType = mapProductToTariffType(bp)
+    const revenueType = mapProductToTariffType(bp)
     let productTariffs: R[]
-    if (tariffType) {
+    if (revenueType) {
       productTariffs = contractTariffs.filter(
-        (t) => String(t.tariff_type_code).toUpperCase() === tariffType,
+        (t) => String(t.energy_sale_type_code).toUpperCase() === revenueType,
       )
     } else {
       // No match → show all tariffs as fallback for this product

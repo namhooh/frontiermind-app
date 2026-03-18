@@ -267,7 +267,7 @@ Calculate the SHA256 hash of your exported file and query the status endpoint:
 # Or use: openssl dgst -sha256 your_file.parquet
 
 curl -X GET \
-  "https://api.frontiermind.com/api/ingest/status/by-hash/{file_hash}?organization_id=YOUR_ORG_ID" \
+  "https://api.frontiermind.co/api/ingest/status/by-hash/{file_hash}?organization_id=YOUR_ORG_ID" \
   -H "Authorization: Bearer YOUR_API_KEY"
 ```
 

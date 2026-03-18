@@ -100,7 +100,7 @@ Send the following to the client:
 | External ID | `fm_org_____snowflake` |
 | S3 Bucket | `frontiermind-meter-data` |
 | S3 Path Prefix | `raw/snowflake/___/` |
-| API Endpoint | `https://api.frontiermind.com` |
+| API Endpoint | `https://api.frontiermind.co` |
 | API Key | `___` |
 
 ---
@@ -159,7 +159,7 @@ After receiving Snowflake IAM details:
 
 - [ ] Query status API (Client)
   ```bash
-  curl "https://api.frontiermind.com/api/ingest/status/by-hash/{hash}?organization_id=${ORG_ID}"
+  curl "https://api.frontiermind.co/api/ingest/status/by-hash/{hash}?organization_id=${ORG_ID}"
   ```
 
 - [ ] Verify data in `meter_reading` table (FrontierMind)

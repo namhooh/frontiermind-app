@@ -115,8 +115,10 @@ export function ProjectOverviewTab({ data, contractColumns, projectId, onSaved, 
                 ? phaseCods.map(p => [p.label, p.date] as FieldDef)
                 : [['COD', project.cod_date, { fieldKey: 'cod_date', entity: 'projects' as const, entityId: pid, type: 'date' as const }] as FieldDef]),
               ...(cid != null ? [['Contract Term (years)', primaryContract?.contract_term_years, { fieldKey: 'contract_term_years', entity: 'contracts' as const, entityId: cid, projectId: pid, type: 'number' as const }] as FieldDef] : []),
-              ['Installed Capacity (kWp)', project.installed_dc_capacity_kwp, { fieldKey: 'installed_dc_capacity_kwp', entity: 'projects' as const, entityId: pid, type: 'number' as const }],
-              ['Energy Sales Type', primaryTariff?.energy_sale_type_name],
+              ['Installed DC Capacity (kWp)', project.installed_dc_capacity_kwp, { fieldKey: 'installed_dc_capacity_kwp', entity: 'projects' as const, entityId: pid, type: 'number' as const }],
+              ['Installed AC Capacity (kW)', project.installed_ac_capacity_kw, { fieldKey: 'installed_ac_capacity_kw', entity: 'projects' as const, entityId: pid, type: 'number' as const }],
+              ['Revenue Type', primaryTariff?.energy_sale_type_name],
+              ['Energy Sale Type', primaryTariff?.tariff_type_name],
               ['Billing Currency', primaryTariff?.currency_code],
             ] as FieldDef[]} />
           )
@@ -154,8 +156,8 @@ export function ProjectOverviewTab({ data, contractColumns, projectId, onSaved, 
                         Amendment {a.amendment_number as number}
                       </span>
                       <span className="inline-flex items-center px-2 py-0.5 rounded text-xs font-medium bg-amber-50 text-amber-700 border border-amber-200">
-                        {a.amendment_date
-                          ? new Date(String(a.amendment_date)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
+                        {a.effective_date
+                          ? new Date(String(a.effective_date)).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' })
                           : ''}
                       </span>
                     </div>

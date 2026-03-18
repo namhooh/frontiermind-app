@@ -72,7 +72,7 @@ class MeterAggregateLoader:
     ]
 
     # Required FK fields — rows missing any of these are dropped with a warning
-    REQUIRED_FKS = {'meter_id', 'billing_period_id', 'contract_line_id'}
+    REQUIRED_FKS = {'billing_period_id', 'contract_line_id'}
 
     def load(
         self,
@@ -124,11 +124,17 @@ class MeterAggregateLoader:
                     i + 1, org, period, source, detail,
                 )
 
-        # Insert resolved rows
+        # Split resolved by meter_id presence — different conflict targets
+        with_meter = [r for r in resolved if r.get('meter_id') is not None]
+        without_meter = [r for r in resolved if r.get('meter_id') is None]
+
         rows_loaded = 0
-        for i in range(0, len(resolved), self.BATCH_SIZE):
-            batch = resolved[i:i + self.BATCH_SIZE]
-            rows_loaded += self._insert_batch(batch)
+        for i in range(0, len(with_meter), self.BATCH_SIZE):
+            batch = with_meter[i:i + self.BATCH_SIZE]
+            rows_loaded += self._insert_batch(batch, has_meter=True)
+        for i in range(0, len(without_meter), self.BATCH_SIZE):
+            batch = without_meter[i:i + self.BATCH_SIZE]
+            rows_loaded += self._insert_batch(batch, has_meter=False)
 
         # Compute date range from period_start values
         starts = [r['period_start'] for r in records if r.get('period_start')]
@@ -143,11 +149,13 @@ class MeterAggregateLoader:
         )
         return rows_loaded, rows_dropped, data_start, data_end
 
-    def _insert_batch(self, batch: List[Dict[str, Any]]) -> int:
+    def _insert_batch(self, batch: List[Dict[str, Any]], has_meter: bool = True) -> int:
         """Insert a batch of resolved records using the connection pool.
 
-        Uses ON CONFLICT with the idx_meter_aggregate_billing_dedup index
-        to upsert: new rows are inserted, existing rows are updated.
+        Uses ON CONFLICT with the appropriate dedup index depending on
+        whether the rows have a meter_id or not:
+          - has_meter=True  → idx_meter_aggregate_billing_dedup (non-null meter)
+          - has_meter=False → idx_meter_aggregate_billing_dedup_null_meter
         """
         if not batch:
             return 0
@@ -181,18 +189,27 @@ class MeterAggregateLoader:
             values.append(row)
 
         columns_str = ', '.join(self.COLUMNS)
-        # Upsert: on dedup conflict, update data columns with new values
         update_set = ', '.join(
             f"{col} = EXCLUDED.{col}" for col in self.UPSERT_COLUMNS
         )
+
+        if has_meter:
+            conflict = """ON CONFLICT (organization_id, meter_id, billing_period_id, contract_line_id)
+                WHERE period_type = 'monthly'
+                  AND meter_id IS NOT NULL
+                  AND billing_period_id IS NOT NULL
+                  AND contract_line_id IS NOT NULL"""
+        else:
+            conflict = """ON CONFLICT (organization_id, billing_period_id, contract_line_id)
+                WHERE period_type = 'monthly'
+                  AND meter_id IS NULL
+                  AND billing_period_id IS NOT NULL
+                  AND contract_line_id IS NOT NULL"""
+
         sql = f"""
             INSERT INTO meter_aggregate ({columns_str})
             VALUES %s
-            ON CONFLICT (organization_id, meter_id, billing_period_id, contract_line_id)
-            WHERE period_type = 'monthly'
-              AND meter_id IS NOT NULL
-              AND billing_period_id IS NOT NULL
-              AND contract_line_id IS NOT NULL
+            {conflict}
             DO UPDATE SET {update_set}
         """
 
@@ -201,7 +218,8 @@ class MeterAggregateLoader:
                 execute_values(cur, sql, values, page_size=self.BATCH_SIZE)
                 rows_affected = cur.rowcount
 
-        logger.info("Upserted batch: %d rows into meter_aggregate", rows_affected)
+        label = "with meter_id" if has_meter else "without meter_id"
+        logger.info("Upserted batch (%s): %d rows into meter_aggregate", label, rows_affected)
         return rows_affected
 
     @staticmethod

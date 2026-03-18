@@ -128,6 +128,8 @@ export interface SendEmailRequest {
   include_submission_link?: boolean
   submission_fields?: string[]
   extra_context?: Record<string, unknown>
+  subject_override?: string
+  body_html_override?: string
 }
 
 export interface CreateEmailTemplateRequest {

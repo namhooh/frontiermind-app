@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import React, { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { Upload, Plus, Loader2, Check, X, Maximize2, Minimize2, ChevronRight, ChevronDown } from 'lucide-react'
 import { IS_DEMO } from '@/lib/demoMode'
 import { toast } from 'sonner'
@@ -13,6 +13,10 @@ import {
   type PerformanceMonth,
 } from '@/lib/api/adminClient'
 import { formatMonth, fmtNum, fmtPct, fmtRatio, compClass } from '@/app/projects/utils/formatters'
+import { createClientResourceCache } from '@/app/projects/utils/clientResourceCache'
+
+const PERFORMANCE_CACHE_TTL_MS = 5 * 60 * 1000
+const performanceCache = createClientResourceCache<PlantPerformanceResponse>(PERFORMANCE_CACHE_TTL_MS)
 
 // ---------------------------------------------------------------------------
 // Props
@@ -28,10 +32,13 @@ interface PlantPerformanceTabProps {
 // ---------------------------------------------------------------------------
 
 export function PlantPerformanceTab({ projectId, editMode }: PlantPerformanceTabProps) {
-  const [data, setData] = useState<PlantPerformanceResponse | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [data, setData] = useState<PlantPerformanceResponse | null>(() => (
+    projectId != null ? performanceCache.get(String(projectId)) : null
+  ))
+  const [loading, setLoading] = useState(() => projectId != null && performanceCache.get(String(projectId)) == null)
   const [error, setError] = useState<string | null>(null)
   const [view, setView] = useState<'table' | 'charts'>('table')
+  const [loadAllMonths, setLoadAllMonths] = useState(false)
 
   // Fullscreen state
   const [fullscreen, setFullscreen] = useState(false)
@@ -46,19 +53,67 @@ export function PlantPerformanceTab({ projectId, editMode }: PlantPerformanceTab
   const [draft, setDraft] = useState<{
     billing_month: string; ghi: string; availability: string; comments: string
   }>({ billing_month: '', ghi: '', availability: '', comments: '' })
+  const months = useMemo(() => {
+    const currentMonth = new Date().toISOString().slice(0, 7) + '-01'
+    return (data?.months ?? []).filter((month) => month.billing_month <= currentMonth)
+  }, [data?.months])
+  const latestPrMonth = useMemo(() => months.find((month) => month.actual_pr != null), [months])
+  const latestAvailabilityMonth = useMemo(
+    () => months.find((month) => month.actual_availability_pct != null),
+    [months],
+  )
+  const meters = data?.meters ?? []
+  const capacity = data?.installed_capacity_kwp
+  const degradation = data?.annual_degradation_pct
 
   // Fetch
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (options?: { force?: boolean; allMonths?: boolean }) => {
     if (!projectId) return
+    const monthsParam = (options?.allMonths || loadAllMonths) ? 0 : undefined
+    const cacheKey = `${projectId}:${monthsParam ?? 12}`
+    if (options?.force) {
+      performanceCache.invalidate(cacheKey)
+    } else {
+      const cached = performanceCache.get(cacheKey)
+      if (cached) {
+        setData(cached)
+        setLoading(false)
+        setError(null)
+        return
+      }
+    }
+
     setLoading(true)
     setError(null)
     try {
-      const resp = await adminClient.getPlantPerformance(projectId)
+      const fetchOpts = monthsParam !== undefined ? { months: monthsParam } : undefined
+      const resp = options?.force
+        ? performanceCache.set(cacheKey, await adminClient.getPlantPerformance(projectId, fetchOpts))
+        : await performanceCache.getOrLoad(cacheKey, () => adminClient.getPlantPerformance(projectId, fetchOpts))
       setData(resp)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load performance data')
     } finally {
       setLoading(false)
+    }
+  }, [projectId, loadAllMonths])
+
+  useEffect(() => {
+    if (!projectId) {
+      setData(null)
+      setLoading(false)
+      setError(null)
+      return
+    }
+
+    // Reset to default 12-month view when project changes
+    setLoadAllMonths(false)
+
+    const cached = performanceCache.get(String(projectId))
+    if (cached) {
+      setData(cached)
+      setLoading(false)
+      setError(null)
     }
   }, [projectId])
 
@@ -74,7 +129,7 @@ export function PlantPerformanceTab({ projectId, editMode }: PlantPerformanceTab
     try {
       const resp = await adminClient.importPlantPerformance(projectId, file)
       toast.success(resp.message || `Imported ${resp.imported_rows} rows`)
-      await fetchData()
+      await fetchData({ force: true })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Import failed')
     } finally {
@@ -104,7 +159,7 @@ export function PlantPerformanceTab({ projectId, editMode }: PlantPerformanceTab
       toast.success(`Saved ${draft.billing_month}`)
       setShowAddRow(false)
       setDraft({ billing_month: '', ghi: '', availability: '', comments: '' })
-      await fetchData()
+      await fetchData({ force: true })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Save failed')
     } finally {
@@ -128,13 +183,6 @@ export function PlantPerformanceTab({ projectId, editMode }: PlantPerformanceTab
     return <p className="text-sm text-red-600">{error}</p>
   }
 
-  // Cap display at the current month — future forecast-only rows are hidden
-  const currentMonth = new Date().toISOString().slice(0, 7) + '-01'
-  const months = (data?.months ?? []).filter(m => m.billing_month <= currentMonth)
-  const meters = data?.meters ?? []
-  const capacity = data?.installed_capacity_kwp
-  const degradation = data?.annual_degradation_pct
-
   return (
     <div className={`space-y-4 ${fullscreen ? 'fixed inset-0 z-50 bg-white overflow-auto p-6' : ''}`}>
       {/* Summary cards */}
@@ -143,17 +191,11 @@ export function PlantPerformanceTab({ projectId, editMode }: PlantPerformanceTab
         <SummaryCard label="Degradation Rate" value={degradation != null ? `${(degradation * 100).toFixed(2)}%/yr` : '—'} />
         <SummaryCard
           label="Latest PR"
-          value={(() => {
-            const m = months.find(m => m.actual_pr != null)
-            return m ? fmtPct(m.actual_pr!) : '—'
-          })()}
+          value={latestPrMonth ? fmtPct(latestPrMonth.actual_pr!) : '—'}
         />
         <SummaryCard
           label="Latest Availability"
-          value={(() => {
-            const m = months.find(m => m.actual_availability_pct != null)
-            return m ? `${m.actual_availability_pct!.toFixed(1)}%` : '—'
-          })()}
+          value={latestAvailabilityMonth ? `${latestAvailabilityMonth.actual_availability_pct!.toFixed(1)}%` : '—'}
         />
       </div>
 
@@ -214,6 +256,16 @@ export function PlantPerformanceTab({ projectId, editMode }: PlantPerformanceTab
           </label>
         </div>
       </div>
+
+      {/* "Load all months" prompt when more data available */}
+      {data && data.total_months != null && data.months_returned != null && data.total_months > data.months_returned && !loadAllMonths && (
+        <button
+          onClick={() => { setLoadAllMonths(true); fetchData({ allMonths: true }) }}
+          className="w-full text-center text-xs text-blue-600 hover:text-blue-800 py-1.5 bg-blue-50 rounded border border-blue-100 hover:bg-blue-100 transition-colors"
+        >
+          Showing {data.months_returned} of {data.total_months} months — click to load all
+        </button>
+      )}
 
       {/* Content */}
       {view === 'table' ? (
@@ -299,7 +351,7 @@ function PerformanceWorkbook({
   onCancelAdd,
 }: {
   months: PerformanceMonth[]
-  meters: { meter_id: number; meter_name: string; energy_category: string }[]
+  meters: { meter_id: number; meter_name: string; energy_category: string; phase_number?: number | null; phase_cod_date?: string | null }[]
   editMode?: boolean
   projectId?: number
   onSaved?: () => void
@@ -310,7 +362,33 @@ function PerformanceWorkbook({
   onSaveManual?: () => void
   onCancelAdd?: () => void
 }) {
-  const yearGroups = groupByOperatingYear(months)
+  const yearGroups = useMemo(() => {
+    const groups = groupByOperatingYear(months)
+    // Pre-compute year-level totals to avoid recalculating in render
+    return groups.map(g => ({
+      ...g,
+      totalEnergy: g.months.reduce((s, m) => s + (m.total_energy_kwh ?? 0), 0),
+      totalForecast: g.months.reduce((s, m) => s + (m.forecast_energy_kwh ?? 0), 0),
+    }))
+  }, [months])
+  const hasMeters = meters.length > 0
+  const phaseGroups = useMemo(() => {
+    if (!hasMeters) return null
+    const hasPhases = meters.some(m => m.phase_number != null)
+    if (!hasPhases) return null
+    const groups: { phase: number | null; count: number }[] = []
+    let currentPhase: number | null | undefined = undefined
+    for (const m of meters) {
+      const p = m.phase_number ?? null
+      if (p === currentPhase && groups.length > 0) {
+        groups[groups.length - 1].count++
+      } else {
+        groups.push({ phase: p, count: 1 })
+        currentPhase = p
+      }
+    }
+    return groups
+  }, [hasMeters, meters])
 
   // Most recent year expanded by default, rest collapsed
   const [collapsed, setCollapsed] = useState<Set<string>>(() => {
@@ -336,13 +414,26 @@ function PerformanceWorkbook({
     )
   }
 
-  const hasMeters = meters.length > 0
-  const totalCols = 2 + 3 + (hasMeters ? meters.length : 0) + 1 + 4 + 3
-
   return (
     <div className="overflow-x-auto border border-slate-200 rounded-lg">
       <table className="w-full text-sm">
         <thead>
+          {/* Phase sub-group row (only for multi-phase projects) */}
+          {phaseGroups && (
+            <tr className="border-b border-purple-100">
+              <th colSpan={2 + 5} />
+              {phaseGroups.map((g, i) => (
+                <th
+                  key={`phase-${g.phase}-${i}`}
+                  colSpan={g.count}
+                  className="px-1 py-1 text-[10px] font-semibold text-purple-600 bg-purple-50/60 text-center border-r border-purple-100"
+                >
+                  {g.phase != null ? `Phase ${g.phase}` : ''}
+                </th>
+              ))}
+              <th colSpan={1 + 5 + 3} />
+            </tr>
+          )}
           {/* Group header row */}
           <tr className="border-b border-slate-200">
             {/* Reference group */}
@@ -350,7 +441,7 @@ function PerformanceWorkbook({
               Reference
             </th>
             {/* Forecast group */}
-            <th colSpan={3} className="px-3 py-1.5 text-xs font-semibold text-green-700 bg-green-50 border-r-2 border-green-200 text-center">
+            <th colSpan={5} className="px-3 py-1.5 text-xs font-semibold text-green-700 bg-green-50 border-r-2 border-green-200 text-center">
               Forecast
             </th>
             {/* Per-meter group */}
@@ -364,7 +455,7 @@ function PerformanceWorkbook({
               Available
             </th>
             {/* Aggregated group */}
-            <th colSpan={4} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 border-r-2 border-slate-300 text-center">
+            <th colSpan={5} className="px-3 py-1.5 text-xs font-semibold text-slate-700 bg-slate-50 border-r-2 border-slate-300 text-center">
               Aggregated
             </th>
             {/* Comparison group */}
@@ -373,14 +464,16 @@ function PerformanceWorkbook({
             </th>
           </tr>
           {/* Column header row */}
-          <tr className="bg-slate-50 border-b border-slate-200">
+          <tr className="bg-slate-50 border-b border-slate-200 text-xs">
             {/* Reference */}
             <th className="text-left px-3 py-2 font-medium text-slate-600 whitespace-nowrap sticky left-0 bg-slate-50 z-10 border-r border-slate-200">Mon</th>
             <th className="text-center px-2 py-2 font-medium text-slate-600 whitespace-nowrap border-r-2 border-blue-200">OY</th>
             {/* Forecast */}
-            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">E (kWh)</th>
-            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">GHI</th>
-            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap border-r-2 border-green-200">PR</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">Energy (kWh)</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">GHI Irrad.</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">POA Irrad.</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">PR (GHI)</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap border-r-2 border-green-200">PR (POA)</th>
             {/* Per-meter column headers */}
             {hasMeters && meters.map((m, i) => (
               <th key={`hdr-${m.meter_id}`} className={`text-center px-1 py-2 font-medium text-slate-600 whitespace-nowrap text-xs ${i === meters.length - 1 ? 'border-r-2 border-purple-200' : 'border-r border-slate-100'}`}>
@@ -390,8 +483,9 @@ function PerformanceWorkbook({
             {/* Available Energy (standalone) */}
             <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap border-r-2 border-purple-200">Avail</th>
             {/* Aggregated */}
-            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">Total E</th>
-            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">GHI</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">Total Energy</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">GHI Irrad.</th>
+            <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">POA Irrad.</th>
             <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap">PR</th>
             <th className="text-right px-2 py-2 font-medium text-slate-600 whitespace-nowrap border-r-2 border-slate-300">Avail%</th>
             {/* Comparison */}
@@ -417,13 +511,15 @@ function PerformanceWorkbook({
               <td className="px-2 py-1.5" />
               <td className="px-2 py-1.5" />
               <td className="px-2 py-1.5" />
+              <td className="px-2 py-1.5" />
+              <td className="px-2 py-1.5" />
               {/* Per-meter cols empty */}
               {hasMeters && meters.map((m) => (
                 <td key={`add-${m.meter_id}`} className="px-1 py-1.5" />
               ))}
               {/* Available empty */}
               <td className="px-2 py-1.5" />
-              {/* Aggregated: Total E empty, GHI editable */}
+              {/* Aggregated: Total E empty, GHI editable, POA empty, PR empty */}
               <td className="px-2 py-1.5" />
               <td className="px-2 py-1.5 text-right">
                 <input
@@ -435,6 +531,8 @@ function PerformanceWorkbook({
                   className="w-16 text-xs text-right border border-slate-300 rounded px-1.5 py-1"
                 />
               </td>
+              {/* POA empty */}
+              <td className="px-2 py-1.5" />
               {/* PR empty */}
               <td className="px-2 py-1.5" />
               {/* A% editable */}
@@ -465,31 +563,22 @@ function PerformanceWorkbook({
           )}
 
           {/* Year-grouped data rows */}
-          {yearGroups.map((group) => {
-            const isCollapsed = collapsed.has(group.label)
-            // Compute year-level summary for the collapsed row
-            const totalEnergy = group.months.reduce((s, m) => s + (m.total_energy_kwh ?? 0), 0)
-            const totalForecast = group.months.reduce((s, m) => s + (m.forecast_energy_kwh ?? 0), 0)
-            const monthCount = group.months.length
-
-            return (
+          {yearGroups.map((group) => (
               <YearGroupRows
                 key={group.label}
                 group={group}
-                isCollapsed={isCollapsed}
+                isCollapsed={collapsed.has(group.label)}
                 onToggle={() => toggleYear(group.label)}
-                totalCols={totalCols}
-                totalEnergy={totalEnergy}
-                totalForecast={totalForecast}
-                monthCount={monthCount}
+                totalEnergy={group.totalEnergy}
+                totalForecast={group.totalForecast}
+                monthCount={group.months.length}
                 meters={meters}
                 hasMeters={hasMeters}
                 editMode={editMode}
                 projectId={projectId}
                 onSaved={onSaved}
               />
-            )
-          })}
+          ))}
         </tbody>
       </table>
     </div>
@@ -504,7 +593,6 @@ function YearGroupRows({
   group,
   isCollapsed,
   onToggle,
-  totalCols,
   totalEnergy,
   totalForecast,
   monthCount,
@@ -517,11 +605,10 @@ function YearGroupRows({
   group: YearGroup
   isCollapsed: boolean
   onToggle: () => void
-  totalCols: number
   totalEnergy: number
   totalForecast: number
   monthCount: number
-  meters: { meter_id: number; meter_name: string; energy_category: string }[]
+  meters: { meter_id: number; meter_name: string; energy_category: string; phase_number?: number | null; phase_cod_date?: string | null }[]
   hasMeters: boolean
   editMode?: boolean
   projectId?: number
@@ -555,6 +642,8 @@ function YearGroupRows({
           {totalForecast > 0 ? fmtNum(totalForecast) : '—'}
         </td>
         <td className="px-2 py-1.5" />
+        <td className="px-2 py-1.5" />
+        <td className="px-2 py-1.5" />
         <td className="px-2 py-1.5 border-r-2 border-green-100" />
         {/* Per-meter cols */}
         {hasMeters && meters.map((m, i) => (
@@ -566,6 +655,7 @@ function YearGroupRows({
         <td className="px-2 py-1.5 text-right text-xs tabular-nums font-semibold text-slate-700">
           {totalEnergy > 0 ? fmtNum(totalEnergy) : '—'}
         </td>
+        <td className="px-2 py-1.5" />
         <td className="px-2 py-1.5" />
         <td className="px-2 py-1.5" />
         <td className="px-2 py-1.5 border-r-2 border-slate-200" />
@@ -693,7 +783,7 @@ function InlinePerfEdit({
 // PerformanceRow — single data row, supports inline editing
 // ---------------------------------------------------------------------------
 
-function PerformanceRow({
+const PerformanceRow = React.memo(function PerformanceRow({
   m,
   meters,
   hasMeters,
@@ -702,7 +792,7 @@ function PerformanceRow({
   onSaved,
 }: {
   m: PerformanceMonth
-  meters: { meter_id: number; meter_name: string; energy_category: string }[]
+  meters: { meter_id: number; meter_name: string; energy_category: string; phase_number?: number | null; phase_cod_date?: string | null }[]
   hasMeters: boolean
   editMode?: boolean
   projectId?: number
@@ -718,7 +808,9 @@ function PerformanceRow({
       {/* Forecast (read-only, edited in Technical tab) */}
       <td className="px-2 py-2 text-right tabular-nums text-slate-500">{fmtNum(m.forecast_energy_kwh)}</td>
       <td className="px-2 py-2 text-right tabular-nums text-slate-500">{fmtNum(m.forecast_ghi_irradiance, 1)}</td>
-      <td className="px-2 py-2 text-right tabular-nums text-slate-500 border-r-2 border-green-100">{fmtPct(m.forecast_pr)}</td>
+      <td className="px-2 py-2 text-right tabular-nums text-slate-500">{fmtNum(m.forecast_poa_irradiance, 1)}</td>
+      <td className="px-2 py-2 text-right tabular-nums text-slate-500">{fmtPct(m.forecast_pr)}</td>
+      <td className="px-2 py-2 text-right tabular-nums text-slate-500 border-r-2 border-green-100">{fmtPct(m.forecast_pr_poa)}</td>
       {/* Per-meter metered kWh */}
       {hasMeters && meters.map((meter, i) => {
         const md = m.meter_details?.find(d => d.meter_id === meter.meter_id)
@@ -737,6 +829,7 @@ function PerformanceRow({
           <InlinePerfEdit value={m.actual_ghi_irradiance} billingMonth={m.billing_month} field="ghi_irradiance_wm2" projectId={projectId!} onSaved={onSaved!} />
         ) : fmtNum(m.actual_ghi_irradiance, 1)}
       </td>
+      <td className="px-2 py-2 text-right tabular-nums text-slate-600">{fmtNum(m.actual_poa_irradiance, 1)}</td>
       <td className="px-2 py-2 text-right tabular-nums text-slate-700 font-medium">{fmtPct(m.actual_pr)}</td>
       <td className="px-2 py-2 text-right tabular-nums text-slate-600 border-r-2 border-slate-200">
         {canEdit ? (
@@ -755,21 +848,24 @@ function PerformanceRow({
       </td>
     </tr>
   )
-}
+})
 
 // ---------------------------------------------------------------------------
 // Charts View
 // ---------------------------------------------------------------------------
 
 function PerformanceCharts({ months }: { months: PerformanceMonth[] }) {
-  // Reverse for chronological order in charts
-  const chartData = [...months].reverse().map((m) => ({
-    month: formatMonth(m.billing_month),
-    actual: m.total_energy_kwh,
-    forecast: m.forecast_energy_kwh,
-    pr: m.actual_pr != null ? m.actual_pr * 100 : null,
-    forecast_pr: m.forecast_pr != null ? m.forecast_pr * 100 : null,
-  }))
+  // Memoize chart data transform — only computed when this component is rendered
+  const chartData = useMemo(() =>
+    [...months].reverse().map((m) => ({
+      month: formatMonth(m.billing_month),
+      actual: m.total_energy_kwh,
+      forecast: m.forecast_energy_kwh,
+      pr: m.actual_pr != null ? m.actual_pr * 100 : null,
+      forecast_pr: m.forecast_pr != null ? m.forecast_pr * 100 : null,
+    })),
+    [months],
+  )
 
   if (chartData.length === 0) {
     return (

@@ -252,8 +252,8 @@
 
 ✅ **Deployment (January 2026):**
 - ✅ **AWS ECS Fargate Deployment (Task 5.1-5.2):** Backend deployed to AWS ECS Fargate
-  - Backend URL: `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com`
-  - Health Check: `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/health`
+  - Backend URL: `https://api.frontiermind.co`
+  - Health Check: `https://api.frontiermind.co/health`
   - See `CLAUDE.md` for full deployment documentation
 
 **Next Steps:**
@@ -1586,7 +1586,7 @@ database/migrations/
 
     URLS:
     ├── Frontend:  https://frontiermind-app.vercel.app
-    ├── Backend:   http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com
+    ├── Backend:   https://api.frontiermind.co
     └── Database:  Supabase PostgreSQL (Transaction Pooler port 6543)
 ```
 
@@ -1664,7 +1664,7 @@ Frontend automatically uses `localhost:8000` when `NEXT_PUBLIC_PYTHON_BACKEND_UR
 **Vercel (Frontend):**
 | Variable | Value |
 |----------|-------|
-| `NEXT_PUBLIC_PYTHON_BACKEND_URL` | `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com` |
+| `NEXT_PUBLIC_PYTHON_BACKEND_URL` | `https://api.frontiermind.co` |
 | `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Your Supabase anon key |
 
@@ -1700,10 +1700,10 @@ aws logs filter-log-events --log-group-name /ecs/frontiermind-backend --filter-p
 
 ```bash
 # Backend health
-curl http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/health
+curl https://api.frontiermind.co/health
 
 # API documentation
-open http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/docs
+open https://api.frontiermind.co/docs
 ```
 
 #### AWS Console Dashboards
@@ -1901,7 +1901,7 @@ cd python-backend && source aws/infrastructure-config.env && ./deploy-aws.sh  # 
 
 # === MONITORING ===
 aws logs tail /ecs/frontiermind-backend --follow
-curl http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/health
+curl https://api.frontiermind.co/health
 
 # === SECRETS ===
 aws secretsmanager list-secrets --region us-east-1 --filter Key=name,Values=frontiermind

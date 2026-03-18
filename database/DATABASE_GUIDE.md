@@ -99,6 +99,7 @@ database/
 │   ├── 058_sage_bp_import.sql                        # SAGE BP import data
 │   ├── 059_tariff_taxonomy_restructure.sql           # Tariff classification taxonomy restructure: tariff_type→offtake model, energy_sale_type→revenue type, escalation_type→expanded with FLOATING_* flat codes
 │   ├── 060_tariff_rate_billing_period.sql            # tariff_rate cleanup: add billing_period_id FK, drop fx_rate_hard_id, rename fx_rate_local_id → exchange_rate_id
+│   ├── 062_tariff_formula.sql                       # Tariff formula decomposition: computation graphs from PPA pricing sections (Step 11P)
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -1170,6 +1171,12 @@ database/
 - Adapter registry expanded: `generic` source type falls through to `GenericBillingAdapter`
 - Frontend: `GenerateAPIKeyDialog.tsx` and `OnboardingSummary.tsx` updated with `reference_prices` scope
 - Client docs: `CLIENT_INSTRUCTIONS.md` updated with Sections 3 (FX Rates) and 4 (Reference Prices)
+
+**v10.18 (oy_start_date as Canonical OY Anchor)** - Complete
+- No new migration — data population script + application-layer code changes
+- `clause_tariff.logic_parameters.oy_start_date` is now the single canonical OY anchor for all 10 computation paths
+- Population script: `python-backend/scripts/populate_oy_start_date.py` — set `oy_start_date = cod_date` for 36 clause_tariff rows; LOI01 kept at Transfer Date (2019-10-31)
+- All 10 OY code paths updated to read `oy_start_date` directly instead of falling back to `project.cod_date`
 
 ---
 

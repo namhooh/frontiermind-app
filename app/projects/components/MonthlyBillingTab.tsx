@@ -12,9 +12,18 @@ import {
   type MeterBillingMonth,
   type MeterReadingDetail,
   type ExpectedInvoiceSummary,
-  type ExpectedInvoiceLineItem,
 } from '@/lib/api/adminClient'
 import { formatMonth, fmtNum, fmtCurrency, varianceClass } from '@/app/projects/utils/formatters'
+import { parsePhaseNumber } from '@/app/projects/components/shared/helpers'
+import { createClientResourceCache } from '@/app/projects/utils/clientResourceCache'
+
+type CachedBillingData = {
+  monthly: MonthlyBillingResponse
+  meter: MeterBillingResponse | null
+}
+
+const MONTHLY_BILLING_CACHE_TTL_MS = 5 * 60 * 1000
+const monthlyBillingCache = createClientResourceCache<CachedBillingData>(MONTHLY_BILLING_CACHE_TTL_MS)
 
 // ---------------------------------------------------------------------------
 // InlineNumberEdit — click-to-edit number cell for existing rows
@@ -178,11 +187,16 @@ interface UnifiedBillingRow {
 // ---------------------------------------------------------------------------
 
 export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProps) {
-  const [data, setData] = useState<MonthlyBillingResponse | null>(null)
-  const [meterData, setMeterData] = useState<MeterBillingResponse | null>(null)
-  const [loading, setLoading] = useState(false)
+  const [data, setData] = useState<MonthlyBillingResponse | null>(() => (
+    projectId != null ? monthlyBillingCache.get(String(projectId))?.monthly ?? null : null
+  ))
+  const [meterData, setMeterData] = useState<MeterBillingResponse | null>(() => (
+    projectId != null ? monthlyBillingCache.get(String(projectId))?.meter ?? null : null
+  ))
+  const [loading, setLoading] = useState(() => projectId != null && monthlyBillingCache.get(String(projectId)) == null)
   const [error, setError] = useState<string | null>(null)
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  const [loadAllMonths, setLoadAllMonths] = useState(false)
 
   // Fullscreen state
   const [fullscreen, setFullscreen] = useState(false)
@@ -201,21 +215,71 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
   })
 
   // Fetch data
-  const fetchData = useCallback(async () => {
+  const fetchData = useCallback(async (options?: { force?: boolean; allMonths?: boolean }) => {
     if (!projectId) return
+    const monthsParam = (options?.allMonths || loadAllMonths) ? 0 : undefined
+    const cacheKey = `${projectId}:${monthsParam ?? 12}`
+    if (options?.force) {
+      monthlyBillingCache.invalidate(cacheKey)
+    } else {
+      const cached = monthlyBillingCache.get(cacheKey)
+      if (cached) {
+        setData(cached.monthly)
+        setMeterData(cached.meter)
+        setLoading(false)
+        setError(null)
+        return
+      }
+    }
+
     setLoading(true)
     setError(null)
     try {
-      const [resp, meterResp] = await Promise.all([
-        adminClient.getMonthlyBilling(projectId),
-        adminClient.getMeterBilling(projectId).catch(() => null),
-      ])
-      setData(resp)
-      setMeterData(meterResp)
+      const fetchOpts = monthsParam !== undefined ? { months: monthsParam } : undefined
+
+      // Fetch monthly billing first (unblocks render), then meter billing in background
+      const monthly = options?.force
+        ? await adminClient.getMonthlyBilling(projectId, fetchOpts)
+        : await (async () => {
+            const cached = monthlyBillingCache.get(cacheKey)
+            if (cached) return cached.monthly
+            return adminClient.getMonthlyBilling(projectId, fetchOpts)
+          })()
+      setData(monthly)
+      setLoading(false)
+
+      // Fetch meter billing in background (for expandable detail rows)
+      adminClient.getMeterBilling(projectId, fetchOpts).then((meter) => {
+        setMeterData(meter)
+        monthlyBillingCache.set(cacheKey, { monthly, meter })
+      }).catch(() => {
+        monthlyBillingCache.set(cacheKey, { monthly, meter: null })
+      })
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load billing data')
     } finally {
       setLoading(false)
+    }
+  }, [projectId, loadAllMonths])
+
+  useEffect(() => {
+    if (!projectId) {
+      setData(null)
+      setMeterData(null)
+      setLoading(false)
+      setError(null)
+      return
+    }
+
+    // Reset to default 12-month view when project changes
+    setLoadAllMonths(false)
+
+    const cached = monthlyBillingCache.get(String(projectId))
+    if (cached) {
+      setData(cached.monthly)
+      setMeterData(cached.meter)
+      setLoading(false)
+      setError(null)
     }
   }, [projectId])
 
@@ -236,7 +300,7 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
     try {
       const resp = await adminClient.importMonthlyBilling(projectId, file)
       toast.success(resp.message || `Imported ${resp.imported_rows} rows`)
-      await fetchData()
+      await fetchData({ force: true })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Import failed')
     } finally {
@@ -283,7 +347,7 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
       toast.success(`Saved ${draft.billing_month}`)
       setShowAddRow(false)
       setDraft({ billing_month: '', actual_kwh: '', forecast_kwh: '' })
-      await fetchData()
+      await fetchData({ force: true })
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Save failed')
     } finally {
@@ -336,7 +400,7 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
         total_billing_amount: row.total_billing_amount,
         total_billing_amount_hard_ccy: row.total_billing_amount_hard_ccy ?? null,
         meter_readings: mm?.meter_readings ?? [],
-        expected_invoice: mm?.expected_invoice ?? null,
+        expected_invoice: mm?.expected_invoice ?? row.expected_invoice ?? null,
       })
     }
 
@@ -371,7 +435,7 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
     })
   }, [data, meterData])
 
-  // Group rows by calendar year (DESC)
+  // Group rows by calendar year (DESC) with pre-computed totals
   const yearGroups = useMemo(() => {
     const map = new Map<string, UnifiedBillingRow[]>()
     for (const row of unifiedRows) {
@@ -379,10 +443,22 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
       if (!map.has(year)) map.set(year, [])
       map.get(year)!.push(row)
     }
-    // Sort years DESC
+    // Sort years DESC and pre-compute year-level totals
     return [...map.entries()]
       .sort(([a], [b]) => b.localeCompare(a))
-      .map(([year, rows]) => ({ year, rows }))
+      .map(([year, rows]) => {
+        let yearActual = 0, yearForecast = 0, yearNetDue = 0, yearNetDueHard = 0
+        let hasActuals = false
+        for (const r of rows) {
+          if (r.actual_kwh != null) { yearActual += r.actual_kwh; hasActuals = true }
+          if (r.forecast_kwh != null) yearForecast += r.forecast_kwh
+          if (r.expected_invoice) yearNetDue += r.expected_invoice.net_due
+          else if (r.total_billing_amount != null) yearNetDue += r.total_billing_amount
+          if (r.expected_invoice?.net_due_hard_ccy != null) yearNetDueHard += r.expected_invoice.net_due_hard_ccy
+          else if (r.total_billing_amount_hard_ccy != null) yearNetDueHard += r.total_billing_amount_hard_ccy
+        }
+        return { year, rows, yearActual, yearForecast, yearNetDue, yearNetDueHard, hasActuals }
+      })
   }, [unifiedRows])
 
   // Year-group collapse state: most recent year expanded, rest collapsed
@@ -536,6 +612,16 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
         </div>
       </div>
 
+      {/* "Load all months" prompt when more data available */}
+      {data && data.total_months != null && data.months_returned != null && data.total_months > data.months_returned && !loadAllMonths && (
+        <button
+          onClick={() => { setLoadAllMonths(true); fetchData({ allMonths: true }) }}
+          className="w-full text-center text-xs text-blue-600 hover:text-blue-800 py-1.5 bg-blue-50 rounded border border-blue-100 hover:bg-blue-100 transition-colors"
+        >
+          Showing {data.months_returned} of {data.total_months} months — click to load all
+        </button>
+      )}
+
       {/* Table */}
       {!hasData ? (
         <div className="flex items-center justify-center h-32 text-sm text-slate-400">
@@ -644,27 +730,15 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
               )}
 
               {/* Year-grouped data rows */}
-              {yearGroups.map(({ year, rows: yearRows }) => {
-                const isYearCollapsed = collapsedYears.has(year)
-                const yearActual = yearRows.reduce((s, r) => s + (r.actual_kwh ?? 0), 0)
-                const yearForecast = yearRows.reduce((s, r) => s + (r.forecast_kwh ?? 0), 0)
-                const yearNetDue = yearRows.reduce((s, r) => {
-                  if (r.expected_invoice) return s + r.expected_invoice.net_due
-                  return s + (r.total_billing_amount ?? 0)
-                }, 0)
-                const yearNetDueHard = yearRows.reduce((s, r) => {
-                  if (r.expected_invoice?.net_due_hard_ccy != null) return s + r.expected_invoice.net_due_hard_ccy
-                  if (r.total_billing_amount_hard_ccy != null) return s + r.total_billing_amount_hard_ccy
-                  return s
-                }, 0)
-                const hasActuals = yearRows.some(r => r.actual_kwh != null)
+              {yearGroups.map((yg) => {
+                const isYearCollapsed = collapsedYears.has(yg.year)
 
                 return (
-                  <React.Fragment key={year}>
+                  <React.Fragment key={yg.year}>
                     {/* Year header row */}
                     <tr
                       className="border-b border-slate-200 bg-slate-100/80 cursor-pointer hover:bg-slate-100 select-none"
-                      onClick={() => toggleYear(year)}
+                      onClick={() => toggleYear(yg.year)}
                     >
                       <td className="w-6 px-1 py-1.5 text-slate-400">
                         {isYearCollapsed
@@ -673,14 +747,14 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
                         }
                       </td>
                       <td className="px-3 py-1.5 font-semibold text-slate-700 text-xs border-r-2 border-blue-100">
-                        {year}
-                        <span className="ml-2 font-normal text-slate-400">{yearRows.length} mo</span>
+                        {yg.year}
+                        <span className="ml-2 font-normal text-slate-400">{yg.rows.length} mo</span>
                       </td>
                       <td className="px-3 py-1.5 text-right text-xs tabular-nums text-slate-600 font-medium">
-                        {hasActuals ? fmtNum(yearActual) : '—'}
+                        {yg.hasActuals ? fmtNum(yg.yearActual) : '—'}
                       </td>
                       <td className="px-3 py-1.5 text-right text-xs tabular-nums text-slate-500">
-                        {yearForecast > 0 ? fmtNum(yearForecast) : '—'}
+                        {yg.yearForecast > 0 ? fmtNum(yg.yearForecast) : '—'}
                       </td>
                       <td className="px-3 py-1.5" />
                       {products.map((p) => (
@@ -692,18 +766,18 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
                       <td className="px-3 py-1.5" />
                       <td className="px-3 py-1.5 text-right text-xs tabular-nums font-semibold text-slate-700">
                         <div>
-                          {yearNetDue > 0 ? fmtCurrency(yearNetDue, currency) : '—'}
-                          {currency && yearNetDue > 0 && <span className="ml-1 font-normal text-slate-400">{currency}</span>}
+                          {yg.yearNetDue > 0 ? fmtCurrency(yg.yearNetDue, currency) : '—'}
+                          {currency && yg.yearNetDue > 0 && <span className="ml-1 font-normal text-slate-400">{currency}</span>}
                         </div>
-                        {showHardCcy && yearNetDueHard > 0 && (
+                        {showHardCcy && yg.yearNetDueHard > 0 && (
                           <div className="text-xs font-normal text-slate-500 tabular-nums">
-                            {fmtCurrency(yearNetDueHard, hardCurrency)} {hardCurrency}
+                            {fmtCurrency(yg.yearNetDueHard, hardCurrency)} {hardCurrency}
                           </div>
                         )}
                       </td>
                     </tr>
                     {/* Month rows (hidden when collapsed) */}
-                    {!isYearCollapsed && yearRows.map((row) => (
+                    {!isYearCollapsed && yg.rows.map((row) => (
                       <UnifiedRow
                         key={row.billing_month}
                         row={row}
@@ -765,7 +839,7 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
 // UnifiedRow — parent expandable row
 // ---------------------------------------------------------------------------
 
-function UnifiedRow({
+const UnifiedRow = React.memo(function UnifiedRow({
   row,
   products,
   currency,
@@ -882,7 +956,7 @@ function UnifiedRow({
       )}
     </>
   )
-}
+})
 
 // ---------------------------------------------------------------------------
 // ExpandedDetailRows — meter breakdown + levy/WHT breakdown
@@ -905,8 +979,14 @@ function ExpandedDetailRows({
   showHardCcy: boolean
   totalCols: number
 }) {
+  const energyItems = expectedInvoice?.line_items
+    .filter(li => li.line_item_type_code === 'ENERGY' || li.line_item_type_code === 'AVAILABLE_ENERGY')
+    .sort((a, b) => a.sort_order - b.sort_order) ?? []
   const levyItems = expectedInvoice?.line_items
     .filter(li => li.line_item_type_code === 'LEVY')
+    .sort((a, b) => a.sort_order - b.sort_order) ?? []
+  const taxItems = expectedInvoice?.line_items
+    .filter(li => li.line_item_type_code === 'TAX')
     .sort((a, b) => a.sort_order - b.sort_order) ?? []
   const whItems = expectedInvoice?.line_items
     .filter(li => li.line_item_type_code === 'WITHHOLDING')
@@ -918,9 +998,12 @@ function ExpandedDetailRows({
   // Shared sub-row cell class (matches parent px-3 py-2 but slightly compact)
   const sc = 'px-3 py-1.5'
 
+  // Show energy line items from expected invoice when no meter readings available
+  const showInvoiceEnergyLines = readings.length === 0 && energyItems.length > 0
+
   return (
     <>
-      {/* Meter breakdown rows */}
+      {/* Meter breakdown rows (from meter-billing API) */}
       {readings.map((r, idx) => {
         const rate = r.rate
         // Build a lookup of persisted invoice line items for this meter
@@ -931,7 +1014,13 @@ function ExpandedDetailRows({
           <tr key={`meter-${r.meter_id}-${idx}`} className="bg-slate-50/80 border-b border-slate-100/50 text-xs">
             <td className="w-6 px-1 py-1.5" />
             <td className={`${sc} text-slate-500 whitespace-nowrap`}>
-              {r.meter_name || `Meter ${r.meter_id}`}
+              {(() => {
+                const phaseNum = parsePhaseNumber(r.meter_name)
+                const displayName = r.meter_name || `Meter ${r.meter_id}`
+                return phaseNum != null ? (
+                  <><span className="font-medium text-purple-600">P{phaseNum}</span>{' '}{displayName}</>
+                ) : displayName
+              })()}
               {rate != null && (
                 <span className="ml-1.5 text-[10px] text-slate-400 tabular-nums">@{fmtNum(rate, 4)}/kWh</span>
               )}
@@ -984,8 +1073,37 @@ function ExpandedDetailRows({
         )
       })}
 
+      {/* Energy line items from expected invoice (fallback when no meter readings) */}
+      {showInvoiceEnergyLines && energyItems.map((li, i) => (
+        <tr key={`energy-${i}`} className="bg-slate-50/80 border-b border-slate-100/50 text-xs">
+          <td className="w-6 px-1 py-1.5" />
+          <td className={`${sc} text-slate-500 whitespace-nowrap`}>
+            {li.description}
+            {li.unit_price != null && (
+              <span className="ml-1.5 text-[10px] text-slate-400 tabular-nums">@{fmtNum(li.unit_price, 4)}/kWh</span>
+            )}
+          </td>
+          <td className={`${sc} text-right tabular-nums text-slate-500`}>
+            {fmtNum(li.quantity)}
+          </td>
+          <td className={sc} />
+          <td className={sc} />
+          {products.map((p) => (
+            <td key={p.product_code} className={`${sc} text-right tabular-nums text-slate-500`}>
+              {fmtCurrency(li.line_total_amount, currency)}
+            </td>
+          ))}
+          {/* Waterfall empty */}
+          <td className={sc} />
+          <td className={sc} />
+          <td className={sc} />
+          <td className={sc} />
+          <td className={sc} />
+        </tr>
+      ))}
+
       {/* Levy breakdown rows */}
-      {levyItems.length > 0 && readings.length > 0 && (
+      {levyItems.length > 0 && (readings.length > 0 || showInvoiceEnergyLines) && (
         <tr><td colSpan={totalCols} className="h-px bg-slate-200/60" /></tr>
       )}
       {levyItems.map((li, i) => (
@@ -1010,8 +1128,35 @@ function ExpandedDetailRows({
         </tr>
       ))}
 
+      {/* VAT breakdown rows */}
+      {taxItems.length > 0 && (
+        <tr><td colSpan={totalCols} className="h-px bg-slate-200/60" /></tr>
+      )}
+      {taxItems.map((li, i) => (
+        <tr key={`tax-${i}`} className="bg-slate-50/80 border-b border-slate-100/50 text-xs">
+          <td className="w-6 px-1 py-1.5" />
+          <td className={`${sc} text-slate-500 whitespace-nowrap`}>
+            {li.description}
+          </td>
+          {/* Empty: actual, forecast, var%, products */}
+          {Array.from({ length: midEmpties }).map((_, j) => (
+            <td key={j} className={sc} />
+          ))}
+          {/* Levies empty */}
+          <td className={sc} />
+          {/* VAT column */}
+          <td className={`${sc} text-right tabular-nums text-slate-500`}>
+            {fmtCurrency(li.line_total_amount, currency)}
+          </td>
+          {/* Gross, W/H, Net Due empty */}
+          <td className={sc} />
+          <td className={sc} />
+          <td className={sc} />
+        </tr>
+      ))}
+
       {/* Withholding breakdown rows */}
-      {whItems.length > 0 && (readings.length > 0 || levyItems.length > 0) && levyItems.length === 0 && (
+      {whItems.length > 0 && (readings.length > 0 || showInvoiceEnergyLines || levyItems.length > 0 || taxItems.length > 0) && (
         <tr><td colSpan={totalCols} className="h-px bg-slate-200/60" /></tr>
       )}
       {whItems.map((li, i) => (

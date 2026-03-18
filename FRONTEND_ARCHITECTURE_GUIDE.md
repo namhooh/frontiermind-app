@@ -504,7 +504,7 @@ export function cn(...inputs: ClassValue[]) {
 
 | Variable | Purpose | Example |
 |----------|---------|---------|
-| `NEXT_PUBLIC_PYTHON_BACKEND_URL` | Backend API URL | `http://localhost:8000` or `https://api.frontiermind.com` |
+| `NEXT_PUBLIC_PYTHON_BACKEND_URL` | Backend API URL | `http://localhost:8000` or `https://api.frontiermind.co` |
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase project URL | `https://xxx.supabase.co` |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase anonymous key | `eyJhbGci...` |
 

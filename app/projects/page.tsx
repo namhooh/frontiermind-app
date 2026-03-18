@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useCallback, useEffect, useMemo, Suspense } from 'react'
+import { useState, useCallback, useEffect, useMemo, Suspense, useRef } from 'react'
 import { useSearchParams } from 'next/navigation'
+import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { ArrowLeft, Loader2, Pencil, PencilOff, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { IS_DEMO } from '@/lib/demoMode'
@@ -10,16 +11,72 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/app/components/ui/ta
 import { adminClient, type ProjectDashboardResponse, type MRPObservation, type SubmissionTokenItem } from '@/lib/api/adminClient'
 import { fmtNum } from './utils/formatters'
 import { toOpts } from './utils/constants'
+import { createClientResourceCache } from './utils/clientResourceCache'
 import { ProjectSidebar } from './components/ProjectSidebar'
-import { ProjectOverviewTab } from './components/ProjectOverviewTab'
-import { ProjectTableTab, type Column } from './components/ProjectTableTab'
-import { PricingTariffsTab } from './components/PricingTariffsTab'
-import { TechnicalTab } from './components/TechnicalTab'
+import type { Column } from './components/ProjectTableTab'
 // ForecastsGuaranteesTab — content moved into TechnicalTab
-import { MonthlyBillingTab } from './components/MonthlyBillingTab'
-import { PlantPerformanceTab } from './components/PlantPerformanceTab'
 import { PortfolioHome } from './components/PortfolioHome'
 // import { SpreadsheetTab } from './components/SpreadsheetTab'
+
+type DashboardTabValue = 'overview' | 'pricing-tariffs' | 'technical' | 'performance' | 'monthly-billing'
+
+type CachedMrpData = {
+  monthly: MRPObservation[]
+  annual: MRPObservation[]
+  tokens: SubmissionTokenItem[]
+}
+
+const PROJECT_DASHBOARD_CACHE_TTL_MS = 5 * 60 * 1000
+const MRP_CACHE_TTL_MS = 5 * 60 * 1000
+
+const projectDashboardCache = createClientResourceCache<ProjectDashboardResponse>(PROJECT_DASHBOARD_CACHE_TTL_MS)
+const mrpDataCache = createClientResourceCache<CachedMrpData>(MRP_CACHE_TTL_MS)
+
+function TabPanelFallback() {
+  return (
+    <div className="flex items-center justify-center h-40">
+      <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+    </div>
+  )
+}
+
+const ProjectOverviewTab = dynamic(
+  () => import('./components/ProjectOverviewTab').then((mod) => mod.ProjectOverviewTab),
+  { loading: TabPanelFallback },
+)
+
+const PricingTariffsTab = dynamic(
+  () => import('./components/PricingTariffsTab').then((mod) => mod.PricingTariffsTab),
+  { loading: TabPanelFallback },
+)
+
+const TechnicalTab = dynamic(
+  () => import('./components/TechnicalTab').then((mod) => mod.TechnicalTab),
+  { loading: TabPanelFallback },
+)
+
+const MonthlyBillingTab = dynamic(
+  () => import('./components/MonthlyBillingTab').then((mod) => mod.MonthlyBillingTab),
+  { loading: TabPanelFallback },
+)
+
+const PlantPerformanceTab = dynamic(
+  () => import('./components/PlantPerformanceTab').then((mod) => mod.PlantPerformanceTab),
+  { loading: TabPanelFallback },
+)
+
+// Stable format functions — defined outside component to avoid re-creation on every render
+const MONTH_SHORT = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'] as const
+const fmtMonthCol = (v: unknown) => {
+  if (v == null) return '—'
+  const d = new Date(String(v))
+  if (isNaN(d.getTime())) return String(v)
+  return `${MONTH_SHORT[d.getUTCMonth()]} '${String(d.getUTCFullYear()).slice(2)}`
+}
+const fmtNum2 = (v: unknown) => v == null ? '—' : fmtNum(Number(v), 2)
+const fmtPR = (v: unknown) => v == null ? '—' : (Number(v) * 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const fmtDegradation = (v: unknown) => v == null ? '—' : Number(v).toFixed(5)
+const fmtLocale2 = (v: unknown) => v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 export default function ProjectsPage() {
   return (
@@ -40,37 +97,96 @@ function ProjectsPageContent() {
   const [mrpAnnual, setMrpAnnual] = useState<MRPObservation[]>([])
   const [mrpTokens, setMrpTokens] = useState<SubmissionTokenItem[]>([])
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [activeTab, setActiveTab] = useState<DashboardTabValue>('overview')
+  const [mountedTabs, setMountedTabs] = useState<Set<DashboardTabValue>>(() => new Set(['overview']))
+  const projectRequestRef = useRef(0)
 
-  /** Fetch MRP post-COD data for a given project + org */
-  const fetchMrpData = useCallback(async (pid: number, orgId: number) => {
-    const [, monthlyRes, annualRes, tokensRes] = await Promise.all([
-      adminClient.refreshMRP(pid, orgId).catch(() => {}),
-      adminClient.listMRPObservations(pid, orgId, { observation_type: 'monthly' })
-        .catch(() => ({ observations: [] as MRPObservation[], total: 0 })),
-      adminClient.listMRPObservations(pid, orgId, { observation_type: 'annual' })
-        .catch(() => ({ observations: [] as MRPObservation[], total: 0 })),
-      adminClient.listTokens(orgId, { project_id: pid, submission_type: 'mrp_upload', include_expired: true })
-        .catch((err) => {
-          console.error('Failed to fetch MRP tokens:', err)
-          return { tokens: [] as SubmissionTokenItem[] }
-        }),
-    ])
-    setMrpMonthly(monthlyRes.observations.filter(o => o.operating_year !== 0))
-    setMrpAnnual(annualRes.observations)
-    setMrpTokens(tokensRes.tokens)
+  const resetTabState = useCallback(() => {
+    setActiveTab('overview')
+    setMountedTabs(new Set<DashboardTabValue>(['overview']))
   }, [])
 
-  const refreshDashboard = useCallback(async () => {
+  const applyMrpData = useCallback((data: CachedMrpData) => {
+    setMrpMonthly(data.monthly)
+    setMrpAnnual(data.annual)
+    setMrpTokens(data.tokens)
+  }, [])
+
+  const clearMrpData = useCallback(() => {
+    setMrpMonthly([])
+    setMrpAnnual([])
+    setMrpTokens([])
+  }, [])
+
+  const loadProjectDashboard = useCallback(async (projectId: number, force = false) => {
+    const cacheKey = String(projectId)
+    if (force) projectDashboardCache.invalidate(cacheKey)
+    if (force) {
+      const fresh = await adminClient.getProjectDashboard(projectId)
+      return projectDashboardCache.set(cacheKey, fresh)
+    }
+    return projectDashboardCache.getOrLoad(cacheKey, () => adminClient.getProjectDashboard(projectId))
+  }, [])
+
+  /** Fetch MRP post-COD data for a given project + org */
+  const fetchMrpData = useCallback(async (pid: number, orgId: number, force = false) => {
+    const cacheKey = `${pid}:${orgId}`
+    if (force) mrpDataCache.invalidate(cacheKey)
+    if (force) {
+      const [, monthlyRes, annualRes, tokensRes] = await Promise.all([
+        adminClient.refreshMRP(pid, orgId).catch(() => {}),
+        adminClient.listMRPObservations(pid, orgId, { observation_type: 'monthly' })
+          .catch(() => ({ observations: [] as MRPObservation[], total: 0 })),
+        adminClient.listMRPObservations(pid, orgId, { observation_type: 'annual' })
+          .catch(() => ({ observations: [] as MRPObservation[], total: 0 })),
+        adminClient.listTokens(orgId, { project_id: pid, submission_type: 'mrp_upload', include_expired: true })
+          .catch((err) => {
+            console.error('Failed to fetch MRP tokens:', err)
+            return { tokens: [] as SubmissionTokenItem[] }
+          }),
+      ])
+      return mrpDataCache.set(cacheKey, {
+        monthly: monthlyRes.observations.filter((o) => o.operating_year !== 0),
+        annual: annualRes.observations,
+        tokens: tokensRes.tokens,
+      })
+    }
+
+    return mrpDataCache.getOrLoad(cacheKey, async () => {
+      const [, monthlyRes, annualRes, tokensRes] = await Promise.all([
+        adminClient.refreshMRP(pid, orgId).catch(() => {}),
+        adminClient.listMRPObservations(pid, orgId, { observation_type: 'monthly' })
+          .catch(() => ({ observations: [] as MRPObservation[], total: 0 })),
+        adminClient.listMRPObservations(pid, orgId, { observation_type: 'annual' })
+          .catch(() => ({ observations: [] as MRPObservation[], total: 0 })),
+        adminClient.listTokens(orgId, { project_id: pid, submission_type: 'mrp_upload', include_expired: true })
+          .catch((err) => {
+            console.error('Failed to fetch MRP tokens:', err)
+            return { tokens: [] as SubmissionTokenItem[] }
+          }),
+      ])
+      return {
+        monthly: monthlyRes.observations.filter((o) => o.operating_year !== 0),
+        annual: annualRes.observations,
+        tokens: tokensRes.tokens,
+      }
+    })
+  }, [])
+
+  const refreshDashboard = useCallback(async (options?: { force?: boolean; includeMrp?: boolean }) => {
     if (!selectedProjectId) return
     try {
-      const data = await adminClient.getProjectDashboard(selectedProjectId)
+      const data = await loadProjectDashboard(selectedProjectId, options?.force)
       setDashboard(data)
-      const orgId = data.project.organization_id as number
-      await fetchMrpData(selectedProjectId, orgId)
+      if (options?.includeMrp) {
+        const orgId = data.project.organization_id as number
+        const mrpData = await fetchMrpData(selectedProjectId, orgId, options.force)
+        applyMrpData(mrpData)
+      }
     } catch {
       // Silently fail on refresh — data shown is just stale
     }
-  }, [selectedProjectId, fetchMrpData])
+  }, [selectedProjectId, loadProjectDashboard, fetchMrpData, applyMrpData])
 
   // Load project from URL ?id= on mount
   useEffect(() => {
@@ -83,30 +199,83 @@ function ProjectsPageContent() {
   }, [])
 
   function handleSelectHome() {
+    projectRequestRef.current += 1
     setSelectedProjectId(null)
     setDashboard(null)
     setError(null)
+    clearMrpData()
+    resetTabState()
     window.history.replaceState(null, '', '/projects')
   }
 
   async function handleSelectProject(projectId: number) {
     if (projectId === selectedProjectId) return
+    const requestId = projectRequestRef.current + 1
+    projectRequestRef.current = requestId
     setSelectedProjectId(projectId)
     window.history.replaceState(null, '', `/projects?id=${projectId}`)
-    setLoading(true)
     setError(null)
+    clearMrpData()
+    resetTabState()
+
+    const cachedDashboard = projectDashboardCache.get(String(projectId))
+    if (cachedDashboard) {
+      setDashboard(cachedDashboard)
+      setLoading(false)
+    } else {
+      setDashboard(null)
+      setLoading(true)
+    }
+
     try {
-      const data = await adminClient.getProjectDashboard(projectId)
+      const data = await loadProjectDashboard(projectId)
+      if (projectRequestRef.current !== requestId) return
       setDashboard(data)
-      const orgId = data.project.organization_id as number
-      await fetchMrpData(projectId, orgId)
     } catch (e) {
+      if (projectRequestRef.current !== requestId) return
       setError(e instanceof Error ? e.message : 'Failed to load project data')
       setDashboard(null)
     } finally {
-      setLoading(false)
+      if (projectRequestRef.current === requestId) {
+        setLoading(false)
+      }
     }
   }
+
+  const handleTabChange = useCallback((value: string) => {
+    const nextTab = value as DashboardTabValue
+    setActiveTab(nextTab)
+    setMountedTabs((prev) => {
+      if (prev.has(nextTab)) return prev
+      const next = new Set(prev)
+      next.add(nextTab)
+      return next
+    })
+  }, [])
+
+  useEffect(() => {
+    if (activeTab !== 'pricing-tariffs' || !selectedProjectId || !dashboard) return
+    const projectId = selectedProjectId
+    const orgId = dashboard.project.organization_id as number | undefined
+    if (!orgId) return
+    const resolvedOrgId = orgId
+
+    let cancelled = false
+
+    async function loadPricingMrp() {
+      try {
+        const data = await fetchMrpData(projectId, resolvedOrgId)
+        if (!cancelled) applyMrpData(data)
+      } catch {
+        if (!cancelled) clearMrpData()
+      }
+    }
+
+    loadPricingMrp()
+    return () => {
+      cancelled = true
+    }
+  }, [activeTab, selectedProjectId, dashboard, fetchMrpData, applyMrpData, clearMrpData])
 
   // Build lookup options from dashboard response
   const lookups = dashboard?.lookups ?? {}
@@ -117,8 +286,8 @@ function ProjectsPageContent() {
   const meterTypeOpts = useMemo(() => toOpts(lookups.meter_types), [lookups.meter_types])
 
 
-  // Column definitions with editable config
-  const contractColumns: Column[] = [
+  // Column definitions — memoized to prevent child re-renders
+  const contractColumns: Column[] = useMemo(() => [
     { key: 'name', label: 'Name', editable: true, type: 'text' },
     { key: 'contract_type_name', label: 'Type', editable: true, type: 'select', editKey: 'contract_type_id', options: contractTypeOpts },
     { key: 'contract_status_name', label: 'Status', editable: true, type: 'select', editKey: 'contract_status_id', options: contractStatusOpts },
@@ -128,61 +297,53 @@ function ProjectsPageContent() {
     { key: 'contract_term_years', label: 'Term (yr)', editable: true, type: 'number' },
     { key: 'payment_terms', label: 'Payment Terms', editable: true, type: 'text' },
     { key: 'has_amendments', label: 'Amendments', editable: true, type: 'boolean' },
-  ]
+  ], [contractTypeOpts, contractStatusOpts, counterpartyOpts])
 
-  const assetColumns: Column[] = [
+  const assetColumns: Column[] = useMemo(() => [
     { key: 'asset_type_name', label: 'Type', editable: true, type: 'select', editKey: 'asset_type_id', options: assetTypeOpts },
     { key: 'name', label: 'Name', editable: true, type: 'text' },
     { key: 'model', label: 'Model', editable: true, type: 'text' },
     { key: 'capacity', label: 'Capacity', editable: true, type: 'number' },
     { key: 'capacity_unit', label: 'Unit', editable: true, type: 'text' },
     { key: 'quantity', label: 'Qty', editable: true, type: 'number' },
-  ]
+  ], [assetTypeOpts])
 
-  const meterColumns: Column[] = [
+  const meterColumns: Column[] = useMemo(() => [
     { key: 'meter_type_name', label: 'Type', editable: true, type: 'select', editKey: 'meter_type_id', options: meterTypeOpts },
     { key: 'model', label: 'Model', editable: true, type: 'text' },
     { key: 'serial_number', label: 'Serial Number', editable: true, type: 'text' },
     { key: 'location_description', label: 'Location', editable: true, type: 'text' },
     { key: 'metering_type', label: 'Metering Type', editable: true, type: 'text' },
-  ]
+  ], [meterTypeOpts])
 
-  const MONTH_SHORT = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'] as const
-  const fmtMonth = (v: unknown) => {
-    if (v == null) return '—'
-    const d = new Date(String(v))
-    return isNaN(d.getTime()) ? String(v) : MONTH_SHORT[d.getUTCMonth()]
-  }
-  const fmtNum2 = (v: unknown) => v == null ? '—' : fmtNum(Number(v), 2)
-  const fmtPR = (v: unknown) => v == null ? '—' : (Number(v) * 100).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-
-  const forecastColumns: Column[] = [
+  const forecastColumns: Column[] = useMemo(() => [
     { key: 'operating_year', label: 'Op. Year', editable: false, type: 'number' },
-    { key: 'forecast_month', label: 'Month', editable: true, type: 'date', editKey: 'forecast_month', format: fmtMonth },
+    { key: 'forecast_month', label: 'Month', editable: true, type: 'date', editKey: 'forecast_month', format: fmtMonthCol, minWidth: 80 },
     { key: 'forecast_energy_kwh', label: 'Energy (kWh)', editable: true, type: 'number', format: fmtNum2 },
     { key: 'forecast_ghi_irradiance', label: 'GHI Irradiance', editable: true, type: 'number', format: fmtNum2 },
     { key: 'forecast_poa_irradiance', label: 'POA Irradiance', editable: true, type: 'number', format: fmtNum2 },
-    { key: 'forecast_pr', label: 'PR (%)', editable: true, type: 'number', format: fmtPR },
+    { key: 'forecast_pr', label: 'PR GHI (%)', editable: true, type: 'number', format: fmtPR },
+    { key: 'forecast_pr_poa', label: 'PR POA (%)', editable: true, type: 'number', format: fmtPR },
     { key: 'forecast_source', label: 'Source', editable: true, type: 'text' },
-    { key: 'degradation_factor', label: 'Degr. Factor', editable: false, type: 'number', format: (v) => v == null ? '—' : Number(v).toFixed(5) },
-  ]
+    { key: 'degradation_factor', label: 'Degr. Factor', editable: false, type: 'number', format: fmtDegradation },
+  ], [])
 
-  const guaranteeColumns: Column[] = [
+  const guaranteeColumns: Column[] = useMemo(() => [
     { key: 'operating_year', label: 'Op. Year', editable: true, type: 'number' },
     { key: 'year_start_date', label: 'Start', editable: true, type: 'date' },
     { key: 'year_end_date', label: 'End', editable: true, type: 'date' },
-    { key: 'p50_annual_kwh', label: 'P50 (kWh)', editable: true, type: 'number', format: (v) => v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
-    { key: 'guaranteed_kwh', label: 'Guaranteed (kWh)', editable: true, type: 'number', format: (v) => v == null ? '—' : Number(v).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) },
-  ]
+    { key: 'p50_annual_kwh', label: 'P50 (kWh)', editable: true, type: 'number', format: fmtLocale2 },
+    { key: 'guaranteed_kwh', label: 'Guaranteed (kWh)', editable: true, type: 'number', format: fmtLocale2 },
+  ], [])
 
-  const contactColumns: Column[] = [
+  const contactColumns: Column[] = useMemo(() => [
     { key: 'role', label: 'Title', editable: true, type: 'text' },
     { key: 'full_name', label: 'Full Name', editable: true, type: 'text' },
     { key: 'email', label: 'Email', editable: true, type: 'text' },
     { key: 'phone', label: 'Phone', editable: true, type: 'text' },
     { key: 'include_in_invoice_email', label: 'Invoice', editable: true, type: 'boolean' },
     { key: 'escalation_only', label: 'Escalation', editable: true, type: 'boolean' },
-  ]
+  ], [])
 
   const projectId = selectedProjectId ?? undefined
 
@@ -212,6 +373,10 @@ function ProjectsPageContent() {
     await adminClient.removeContact(id)
     await refreshDashboard()
     toast('Contact removed', { duration: 3000 })
+  }, [refreshDashboard])
+
+  const handlePricingSaved = useCallback(async () => {
+    await refreshDashboard({ force: true, includeMrp: true })
   }, [refreshDashboard])
 
   return (
@@ -302,7 +467,7 @@ function ProjectsPageContent() {
             )}
 
             {selectedProjectId && !loading && !error && dashboard && (
-              <Tabs defaultValue="overview">
+              <Tabs value={activeTab} onValueChange={handleTabChange}>
                 <TabsList>
                   <TabsTrigger value="overview">Overview</TabsTrigger>
                   <TabsTrigger value="pricing-tariffs">Pricing & Tariffs</TabsTrigger>
@@ -312,58 +477,68 @@ function ProjectsPageContent() {
                 </TabsList>
 
                 <div className="mt-4 bg-white rounded-lg border border-slate-200 p-6">
-                  <TabsContent value="overview">
-                    <ProjectOverviewTab
-                      data={dashboard}
-                      contractColumns={contractColumns}
-                      projectId={projectId}
-                      onSaved={refreshDashboard}
-                      editMode={editMode}
-                      contacts={dashboard.contacts}
-                      contactColumns={contactColumns}
-                      onAddContact={handleAddContact}
-                      onRemoveContact={handleRemoveContact}
-                    />
-                  </TabsContent>
+                  {mountedTabs.has('overview') && (
+                    <TabsContent value="overview" forceMount className="data-[state=inactive]:hidden">
+                      <ProjectOverviewTab
+                        data={dashboard}
+                        contractColumns={contractColumns}
+                        projectId={projectId}
+                        onSaved={refreshDashboard}
+                        editMode={editMode}
+                        contacts={dashboard.contacts}
+                        contactColumns={contactColumns}
+                        onAddContact={handleAddContact}
+                        onRemoveContact={handleRemoveContact}
+                      />
+                    </TabsContent>
+                  )}
 
-                  <TabsContent value="pricing-tariffs">
-                    <PricingTariffsTab
-                      data={dashboard}
-                      onSaved={refreshDashboard}
-                      editMode={editMode}
-                      projectId={projectId}
-                      mrpMonthly={mrpMonthly}
-                      mrpAnnual={mrpAnnual}
-                      mrpTokens={mrpTokens}
-                    />
-                  </TabsContent>
+                  {mountedTabs.has('pricing-tariffs') && (
+                    <TabsContent value="pricing-tariffs" forceMount className="data-[state=inactive]:hidden">
+                      <PricingTariffsTab
+                        data={dashboard}
+                        onSaved={handlePricingSaved}
+                        editMode={editMode}
+                        projectId={projectId}
+                        mrpMonthly={mrpMonthly}
+                        mrpAnnual={mrpAnnual}
+                        mrpTokens={mrpTokens}
+                      />
+                    </TabsContent>
+                  )}
 
-                  <TabsContent value="technical">
-                    <TechnicalTab
-                      project={dashboard.project}
-                      contracts={dashboard.contracts}
-                      assets={dashboard.assets}
-                      meters={dashboard.meters}
-                      tariffs={dashboard.tariffs}
-                      forecasts={dashboard.forecasts}
-                      guarantees={dashboard.guarantees}
-                      assetColumns={assetColumns}
-                      meterColumns={meterColumns}
-                      forecastColumns={forecastColumns}
-                      guaranteeColumns={guaranteeColumns}
-                      projectId={projectId}
-                      onSaved={refreshDashboard}
-                      editMode={editMode}
-                    />
-                  </TabsContent>
+                  {mountedTabs.has('technical') && (
+                    <TabsContent value="technical" forceMount className="data-[state=inactive]:hidden">
+                      <TechnicalTab
+                        project={dashboard.project}
+                        contracts={dashboard.contracts}
+                        assets={dashboard.assets}
+                        meters={dashboard.meters}
+                        tariffs={dashboard.tariffs}
+                        forecasts={dashboard.forecasts}
+                        guarantees={dashboard.guarantees}
+                        assetColumns={assetColumns}
+                        meterColumns={meterColumns}
+                        forecastColumns={forecastColumns}
+                        guaranteeColumns={guaranteeColumns}
+                        projectId={projectId}
+                        onSaved={refreshDashboard}
+                        editMode={editMode}
+                      />
+                    </TabsContent>
+                  )}
 
-                  <TabsContent value="performance">
-                    <PlantPerformanceTab projectId={projectId} editMode={editMode} />
-                  </TabsContent>
+                  {mountedTabs.has('performance') && (
+                    <TabsContent value="performance" forceMount className="data-[state=inactive]:hidden">
+                      <PlantPerformanceTab projectId={projectId} editMode={editMode} />
+                    </TabsContent>
+                  )}
 
-                  <TabsContent value="monthly-billing">
-                    <MonthlyBillingTab projectId={projectId} editMode={editMode} />
-                  </TabsContent>
+                  {mountedTabs.has('monthly-billing') && (
+                    <TabsContent value="monthly-billing" forceMount className="data-[state=inactive]:hidden">
+                      <MonthlyBillingTab projectId={projectId} editMode={editMode} />
+                    </TabsContent>
+                  )}
 
 
                 </div>

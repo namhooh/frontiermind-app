@@ -14,6 +14,7 @@ export interface Column {
   type?: 'text' | 'number' | 'date' | 'boolean' | 'select'
   options?: { value: number | string; label: string }[]
   format?: (v: unknown) => string   // Custom display formatter
+  minWidth?: number                 // Minimum column width in px
 }
 
 interface ProjectTableTabProps {
@@ -137,6 +138,7 @@ export function ProjectTableTab({
                   <th
                     key={col.key}
                     className="text-left px-3 py-2 text-xs font-medium text-slate-500 uppercase tracking-wider"
+                    style={col.minWidth ? { minWidth: col.minWidth } : undefined}
                   >
                     {col.label}
                   </th>

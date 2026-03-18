@@ -20,8 +20,10 @@ from db.database import get_db_connection
 
 logger = logging.getLogger(__name__)
 
-# Required FKs that must be non-NULL for a row to be considered resolved
-REQUIRED_FKS = {'meter_id', 'billing_period_id', 'contract_line_id'}
+# Required FKs that must be non-NULL for a row to be considered resolved.
+# meter_id is optional — contract_line already identifies the project/product.
+# meter_id is populated opportunistically when contract_line has one linked.
+REQUIRED_FKS = {'billing_period_id', 'contract_line_id'}
 
 
 class BillingResolver:
@@ -72,7 +74,7 @@ class BillingResolver:
                     )
                 row = cur.fetchone()
                 if row:
-                    return row[0]
+                    return row['id']
         logger.warning(
             "Unresolved tariff_group_key=%s for org=%d (bill_date=%s)",
             tariff_group_key, organization_id, bill_date,
@@ -97,7 +99,7 @@ class BillingResolver:
                 )
                 row = cur.fetchone()
                 if row:
-                    return row[0]
+                    return row['id']
         logger.warning("Unresolved billing_period for bill_date=%s", bill_date)
         return None
 
@@ -114,12 +116,14 @@ class BillingResolver:
             Unresolved records include '_unresolved_fks' diagnostic info.
         """
         # Collect unique (tariff_group_key, bill_date) pairs for date-aware resolution
+        # Normalize date strings: CBE sends '2025/01/31', resolver needs '2025-01-31'
         tariff_date_pairs: set = set()
         for r in records:
             tgk = r.get("tariff_group_key")
             bd = r.get("bill_date")
             if tgk:
-                tariff_date_pairs.add((tgk, str(bd) if bd else None))
+                bd_norm = str(bd).replace('/', '-') if bd else None
+                tariff_date_pairs.add((tgk, bd_norm))
 
         bill_dates = {
             r["bill_date"]
@@ -161,7 +165,8 @@ class BillingResolver:
         for record in records:
             tgk = record.get("tariff_group_key")
             bd = record.get("bill_date")
-            lookup_key = (tgk, str(bd) if bd else None) if tgk else None
+            bd_norm = str(bd).replace('/', '-') if bd else None
+            lookup_key = (tgk, bd_norm) if tgk else None
             unresolved_fks: List[str] = []
 
             if lookup_key and lookup_key in tariff_map:
@@ -170,8 +175,9 @@ class BillingResolver:
             else:
                 record["clause_tariff_id"] = None
 
-            if bd and str(bd) in period_map:
-                record["billing_period_id"] = period_map[str(bd)]
+            bd_normalized = str(bd).replace('/', '-') if bd else None
+            if bd_normalized and bd_normalized in period_map:
+                record["billing_period_id"] = period_map[bd_normalized]
                 period_resolved += 1
             else:
                 record["billing_period_id"] = None
@@ -242,13 +248,13 @@ class BillingResolver:
                     (unique_keys, organization_id),
                 )
                 for row in cur.fetchall():
-                    key = row[0]
+                    key = row['tariff_group_key']
                     if key not in rows_by_key:
                         rows_by_key[key] = []
                     rows_by_key[key].append({
-                        "id": row[1],
-                        "valid_from": row[2],
-                        "valid_to": row[3],
+                        "id": row['id'],
+                        "valid_from": row['valid_from'],
+                        "valid_to": row['valid_to'],
                     })
 
         # Match each (tariff_group_key, bill_date) pair
@@ -323,10 +329,10 @@ class BillingResolver:
                     (external_line_ids, organization_id),
                 )
                 for row in cur.fetchall():
-                    result[row[0]] = {
-                        "id": row[1],
-                        "meter_id": row[2],
-                        "energy_category": row[3],
+                    result[row['external_line_id']] = {
+                        "id": row['id'],
+                        "meter_id": row['meter_id'],
+                        "energy_category": row['energy_category'],
                     }
 
                 # Pass 2: For mother lines (meter_id IS NULL), resolve via
@@ -356,13 +362,13 @@ class BillingResolver:
                         info["id"]: ext_id for ext_id, info in mother_ids.items()
                     }
                     for row in cur.fetchall():
-                        parent_id = row[0]
+                        parent_id = row['parent_contract_line_id']
                         ext_id = mother_db_to_ext.get(parent_id)
                         if ext_id:
                             result[ext_id] = {
-                                "id": row[1],
-                                "meter_id": row[2],
-                                "energy_category": row[3],
+                                "id": row['id'],
+                                "meter_id": row['meter_id'],
+                                "energy_category": row['energy_category'],
                             }
                     resolved_mothers = sum(
                         1 for ext_id in mother_ids
@@ -398,7 +404,8 @@ class BillingResolver:
     ) -> Dict[str, int]:
         """Single query to resolve all bill_dates to billing_period_ids."""
         result: Dict[str, int] = {}
-        date_strings = [str(d) for d in bill_dates]
+        # Normalize date strings: CBE sends '2025/01/31', DB stores '2025-01-31'
+        date_strings = [str(d).replace('/', '-') for d in bill_dates]
         with get_db_connection() as conn:
             with conn.cursor() as cur:
                 cur.execute(
@@ -410,7 +417,7 @@ class BillingResolver:
                     (date_strings,),
                 )
                 for row in cur.fetchall():
-                    result[row[0]] = row[1]
+                    result[row['end_date']] = row['id']
 
         unresolved = set(date_strings) - set(result.keys())
         if unresolved:

@@ -22,7 +22,7 @@ ALTER TABLE integration_credential
 ALTER TABLE integration_credential
   ADD CONSTRAINT chk_allowed_scopes_valid CHECK (
     allowed_scopes IS NULL
-    OR allowed_scopes <@ ARRAY['meter_data', 'fx_rates', 'billing_reads']::TEXT[]
+    OR allowed_scopes <@ ARRAY['meter_data', 'fx_rates', 'billing_reads', 'invoice_export']::TEXT[]
   );
 
 -- 4. Add api_key_hash for indexed lookup (avoid O(n) decrypt scan)

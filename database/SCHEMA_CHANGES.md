@@ -2619,3 +2619,84 @@ Source: PO Summary col E "Energy Sale Type" (offtake model)
 - `InvoiceService` uses `with get_db_connection()` for standalone calls and accepts pre-opened `conn` for transaction sharing
 
 ---
+
+### v10.18 - 2026-03-17 (oy_start_date as Canonical OY Anchor)
+
+**Description:** Made `clause_tariff.logic_parameters.oy_start_date` the single canonical source for Operating Year (OY) computation across all 10 code paths. Previously, OY was derived from `project.cod_date` with an optional override from `oy_start_date`; now all paths read `oy_start_date` directly. This fixes LOI01 where OY must be based on Transfer Date (2019-10-31), not COD (2019-03-01).
+
+**No new migration** — data-only population via script + application-layer code changes.
+
+**Population Script:**
+- `python-backend/scripts/populate_oy_start_date.py` — sets `oy_start_date = project.cod_date` for all clause_tariff records where it was NULL; skips LOI01 (already set to Transfer Date) and projects without COD (BNT01, XFBV, XFL01, XFSS)
+- Result: 36 clause_tariff rows updated, 2 skipped (LOI01)
+
+**Modified Modules (6 — simplified COALESCE to direct read):**
+- `python-backend/api/submissions.py` — `_determine_operating_year()`: queries only `oy_start_date`, removed `cod_date` fallback
+- `python-backend/api/mrp.py` — bulk upsert OY calculation: same
+- `python-backend/api/performance.py` — project metadata query: reads `oy_start_date` as canonical anchor
+- `python-backend/services/mrp/extraction_service.py` — `_compute_operating_year()`: same
+- `python-backend/services/billing/tariff_rate_service.py` — `_derive_operating_year()`: same
+- `python-backend/services/billing/performance_service.py` — inline OY compute: same
+
+**Modified Modules (4 — added oy_start_date read):**
+- `python-backend/api/ingest.py` — meter data ingestion: query now JOINs clause_tariff, resolves `oy_start_date` per sage_id
+- `python-backend/scripts/extend_forecasts.py` — project query JOINs clause_tariff, passes `oy_start_date` to `_compute_operating_year`
+- `python-backend/scripts/populate_mrp_from_excel.py` — `resolve_project()` extracts `oy_anchor` from logic_parameters, `compute_operating_year()` uses it
+- `python-backend/scripts/step10b_tariff_rate_population.py` — fetches `oy_start_date` in query, `_resolve_valid_from()` uses it as highest-priority source
+
+**Key Design Decision:**
+- `oy_start_date` is now a **required** field for OY computation — all paths return default OY=1 if missing rather than falling back to `cod_date`
+- For most projects `oy_start_date == cod_date`; for LOI01 it equals Transfer Date (2019-10-31)
+- Projects without COD (and thus no `oy_start_date`) are unaffected — they already defaulted to OY=1
+
+---
+
+### v10.19 - 2026-03-18 (Tariff Formula — Pricing & Tariff Extraction)
+
+**Description:** Added `tariff_formula` table for storing decomposed mathematical formulas from PPA/SSA pricing sections as structured computation graphs. Populated by Step 11P (Pricing & Tariff Extraction Pipeline).
+
+**Migration:**
+- `database/migrations/062_tariff_formula.sql`
+
+**New Table: `tariff_formula`**
+- `id` BIGSERIAL PRIMARY KEY
+- `clause_tariff_id` BIGINT FK → clause_tariff(id) ON DELETE CASCADE
+- `organization_id` BIGINT FK → organization(id)
+- `formula_name` VARCHAR(255) — human-readable name
+- `formula_text` TEXT — mathematical expression
+- `formula_type` VARCHAR(50) NOT NULL — e.g. 'MRP_BOUNDED', 'CPI_ESCALATION', 'ENERGY_OUTPUT'
+- `variables` JSONB — array of {symbol, role, variable_type, description, unit, maps_to}
+- `operations` JSONB — array of operations (MIN, MAX, MULTIPLY, IF, SUM, etc.)
+- `conditions` JSONB — array of conditions with if/then/else branching
+- `section_ref` VARCHAR(255) — contract section reference
+- `extraction_confidence` NUMERIC(3,2)
+- `extraction_metadata` JSONB
+- `version` INTEGER DEFAULT 1, `is_current` BOOLEAN DEFAULT true
+- `created_at` TIMESTAMPTZ
+
+**Indexes:**
+- `idx_tariff_formula_clause_tariff` — clause_tariff lookup
+- `idx_tariff_formula_org` — organization lookup
+- `idx_tariff_formula_type` — formula_type lookup
+**Formula Type Taxonomy (14 types across 5 categories):**
+- **pricing:** MRP_BOUNDED, MRP_CALCULATION
+- **escalation:** PERCENTAGE_ESCALATION, FIXED_ESCALATION, CPI_ESCALATION, FLOOR_CEILING_ESCALATION
+- **energy:** ENERGY_OUTPUT, DEEMED_ENERGY, ENERGY_DEGRADATION, ENERGY_GUARANTEE, ENERGY_MULTIPHASE
+- **performance:** SHORTFALL_PAYMENT, TAKE_OR_PAY
+- **billing:** FX_CONVERSION
+
+**Design Decisions:**
+- `formula_type` is VARCHAR, not ENUM — new types can be added without migration
+- Validation enforced at Pydantic model layer (`models/pricing.py`)
+- Per-project variations: each project gets its own rows with different variables JSONB
+- Formula dependencies captured via `maps_to` on variables (e.g., `tariff_formula.DEEMED_ENERGY`)
+- No additional FKs beyond `clause_tariff_id` — variable-level `maps_to` captures relationships
+
+**New Pipeline Files:**
+- `python-backend/services/prompts/pricing_extraction_prompt.py` — Claude prompt for Phase 2
+- `python-backend/services/pricing/pricing_extractor.py` — Phase 2 Claude API wrapper
+- `python-backend/services/pricing/formula_decomposer.py` — Phase 3 decomposition + DB mapping
+- `python-backend/services/pricing/pricing_validator.py` — Phase 4 consistency checks
+- `python-backend/scripts/step11p_pricing_extraction.py` — Orchestrator script
+
+---

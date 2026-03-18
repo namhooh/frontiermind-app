@@ -92,6 +92,41 @@ export interface ProjectGroupedItem {
   organization_name: string
 }
 
+export interface TariffFormulaVariable {
+  symbol: string
+  role: 'input' | 'output' | 'parameter' | 'intermediate'
+  variable_type?: string
+  description?: string
+  unit?: string
+  maps_to?: string | null
+  lookup_key?: string | null
+}
+
+export interface TariffFormulaCondition {
+  type: string
+  compare?: string
+  against?: string
+  operator?: string
+  then?: string
+  else?: string
+  description?: string
+}
+
+export interface TariffFormula {
+  id: number
+  clause_tariff_id: number
+  formula_name: string
+  formula_text: string
+  formula_type: string
+  variables: TariffFormulaVariable[]
+  operations: string[]
+  conditions: TariffFormulaCondition[]
+  section_ref?: string | null
+  extraction_confidence?: number | null
+  extraction_metadata?: Record<string, unknown>
+  is_current: boolean
+}
+
 export interface ProjectDashboardResponse {
   success: boolean
   project: Record<string, unknown>
@@ -107,6 +142,7 @@ export interface ProjectDashboardResponse {
   rate_periods: Record<string, unknown>[]
   monthly_rates: Record<string, unknown>[]
   tariff_rates: Record<string, unknown>[]
+  tariff_formulas: TariffFormula[]
   clauses: Record<string, unknown>[]
   amendments: Record<string, unknown>[]
   exchange_rates: Record<string, unknown>[]
@@ -364,6 +400,7 @@ export interface MonthlyBillingRow {
   product_rates_hard_ccy: Record<string, number | null>
   total_billing_amount: number | null
   total_billing_amount_hard_ccy: number | null
+  expected_invoice: ExpectedInvoiceSummary | null
 }
 
 export interface MonthlyBillingResponse {
@@ -380,6 +417,8 @@ export interface MonthlyBillingResponse {
     total_billing: number
     total_billing_hard: number
   }
+  total_months: number | null
+  months_returned: number | null
 }
 
 export interface MonthlyBillingImportResponse {
@@ -463,6 +502,8 @@ export interface MeterBillingResponse {
   months: MeterBillingMonth[]
   currency_code: string | null
   hard_currency_code: string | null
+  total_months: number | null
+  months_returned: number | null
 }
 
 // ============================================================================
@@ -474,6 +515,8 @@ export interface MeterPerformanceDetail {
   meter_name: string | null
   metered_kwh: number | null
   available_kwh: number | null
+  phase_number: number | null
+  phase_cod_date: string | null
 }
 
 export interface PerformanceMonth {
@@ -488,6 +531,7 @@ export interface PerformanceMonth {
   forecast_ghi_irradiance: number | null
   forecast_poa_irradiance: number | null
   forecast_pr: number | null
+  forecast_pr_poa: number | null
   actual_pr: number | null
   actual_availability_pct: number | null
   energy_comparison: number | null
@@ -507,7 +551,9 @@ export interface PlantPerformanceResponse {
     total_available_kwh: number
     total_energy_kwh: number
   }
-  meters: { meter_id: number; meter_name: string; energy_category: string }[]
+  meters: { meter_id: number; meter_name: string; energy_category: string; phase_number?: number | null; phase_cod_date?: string | null }[]
+  total_months: number | null
+  months_returned: number | null
 }
 
 // ============================================================================
@@ -1003,10 +1049,13 @@ export class AdminClient {
   // Monthly Billing
   // =========================================================================
 
-  async getMonthlyBilling(projectId: number): Promise<MonthlyBillingResponse> {
-    this.log('Fetching monthly billing', { projectId })
+  async getMonthlyBilling(projectId: number, opts?: { months?: number }): Promise<MonthlyBillingResponse> {
+    this.log('Fetching monthly billing', { projectId, months: opts?.months })
+    const params = new URLSearchParams()
+    if (opts?.months !== undefined) params.set('months', String(opts.months))
+    const qs = params.toString()
     const response = await fetch(
-      `${this.baseUrl}/api/projects/${projectId}/monthly-billing`
+      `${this.baseUrl}/api/projects/${projectId}/monthly-billing${qs ? `?${qs}` : ''}`
     )
     return this.handleResponse<MonthlyBillingResponse>(response)
   }
@@ -1042,10 +1091,13 @@ export class AdminClient {
   // Meter Billing
   // =========================================================================
 
-  async getMeterBilling(projectId: number): Promise<MeterBillingResponse> {
-    this.log('Fetching meter billing', { projectId })
+  async getMeterBilling(projectId: number, opts?: { months?: number }): Promise<MeterBillingResponse> {
+    this.log('Fetching meter billing', { projectId, months: opts?.months })
+    const params = new URLSearchParams()
+    if (opts?.months !== undefined) params.set('months', String(opts.months))
+    const qs = params.toString()
     const response = await fetch(
-      `${this.baseUrl}/api/projects/${projectId}/meter-billing`
+      `${this.baseUrl}/api/projects/${projectId}/meter-billing${qs ? `?${qs}` : ''}`
     )
     return this.handleResponse<MeterBillingResponse>(response)
   }
@@ -1070,10 +1122,13 @@ export class AdminClient {
   // Plant Performance
   // =========================================================================
 
-  async getPlantPerformance(projectId: number): Promise<PlantPerformanceResponse> {
-    this.log('Fetching plant performance', { projectId })
+  async getPlantPerformance(projectId: number, opts?: { months?: number }): Promise<PlantPerformanceResponse> {
+    this.log('Fetching plant performance', { projectId, months: opts?.months })
+    const params = new URLSearchParams()
+    if (opts?.months !== undefined) params.set('months', String(opts.months))
+    const qs = params.toString()
     const response = await fetch(
-      `${this.baseUrl}/api/projects/${projectId}/plant-performance`
+      `${this.baseUrl}/api/projects/${projectId}/plant-performance${qs ? `?${qs}` : ''}`
     )
     return this.handleResponse<PlantPerformanceResponse>(response)
   }

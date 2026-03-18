@@ -25,7 +25,8 @@ ALTER TABLE project
   ADD COLUMN IF NOT EXISTS cod_date             DATE,
   ADD COLUMN IF NOT EXISTS installed_dc_capacity_kwp DECIMAL,
   ADD COLUMN IF NOT EXISTS installed_ac_capacity_kw  DECIMAL,
-  ADD COLUMN IF NOT EXISTS installation_location_url TEXT;
+  ADD COLUMN IF NOT EXISTS installation_location_url TEXT,
+  ADD COLUMN IF NOT EXISTS installed_capacity_breakdown JSONB;
 
 COMMENT ON COLUMN project.external_project_id IS 'Client-defined project identifier (e.g., country code + number).';
 COMMENT ON COLUMN project.sage_id IS 'Finance/ERP system reference (e.g., Sage ID).';
@@ -34,6 +35,7 @@ COMMENT ON COLUMN project.cod_date IS 'Commercial Operations Date — when the s
 COMMENT ON COLUMN project.installed_dc_capacity_kwp IS 'Total installed DC capacity in kWp. Used in billing pro-rating.';
 COMMENT ON COLUMN project.installed_ac_capacity_kw IS 'Total installed AC capacity in kW. Used in billing pro-rating.';
 COMMENT ON COLUMN project.installation_location_url IS 'Google Maps URL or other geo-reference for the physical site.';
+COMMENT ON COLUMN project.installed_capacity_breakdown IS 'Per-sub-system DC capacity breakdown as JSON array of {label, kwp}. Use when a project has multiple sub-systems with separate installed capacities.';
 
 -- Unique constraint for idempotent upsert
 CREATE UNIQUE INDEX IF NOT EXISTS uq_project_org_external
@@ -114,9 +116,11 @@ COMMENT ON COLUMN meter.metering_type IS 'Metering configuration: net or export_
 -- =============================================================================
 
 ALTER TABLE production_forecast
-  ADD COLUMN IF NOT EXISTS forecast_poa_irradiance DECIMAL;
+  ADD COLUMN IF NOT EXISTS forecast_poa_irradiance DECIMAL,
+  ADD COLUMN IF NOT EXISTS forecast_pr_poa DECIMAL;
 
 COMMENT ON COLUMN production_forecast.forecast_poa_irradiance IS 'Forecasted Plane of Array (POA) irradiance (kWh/m2). From PVSyst report — used for variance analysis against measured values, NOT for Available Energy formula (which uses measured irradiance from meter_reading).';
+COMMENT ON COLUMN production_forecast.forecast_pr_poa IS 'Forecast Performance Ratio based on POA irradiance (0-1 range).';
 
 -- =============================================================================
 -- A7. ALTER production_guarantee — Shortfall cap fields

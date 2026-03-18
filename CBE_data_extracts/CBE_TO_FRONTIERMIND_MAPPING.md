@@ -4,9 +4,9 @@ This document maps CBE's data architecture to FrontierMind's canonical schema an
 
 **Sources:** AM Onboarding Template (Excel), PPA Contract PDFs, Utility Invoices (GRP — Grid Reference Price), Snowflake data warehouse, Operations Plant Performance Workbook, Operating Revenue Masterfile.
 
-**Schema version:** v10.16 (migration 060)
-**Latest population step:** Step 11 — Forecast Extension to Contract End (2026-03-09)
-**Latest architecture update:** Section 32 — Live Data Pipeline & Billing Cycle (2026-03-15)
+**Schema version:** v10.18 (migration 060 + oy_start_date population)
+**Latest population step:** oy_start_date population — 36 clause_tariff rows (2026-03-17)
+**Latest architecture update:** Section 34 — oy_start_date as Canonical OY Anchor (2026-03-17)
 
 **Companion documentation:**
 - [`contract-digitization/docs/IMPLEMENTATION_GUIDE.md`](../contract-digitization/docs/IMPLEMENTATION_GUIDE.md) — Full contract digitization pipeline (OCR, PII, clause extraction, ontology)
@@ -3290,3 +3290,172 @@ The orchestrator checks prerequisites **per tariff family**, not globally:
 | `python-backend/services/billing/billing_cycle_orchestrator.py` | Dependency-graph runner: verify inputs → compute → generate |
 | `data-ingestion/processing/adapters/generic_billing_adapter.py` | Passthrough adapter for non-CBE clients sending canonical fields |
 | `data-ingestion/processing/adapters/__init__.py` | Adapter registry (`snowflake` → CBE, `generic` → Generic, fallback → Generic) |
+
+---
+
+## 33. DB Table Categorization & Data Flow (2026-03-16)
+
+Canonical categorization of the core billing-pipeline tables by update frequency and role in the data lifecycle.
+
+### 33.1 Baseline (Static/Reference)
+
+Set up once per project onboarding; rarely changes afterward.
+
+| Table | Purpose |
+|-------|---------|
+| `project` | Solar/wind project entity |
+| `counterparty` | Companies/parties on contracts |
+
+### 33.2 Slow-Update (Contract/Tariff Configuration)
+
+Changes infrequently — when contracts are onboarded, amended, or tariff structures revised.
+
+| Table | Purpose |
+|-------|---------|
+| `contract` | Core contract record |
+| `contract_line` | Contract line items (meter ↔ product ↔ tariff) |
+| `contract_billing_product` | Contract ↔ billing product junction |
+| `contract_amendment` | Amendment tracking |
+| `clause_tariff` | Tariff definitions extracted from clauses |
+| `production_forecast` | Forecasted energy production per month |
+| `production_guarantee` | Guaranteed annual production thresholds |
+| `billing_tax_rule` | Tax calculation rules per project/country |
+
+### 33.3 Live Data (Time-Series / Frequently Updated)
+
+Ingested or received regularly from external sources (meters, invoices, weather).
+
+| Table | Purpose |
+|-------|---------|
+| `reference_price` | Market Reference Price (MRP) observations |
+| `meter_aggregate` | Aggregated meter readings per billing period |
+| `plant_performance` | Actual vs forecast performance metrics |
+
+### 33.4 Derived Data (Computed by Engine)
+
+Outputs of the tariff calculation and billing engine — regenerated on demand.
+
+| Table | Purpose |
+|-------|---------|
+| `tariff_rate` | Calculated effective rates per period/currency |
+| `expected_invoice_header` | Computed expected invoice totals |
+| `expected_invoice_line_item` | Itemised expected invoice lines |
+
+### 33.5 Data Flow Summary
+
+```
+Baseline:  project → counterparty
+                ↓
+Slow:      contract → contract_line → clause_tariff
+           contract_amendment        → production_forecast
+           contract_billing_product  → production_guarantee
+                                     → billing_tax_rule
+                ↓
+Live:      meter_aggregate, reference_price, plant_performance
+                ↓
+Derived:   tariff_rate → expected_invoice_header → expected_invoice_line_item
+```
+
+The pipeline flows **top to bottom**: baseline entities are set up once, slow-update tariff/contract config is onboarded, live data feeds in periodically, and the billing engine derives invoices from all of the above.
+
+---
+
+## 34. oy_start_date as Canonical OY Anchor
+
+**Date:** 2026-03-17
+**Script:** `python-backend/scripts/populate_oy_start_date.py`
+
+### Problem
+
+Operating Year (OY) was derived from `project.cod_date` across 10 code paths, with an optional override from `clause_tariff.logic_parameters.oy_start_date`. LOI01 needs OY based on Transfer Date (2019-10-31), not COD (2019-03-01) — May 2020 should be OY 1, not OY 2. The COALESCE fallback pattern (`oy_start_date ?? cod_date`) was inconsistently applied and fragile.
+
+### Solution
+
+Made `clause_tariff.logic_parameters.oy_start_date` the **single canonical source** for all OY computation:
+
+1. **Data population**: Set `oy_start_date = project.cod_date` for all 36 clause_tariff records where it was NULL. LOI01 (already set to 2019-10-31) and projects without COD (BNT01, XFBV, XFL01, XFSS) were skipped.
+2. **Code update**: All 10 OY computation paths now read `oy_start_date` directly — no fallback to `cod_date`.
+
+### Affected Code Paths
+
+| # | File | Function/Location | Change |
+|---|------|-------------------|--------|
+| 1 | `api/submissions.py` | `_determine_operating_year()` | Removed `cod_date` from query and fallback |
+| 2 | `api/mrp.py` | Bulk upsert OY calc | Same |
+| 3 | `api/performance.py` | Project metadata query | Same |
+| 4 | `services/mrp/extraction_service.py` | `_compute_operating_year()` | Same |
+| 5 | `services/billing/tariff_rate_service.py` | `_derive_operating_year()` | Same |
+| 6 | `services/billing/performance_service.py` | Inline OY compute | Same |
+| 7 | `api/ingest.py` | Meter data ingestion | Added JOIN clause_tariff, reads `oy_start_date` |
+| 8 | `scripts/extend_forecasts.py` | Project query + `_compute_operating_year()` | Added JOIN clause_tariff, passes `oy_start_date` |
+| 9 | `scripts/populate_mrp_from_excel.py` | `resolve_project()` + `compute_operating_year()` | Extracts `oy_anchor` from logic_parameters |
+| 10 | `scripts/step10b_tariff_rate_population.py` | `_resolve_valid_from()` | `oy_start_date` is highest-priority source |
+
+### Population Results
+
+| Metric | Value |
+|--------|-------|
+| clause_tariff rows updated | 36 |
+| Skipped (LOI01, already set) | 2 |
+| Skipped (no cod_date) | 0 (BNT01/XFBV/XFL01/XFSS have no clause_tariff rows) |
+
+### LOI01 Verification
+
+| Billing Month | OY (old, from COD 2019-03-01) | OY (new, from Transfer 2019-10-31) |
+|---------------|-------------------------------|-------------------------------------|
+| May 2020 | 2 | **1** (correct) |
+| Oct 2020 | 2 | **2** (correct — anniversary) |
+| Sep 2020 | 2 | **1** (correct — before anniversary) |
+
+### Design Principle
+
+- `oy_start_date` is now a **required** field for OY computation
+- For most projects: `oy_start_date == cod_date`
+- For LOI01: `oy_start_date == Transfer Date (2019-10-31)`
+- Future projects where OY differs from COD: set `oy_start_date` during onboarding
+- All paths return default OY=1 if `oy_start_date` is missing (graceful degradation)
+
+---
+
+## Section 35: Multi-Phase Project Disaggregation
+
+### Context
+
+Some CBE projects have multiple construction phases with different COD dates and capacities, but were initially onboarded as single FM projects. Three projects require disaggregation:
+
+| Project | Phase 1 kWp | Phase 1 COD | Phase 2 kWp | Phase 2 COD | Combined kWp |
+|---------|-------------|-------------|-------------|-------------|--------------|
+| NBL01 | 663 | 2021-02-22 | 2511 | 2025-01-01 | 3174 |
+| IVL01 | 967.68 | 2023-10-02 | 2274.84 | 2024-10-04 | 3242.52 |
+| KAS01 | 400.44 | 2018-10-17 | 904.8 | 2024-05-03 | 1305.24 |
+
+### Per-Phase Data Model
+
+Phase information is stored in three places:
+
+1. **`contract_line.phase_cod_date`** — per-line COD date matching the phase the contract line belongs to
+2. **`clause_tariff.logic_parameters.phases[]`** — array of phase objects with `phase`, `kwp`, `cod_date`, `degradation_pct`, `specific_yield_kwh_kwp`, `meter_serial`
+3. **Per-phase meters** — separate `meter` rows for each phase (e.g. "Phase 1 (EMetered)", "Phase 2 (EMetered)")
+
+### PPW Source
+
+Phase COD dates come from PPW Summary-Performance tab rows 4-5:
+- Row 4: "COD Phase 1" with date in the project column
+- Row 5: "COD Phase 2" with date in the project column
+
+Per-phase capacities come from the project metadata block.
+
+### Dashboard Display
+
+- **Overview tab**: Shows Phase 1 COD and Phase 2 COD (from `contract_line.phase_cod_date`)
+- **Performance tab**: Groups per-meter columns under Phase sub-headers
+- **Billing tab**: Shows phase label prefix on meter names in expanded detail rows
+- **Pricing tab**: Shows "Phase Breakdown" section when `logic_parameters.phases[]` exists
+
+### Implementation Script
+
+`python-backend/scripts/fix_multi_phase_disaggregation.py` — run with `--dry-run` to preview changes.
+
+### Template Project
+
+KAS01 is the reference implementation — it already has all three data points populated. NBL01 and IVL01 were backfilled to match.
