@@ -8,7 +8,7 @@ Contract Compliance & Invoicing Verification Engine for renewable energy project
 - **UI Components:** Radix UI, Lucide React icons, Recharts
 - **Backend:** Python (FastAPI) in `/python-backend`
 - **Database:** Supabase (PostgreSQL)
-- **Deployment:** Docker, AWS ECS Fargate
+- **Deployment:** Railway (compute), AWS (S3, SES, SNS)
 
 ## Documentation
 
@@ -134,84 +134,60 @@ Uses the Figma desktop app's local MCP server.
 
 ## Backend Deployment
 
-The Python backend is deployed to AWS ECS Fargate.
+The Python backend is deployed to **Railway** (compute). AWS is used for S3, SES, and SNS only.
 
 ### Live Endpoints
 
 | Endpoint | URL |
 |----------|-----|
-| **Backend API** | `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com` |
-| **Health Check** | `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/health` |
-| **API Docs** | `http://frontiermind-alb-210161978.us-east-1.elb.amazonaws.com/docs` |
+| **Backend API** | `https://api.frontiermind.co` |
+| **Health Check** | `https://api.frontiermind.co/health` |
+| **API Docs** | `https://api.frontiermind.co/docs` |
 
-### AWS Infrastructure
+### Architecture
+
+| Layer | Service |
+|-------|---------|
+| **Compute** | Railway (auto-builds from `railway.toml`) |
+| **File storage** | AWS S3 (us-east-1) |
+| **Email sending** | AWS SES |
+| **Email ingest** | AWS SNS → webhook |
+| **Database** | Supabase (PostgreSQL) |
+| **Frontend** | Vercel |
+
+### Railway
+
+Railway auto-detects `railway.toml` at the repo root, which points to `python-backend/Dockerfile`.
+
+**Deploy:** Push to `main` — Railway builds and deploys automatically.
+
+**Custom domain:** `api.frontiermind.co` is configured as a custom domain in Railway with auto-HTTPS.
+
+**Config:** `railway.toml`
+```toml
+[build]
+dockerfilePath = "python-backend/Dockerfile"
+
+[deploy]
+healthcheckPath = "/health"
+healthcheckTimeout = 30
+restartPolicyType = "on_failure"
+restartPolicyMaxRetries = 3
+```
+
+**Environment variables** are set in the Railway dashboard (not in code). All secrets (API keys, DB URL, AWS credentials) are Railway env vars.
+
+**View logs:** Railway dashboard → Deployments → select deployment → Logs
+
+### AWS Resources (S3 / SES / SNS)
 
 | Resource | Value |
 |----------|-------|
 | **Region** | us-east-1 |
-| **ECS Cluster** | frontiermind-cluster |
-| **ECS Service** | frontiermind-backend |
-| **Load Balancer** | frontiermind-alb |
-| **ECR Repository** | frontiermind-backend |
-| **Log Group** | /ecs/frontiermind-backend |
-
-### AWS ECS Fargate
-
-**Why ECS Fargate:**
-- No request timeout limit (Cloud Run limited to 300s)
-- True scale-to-zero capability
-- Better networking control (VPC, security groups)
-- Consolidates infrastructure on AWS (S3 is already AWS)
-
-**Prerequisites:**
-- AWS CLI v2: `brew install awscli`
-- Docker installed and running
-- AWS credentials configured: `aws configure`
-
-**One-time Infrastructure Setup:**
-```bash
-cd python-backend
-./aws/infrastructure-setup.sh
-```
-
-This creates:
-- ECR repository
-- VPC with public subnets
-- Application Load Balancer
-- ECS cluster
-- IAM roles for task execution and S3 access
-- CloudWatch log group
-
-**Create Secrets in AWS Secrets Manager:**
-```bash
-aws secretsmanager create-secret --region us-east-1 --name frontiermind/backend/anthropic-api-key --secret-string "YOUR_KEY"
-aws secretsmanager create-secret --region us-east-1 --name frontiermind/backend/llama-api-key --secret-string "YOUR_KEY"
-aws secretsmanager create-secret --region us-east-1 --name frontiermind/backend/database-url --secret-string "YOUR_URL"
-aws secretsmanager create-secret --region us-east-1 --name frontiermind/backend/encryption-key --secret-string "YOUR_KEY"
-aws secretsmanager create-secret --region us-east-1 --name frontiermind/supabase-url --secret-string "YOUR_URL"
-aws secretsmanager create-secret --region us-east-1 --name frontiermind/backend/sentry-dsn --secret-string "YOUR_DSN"
-```
-
-**IAM Policy for Secrets Manager Access:**
-
-The ECS task execution role needs permission to read secrets. Add this policy:
-
-```json
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "secretsmanager:GetSecretValue"
-      ],
-      "Resource": [
-        "arn:aws:secretsmanager:us-east-1:*:secret:frontiermind/*"
-      ]
-    }
-  ]
-}
-```
+| **S3 Buckets** | `frontiermind-meter-data`, `frontiermind-reports`, `frontiermind-email-ingest`, `frontiermind-mrp-uploads` |
+| **SES Domain** | `mail.frontiermind.co` |
+| **SNS Topic** | `frontiermind-email-ingest` |
+| **IAM User** | `railway-backend` (programmatic access for S3 + SES) |
 
 **Database Connection (Supabase):**
 
@@ -223,54 +199,16 @@ postgresql://postgres.[project-ref]:[password]@aws-0-us-east-1.pooler.supabase.c
 
 - Transaction Pooler handles connection pooling automatically
 - Direct Connection can exhaust connection limits under load
-- Store the Transaction Pooler URL in `frontiermind/backend/database-url` secret
-
-**Deploy:**
-```bash
-cd python-backend
-source aws/infrastructure-config.env  # Load infrastructure variables
-./deploy-aws.sh
-```
-
-**Cost Management:**
-```bash
-# Scale down to save costs (~$18/month idle)
-aws ecs update-service --cluster frontiermind-cluster --service frontiermind-backend --desired-count 0
-
-# Scale up (30-60 second cold start)
-aws ecs update-service --cluster frontiermind-cluster --service frontiermind-backend --desired-count 1
-```
-
-**View Logs:**
-```bash
-aws logs tail /ecs/frontiermind-backend --follow
-```
 
 ### Troubleshooting
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
-| Task fails to start | Missing secrets or IAM permissions | Check `aws logs tail /ecs/frontiermind-backend` for errors; verify secrets exist and IAM policy is attached |
+| Deploy fails | Dockerfile build error | Check Railway build logs |
 | Database connection refused | Wrong connection string or port | Use Transaction Pooler (port 6543), not Direct Connection (port 5432) |
-| 503 Service Unavailable | Task not running or unhealthy | Check `aws ecs describe-services --cluster frontiermind-cluster --services frontiermind-backend` |
-| Secrets not found | Wrong region or name | Ensure secrets are in us-east-1 and use exact names (e.g., `frontiermind/backend/database-url`) |
-| Image pull fails | ECR authentication expired | Run `aws ecr get-login-password --region us-east-1 \| docker login --username AWS --password-stdin <account>.dkr.ecr.us-east-1.amazonaws.com` |
-
-**Debug Commands:**
-```bash
-# Check service status
-aws ecs describe-services --cluster frontiermind-cluster --services frontiermind-backend
-
-# Check task status
-aws ecs list-tasks --cluster frontiermind-cluster --service-name frontiermind-backend
-aws ecs describe-tasks --cluster frontiermind-cluster --tasks <task-arn>
-
-# View recent logs
-aws logs tail /ecs/frontiermind-backend --since 1h
-
-# Check secrets exist
-aws secretsmanager list-secrets --region us-east-1 --filter Key=name,Values=frontiermind
-```
+| S3 access denied | IAM credentials wrong | Verify `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in Railway env vars |
+| Email not sending | SES still in sandbox | Request production access or verify recipient addresses |
+| Health check fails | App crash on startup | Check Railway deployment logs for Python errors |
 
 ## Implementation Plan
 

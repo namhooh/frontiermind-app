@@ -1,10 +1,9 @@
 /**
  * API Configuration
  *
- * Resolves the backend API base URL, handling mixed-content issues
- * when the frontend is served over HTTPS (Vercel) but the backend
- * is HTTP-only (AWS ALB). In production, returns an empty string so
- * requests use relative URLs proxied by Next.js rewrites.
+ * Resolves the backend API base URL. In production, returns an empty
+ * string so requests use relative URLs proxied by Next.js rewrites
+ * (backend is at https://api.frontiermind.co via Railway).
  */
 
 export function getApiBaseUrl(): string {

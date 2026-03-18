@@ -76,7 +76,7 @@ ENV PYTHONUNBUFFERED=1
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV ENVIRONMENT=production
 
-# Cloud Run uses PORT environment variable (default 8080)
+# Railway sets PORT environment variable (default 8080)
 ENV PORT=8080
 
 # Expose port
