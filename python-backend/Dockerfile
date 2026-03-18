@@ -39,6 +39,8 @@ COPY --from=builder /root/.local /root/.local
 # Ensure scripts in .local are in PATH
 ENV PATH=/root/.local/bin:$PATH
 
+# Cache-bust: force fresh copy on every build
+ARG CACHEBUST=1
 # Copy backend application code
 COPY python-backend/ .
 
