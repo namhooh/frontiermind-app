@@ -36,7 +36,7 @@ class SNSVerifier:
     """Verifies AWS SNS message signatures."""
 
     ALLOWED_TOPIC_ARNS = frozenset({
-        "arn:aws:sns:us-east-1:724772070642:frontiermind-email-ingest",
+        "arn:aws:sns:us-east-1:876762733200:frontiermind-email-ingest",
     })
 
     def verify(self, message: dict) -> bool:
