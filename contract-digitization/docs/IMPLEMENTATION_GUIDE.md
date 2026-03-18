@@ -251,7 +251,7 @@
   - Error handling with user-friendly messages
 
 ✅ **Deployment (January 2026):**
-- ✅ **AWS ECS Fargate Deployment (Task 5.1-5.2):** Backend deployed to AWS ECS Fargate
+- ✅ **Railway Deployment:** Backend deployed to Railway (migrated from AWS ECS Fargate)
   - Backend URL: `https://api.frontiermind.co`
   - Health Check: `https://api.frontiermind.co/health`
   - See `CLAUDE.md` for full deployment documentation
@@ -1573,9 +1573,9 @@ database/migrations/
 └─────────────────────────────────────────────────────────────────────────────┘
 
     ┌─────────────┐         ┌──────────────────┐         ┌─────────────────┐
-    │   Browser   │         │     Vercel       │         │   AWS ECS       │
-    │   (User)    │────────▶│   (Next.js)      │────────▶│   Fargate       │
-    │             │         │                  │         │  (Python API)   │
+    │   Browser   │         │     Vercel       │         │   Railway       │
+    │   (User)    │────────▶│   (Next.js)      │────────▶│  (Python API)   │
+    │             │         │                  │         │                 │
     └─────────────┘         └──────────────────┘         └────────┬────────┘
                                                                   │
                             ┌──────────────────┐                  │
@@ -1595,7 +1595,7 @@ database/migrations/
 | Component | Platform | Reason |
 |-----------|----------|--------|
 | **Frontend** | Vercel | Optimized for Next.js, auto-deploy from Git, global CDN |
-| **Backend** | AWS ECS Fargate | No timeout limit, scale-to-zero, consolidates AWS infrastructure (S3 already on AWS) |
+| **Backend** | Railway | Auto-deploy from GitHub, built-in HTTPS, simpler ops than ECS |
 | **Database** | Supabase | Managed PostgreSQL, built-in Auth, Row-Level Security |
 
 **Why not all on Vercel?**
@@ -1619,25 +1619,15 @@ git push origin main
 # ✅ Vercel automatically builds and deploys
 ```
 
-#### Backend Deployment (Manual)
+#### Backend Deployment (Automatic)
 
 ```bash
-cd python-backend
-source aws/infrastructure-config.env  # Load infrastructure variables
-./deploy-aws.sh
-
-# This will:
-# 1. Build Docker image
-# 2. Push to ECR
-# 3. Update ECS service
-# 4. Wait for deployment to stabilize
+# Just push to GitHub - Railway auto-deploys
+git push origin main
+# Railway detects railway.toml, builds from python-backend/Dockerfile, deploys
 ```
 
-**When to redeploy backend:**
-- Changes to `python-backend/**` files
-- New API endpoints
-- Updated dependencies in `requirements.txt`
-- Bug fixes in parsing/rules logic
+**Railway auto-deploys on every push to `main`.** No manual steps needed.
 
 **For full deployment documentation, see `CLAUDE.md` in the project root.**
 
@@ -1668,16 +1658,15 @@ Frontend automatically uses `localhost:8000` when `NEXT_PUBLIC_PYTHON_BACKEND_UR
 | `NEXT_PUBLIC_SUPABASE_URL` | Your Supabase project URL |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Your Supabase anon key |
 
-**AWS ECS (Backend) - via AWS Secrets Manager:**
-| Secret Name | Description |
-|-------------|-------------|
-| `frontiermind/backend/anthropic-api-key` | Claude API key for clause extraction |
-| `frontiermind/backend/llama-api-key` | LlamaParse API key for document OCR |
-| `frontiermind/backend/database-url` | Supabase PostgreSQL connection string (Transaction Pooler) |
-| `frontiermind/backend/encryption-key` | AES-256 key for PII encryption |
-| `frontiermind/supabase-url` | Supabase project URL |
+**Railway (Backend) - via Railway dashboard env vars:**
+| Variable | Description |
+|----------|-------------|
+| `ANTHROPIC_API_KEY` | Claude API key for clause extraction |
+| `LLAMA_CLOUD_API_KEY` | LlamaParse API key for document OCR |
+| `DATABASE_URL` | Supabase PostgreSQL connection string (Transaction Pooler) |
+| `ENCRYPTION_KEY` | AES-256 key for PII encryption |
 
-**For secret creation commands, see `CLAUDE.md` in the project root.**
+**For full env var list, see `CLAUDE.md` in the project root.**
 
 ---
 
@@ -1685,16 +1674,7 @@ Frontend automatically uses `localhost:8000` when `NEXT_PUBLIC_PYTHON_BACKEND_UR
 
 #### View Backend Logs
 
-```bash
-# Recent logs
-aws logs tail /ecs/frontiermind-backend --since 1h
-
-# Follow logs in real-time
-aws logs tail /ecs/frontiermind-backend --follow
-
-# Filter by pattern
-aws logs filter-log-events --log-group-name /ecs/frontiermind-backend --filter-pattern "ERROR"
-```
+Railway dashboard → select service → Deployments → select deployment → Logs
 
 #### Health Checks
 
@@ -1706,34 +1686,13 @@ curl https://api.frontiermind.co/health
 open https://api.frontiermind.co/docs
 ```
 
-#### AWS Console Dashboards
-
-- **ECS Service:** https://console.aws.amazon.com/ecs/home?region=us-east-1#/clusters/frontiermind-cluster/services
-  - Task status, deployment history
-  - CPU/memory utilization
-
-- **CloudWatch Logs:** https://console.aws.amazon.com/cloudwatch/home?region=us-east-1#logsV2:log-groups/log-group/$252Fecs$252Ffrontiermind-backend
-  - Log streams, search, insights
-
-- **Load Balancer:** https://console.aws.amazon.com/ec2/v2/home?region=us-east-1#LoadBalancers:
-  - Request count, latency, healthy targets
-
 ---
 
 ### Cost Overview
 
-#### AWS ECS Fargate (Python Backend)
+#### Railway (Python Backend)
 
-| Resource | Pricing | Estimated Monthly |
-|----------|---------|-------------------|
-| CPU (0.25 vCPU) | $0.04048/vCPU-hour | ~$5-15 |
-| Memory (0.5 GB) | $0.004445/GB-hour | ~$2-5 |
-| Load Balancer | $0.0225/hour + LCU | ~$16 |
-| **Total** | | **~$18-35/month** (low traffic) |
-
-**Cost Saving Tips:**
-- Scale to 0 when not in use: `aws ecs update-service --cluster frontiermind-cluster --service frontiermind-backend --desired-count 0`
-- Cold start time is 30-60 seconds when scaling back up
+See Railway dashboard for usage and billing.
 
 #### Vercel (Frontend)
 
@@ -1756,49 +1715,16 @@ open https://api.frontiermind.co/docs
 
 ---
 
-### Cold Starts
-
-ECS Fargate can scale to zero when idle to save costs. The first request after idle takes longer:
-
-| Scenario | Response Time |
-|----------|---------------|
-| Warm instance | 200-500ms |
-| Cold start | 30-60 seconds |
-
-**To minimize cold starts:**
-```bash
-# Keep one instance always running (~$18/month extra)
-aws ecs update-service --cluster frontiermind-cluster --service frontiermind-backend --desired-count 1
-```
-
----
-
 ### Troubleshooting
 
 #### Common Issues
 
 | Issue | Cause | Solution |
 |-------|-------|----------|
-| 503 Service Unavailable | Task not running or unhealthy | Check ECS service status and logs |
-| 500 Internal Server Error | Code bug or missing secret | Check `aws logs tail /ecs/frontiermind-backend` |
-| Task fails to start | Missing secrets or IAM permissions | Verify secrets exist and IAM policy is attached |
+| Deploy fails | Dockerfile build error | Check Railway build logs |
+| 500 Internal Server Error | Code bug or missing env var | Check Railway deployment logs |
 | Database connection failed | Wrong connection string or port | Use Transaction Pooler (port 6543), not Direct Connection (port 5432) |
-
-#### Debug Commands
-
-```bash
-# Check service status
-aws ecs describe-services --cluster frontiermind-cluster --services frontiermind-backend
-
-# Check task status
-aws ecs list-tasks --cluster frontiermind-cluster --service-name frontiermind-backend
-
-# View recent logs
-aws logs tail /ecs/frontiermind-backend --since 1h
-
-# Re-deploy
-cd python-backend && ./deploy-aws.sh
-```
+| S3 access denied | IAM credentials wrong | Verify `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` in Railway env vars |
 
 **For comprehensive troubleshooting, see `CLAUDE.md` in the project root.**
 
@@ -1809,7 +1735,7 @@ cd python-backend && ./deploy-aws.sh
 #### 1. Access Setup
 - [ ] GitHub repository access
 - [ ] Vercel team invitation
-- [ ] AWS account access (us-east-1 region)
+- [ ] Railway project access
 - [ ] Supabase project access
 
 #### 2. Local Development Setup
@@ -1834,13 +1760,9 @@ cp .env.example .env
 
 #### 3. Install Tools
 ```bash
-# AWS CLI v2
-brew install awscli
-aws configure  # Enter access key, secret key, region: us-east-1
-
-# Verify access
-aws ecs list-clusters
-aws secretsmanager list-secrets --region us-east-1 --filter Key=name,Values=frontiermind
+# Railway CLI (optional — deployments are automatic via GitHub)
+npm install -g @railway/cli
+railway login
 ```
 
 #### 4. Key Files to Understand
@@ -1873,8 +1795,8 @@ npm run dev
 
 #### Secrets Management
 - **Never commit** `.env` files or API keys to Git
-- Production secrets stored in **Google Secret Manager**
-- Access controlled via IAM roles
+- Production secrets stored in **Railway env vars**
+- AWS access via `railway-backend` IAM user (S3 + SES only)
 
 #### PII Protection
 - PII detected and anonymized **before** sending to Claude API
@@ -1896,21 +1818,11 @@ cd python-backend && uvicorn main:app --reload --port 8000  # Start backend
 npm run dev                                                   # Start frontend
 
 # === DEPLOYMENT ===
-git push origin main                                          # Deploy frontend (auto)
-cd python-backend && source aws/infrastructure-config.env && ./deploy-aws.sh  # Deploy backend
+git push origin main                                          # Deploy frontend (Vercel auto) + backend (Railway auto)
 
 # === MONITORING ===
-aws logs tail /ecs/frontiermind-backend --follow
 curl https://api.frontiermind.co/health
-
-# === SECRETS ===
-aws secretsmanager list-secrets --region us-east-1 --filter Key=name,Values=frontiermind
-aws secretsmanager get-secret-value --region us-east-1 --secret-id frontiermind/backend/anthropic-api-key
-
-# === ECS MANAGEMENT ===
-aws ecs describe-services --cluster frontiermind-cluster --services frontiermind-backend
-aws ecs update-service --cluster frontiermind-cluster --service frontiermind-backend --desired-count 1  # Scale up
-aws ecs update-service --cluster frontiermind-cluster --service frontiermind-backend --desired-count 0  # Scale down
+# Logs: Railway dashboard → service → Deployments → Logs
 ```
 
 ---

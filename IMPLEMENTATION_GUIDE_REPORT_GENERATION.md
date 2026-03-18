@@ -603,7 +603,7 @@ This section documents how to build the missing report generation components in 
 |----------|--------|-----------|
 | **PDF Library** | WeasyPrint | HTML-to-PDF with CSS styling, Jinja2 templates, good table support |
 | **Background Scheduler** | APScheduler | Lightweight, FastAPI compatible, persistent job store support |
-| **Email Service** | AWS SES | Already using AWS infrastructure (ECS, S3), cost-effective |
+| **Email Service** | AWS SES | Cost-effective, S3 already on AWS |
 | **Template Engine** | Jinja2 | Standard for Python, native WeasyPrint integration |
 | **Excel Generation** | openpyxl | Full XLSX support, formulas, styling, widely used |
 
@@ -621,7 +621,7 @@ openpyxl>=3.1.0         # Excel XLSX generation
 apscheduler>=3.10.0     # Background job scheduling
 ```
 
-**System Dependencies for WeasyPrint** (Docker/ECS):
+**System Dependencies for WeasyPrint** (Docker):
 
 ```dockerfile
 # Add to python-backend/Dockerfile
@@ -835,7 +835,7 @@ aws secretsmanager create-secret \
 - [ ] Configure SES domain verification and sending limits
 - [ ] Add secrets to AWS Secrets Manager
 - [ ] Run database migration 018 (already done)
-- [ ] Deploy updated ECS task definition
+- [ ] Deploy to Railway (push to main)
 - [ ] Verify health check includes reports API
 - [ ] Test scheduled report execution in staging
 
@@ -864,7 +864,7 @@ Add to `python-backend/requirements.txt`:
 | `openpyxl` | >=3.1.0 | Excel XLSX generation |
 | `apscheduler` | >=3.10.0 | Background job scheduling |
 
-#### System Dependencies (Docker/ECS)
+#### System Dependencies (Docker)
 
 Add WeasyPrint system dependencies to `python-backend/Dockerfile`:
 
@@ -880,7 +880,7 @@ Add WeasyPrint system dependencies to `python-backend/Dockerfile`:
 
 | Variable | Purpose | Location |
 |----------|---------|----------|
-| `REPORTS_S3_BUCKET` | S3 bucket for report storage | `.env` or Secrets Manager |
+| `REPORTS_S3_BUCKET` | S3 bucket for report storage | Railway env vars |
 | `REPORTS_PRESIGNED_URL_EXPIRY` | Presigned URL expiry (seconds) | `.env` |
 | `AWS_SES_REGION` | AWS region for SES | `.env` |
 | `SES_FROM_EMAIL` | Sender email address | Secrets Manager |
@@ -1198,13 +1198,12 @@ Pre-deployment verification steps to ensure the system is production-ready.
 - [ ] Create S3 bucket `frontiermind-reports` with:
   - [ ] Lifecycle policy: 90 days Standard, then Glacier
   - [ ] CORS configuration for presigned URL downloads
-  - [ ] Bucket policy for ECS task role access
+  - [ ] Bucket policy for `railway-backend` IAM user access
 - [ ] Configure AWS SES:
   - [ ] Verify sending domain
   - [ ] Request production access (if still in sandbox)
   - [ ] Create email templates
-- [ ] Add secrets to AWS Secrets Manager:
-  - [ ] `frontiermind/reports/ses-config`
+- [ ] Add env vars to Railway dashboard
 
 #### Database Verification
 
@@ -1222,9 +1221,8 @@ Pre-deployment verification steps to ensure the system is production-ready.
 
 #### Deployment Steps
 
-- [ ] Build and push Docker image to ECR
-- [ ] Update ECS task definition with new image
-- [ ] Deploy to staging environment
+- [ ] Push to main (Railway auto-deploys)
+- [ ] Verify deployment in Railway dashboard
 - [ ] Run smoke tests:
   - [ ] `GET /api/reports/templates` returns templates
   - [ ] `POST /api/reports/generate` creates pending report

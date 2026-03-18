@@ -54,7 +54,7 @@ Comprehensive documentation for the Next.js frontend application structure, comp
                           ▼
               ┌─────────────────────┐
               │  Python Backend     │
-              │  (AWS ECS Fargate)  │
+              │  (Railway)          │
               └─────────────────────┘
 ```
 

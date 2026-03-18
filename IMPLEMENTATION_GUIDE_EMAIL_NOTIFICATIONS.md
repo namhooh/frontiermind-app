@@ -39,7 +39,7 @@ Both methods converge into the same review queue and processing pipeline.
                               SNS│         │
                                  ▼         │
 ┌────────────────────────────────────────────────────────────────┐
-│  ECS Python Backend (FastAPI)                                  │
+│  Railway Python Backend (FastAPI)                               │
 │                                                                │
 │  ┌─────────────────┐  ┌──────────────────┐  ┌───────────────┐ │
 │  │IngestService    │  │NotificationService│  │TokenService   │ │
@@ -92,7 +92,7 @@ Both methods converge into the same review queue and processing pipeline.
 | **Secondary ingestion** | Token URL upload | Fallback for large files (>25MB), structured form input, onboarding before sender allowlist setup |
 | **Email domain** | `mail.frontiermind.co` subdomain | Keeps MX separate from Google Workspace on `frontiermind.co`. Per-org addresses (e.g., `cbe@mail.frontiermind.co`) provide isolation |
 | **Same address for inbound + outbound** | Yes | Clients interact with one address per org. Replies/forwards naturally route to ingestion pipeline |
-| Scheduler | APScheduler in-process | Schedule state in PostgreSQL; APScheduler only runs the poll loop. Emails only send when ECS desired-count >= 1 |
+| Scheduler | APScheduler in-process | Schedule state in PostgreSQL; APScheduler only runs the poll loop. Emails only send when the Railway service is running |
 | Email delivery | AWS SES | Already in AWS ecosystem, boto3 already a dependency |
 | Templates | Jinja2 | Same engine as existing PDF report templates |
 | Token storage | SHA-256 hash | Raw token never persisted; hash lookup on validation |
@@ -148,7 +148,7 @@ No DNS changes needed when adding new organizations — SES uses a wildcard rece
    - Action 1: Store to S3 bucket `frontiermind-email-ingest`
    - Action 2: SNS notification to `frontiermind-email-ingest` topic
 4. **Request production access** (exit SES sandbox) for outbound sending
-5. **Create SNS subscription** → HTTPS endpoint on ECS backend
+5. **Create SNS subscription** → HTTPS endpoint on Railway backend
 
 ---
 
@@ -166,7 +166,7 @@ No DNS changes needed when adding new organizations — SES uses a wildcard rece
    b. Publish SNS notification with message-id + recipients
         │
         ▼
-3. SNS → POST /api/ingest/email (ECS backend)
+3. SNS → POST /api/ingest/email (Railway backend)
         │
         ▼
 4. Backend IngestService:
@@ -518,7 +518,7 @@ async def lifespan(app: FastAPI):
 # 3. process_due_report_schedules   — every 5 minutes (scheduled report generation)
 ```
 
-**Important constraint:** Emails only send when ECS `desired-count >= 1`. When scaled to zero, the scheduler is not running. This is a documented operational constraint, not a bug.
+**Important constraint:** Emails only send when the Railway service is running. If the service is stopped, the scheduler is not running. This is a documented operational constraint, not a bug.
 
 ---
 
@@ -574,7 +574,7 @@ Six-tab dashboard plus compose action:
 
 ## Environment Variables
 
-### Backend (ECS / .env)
+### Backend (Railway env vars)
 
 | Variable | Required | Description |
 |----------|----------|-------------|
@@ -583,17 +583,11 @@ Six-tab dashboard plus compose action:
 | `SES_CONFIGURATION_SET` | No | SES configuration set for tracking |
 | `SES_INGEST_BUCKET` | Yes | S3 bucket for raw inbound emails (`frontiermind-email-ingest`) |
 | `SES_INGEST_SNS_TOPIC_ARN` | Yes | SNS topic ARN for inbound email notifications |
-| `APP_BASE_URL` | Yes | Base URL for submission links (set in ECS `task-definition.json`; default: `http://localhost:3000`) |
+| `APP_BASE_URL` | Yes | Base URL for submission links (set in Railway env vars; default: `http://localhost:3000`) |
 
-### AWS Secrets Manager
+### AWS IAM (`railway-backend` user)
 
-| Secret | Path |
-|--------|------|
-| SES sender domain | `frontiermind/backend/ses-sender-domain` |
-
-### AWS IAM (ECS Task Role)
-
-Required permissions:
+Required permissions (attached via `FrontierMind_BackendAccess` policy):
 ```json
 {
   "Version": "2012-10-17",
@@ -601,7 +595,7 @@ Required permissions:
     {
       "Sid": "SESSend",
       "Effect": "Allow",
-      "Action": ["ses:SendEmail", "ses:SendRawEmail", "ses:GetSendQuota"],
+      "Action": ["ses:SendEmail", "ses:SendRawEmail"],
       "Resource": "*"
     },
     {
@@ -627,7 +621,7 @@ Before sending/receiving emails, the subdomain must be verified in SES:
 2. Add DNS records: MX, SPF (TXT), DKIM (3 CNAMEs), DMARC (TXT)
 3. Create receipt rule set with S3 + SNS actions
 4. Request production access (exit SES sandbox) for outbound sending
-5. Create SNS subscription pointing to ECS backend `/api/ingest/email`
+5. Create SNS subscription pointing to Railway backend `/api/ingest/email`
 
 ---
 

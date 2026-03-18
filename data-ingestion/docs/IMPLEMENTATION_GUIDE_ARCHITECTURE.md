@@ -10,7 +10,7 @@
 
 ### Backend API Endpoint
 
-The Python backend for data processing is deployed to AWS ECS Fargate:
+The Python backend for data processing is deployed to Railway:
 
 | Endpoint | URL |
 |----------|-----|
@@ -20,7 +20,7 @@ The Python backend for data processing is deployed to AWS ECS Fargate:
 
 **For full deployment documentation, see `CLAUDE.md` in the project root.**
 
-- All data ingestion flows through the ECS backend API (single pipeline)
+- All data ingestion flows through the Railway backend API (single pipeline)
 - SchemaValidator checks, Transformer cleans, MeterReadingLoader inserts
 - Invalid data quarantined with detailed error messages
 - S3 serves as optional audit archive, not the critical path
@@ -32,10 +32,10 @@ The Python backend for data processing is deployed to AWS ECS Fargate:
 
 ### API-First Architecture
 
-All three ingestion channels converge into a single processing pipeline on the ECS backend:
+All three ingestion channels converge into a single processing pipeline on the Railway backend:
 
 ```
-DATA SOURCES                              ECS FARGATE BACKEND
+DATA SOURCES                              RAILWAY BACKEND
 
 ┌──────────────┐                       ┌──────────────────────────────┐
 │ CLIENT PUSH  │  POST /api/ingest/    │                              │
@@ -105,16 +105,15 @@ DATA SOURCES                              ECS FARGATE BACKEND
 |---------|---------------------|---------------------|
 | Validation paths | 2 (Lambda + backend) | **1 (backend only)** |
 | Connection patterns | 2 (raw psycopg2 + pool) | **1 (pool only)** |
-| Deployment units | 3 (ECS + Lambda + GH Actions) | **1 (ECS only)** |
+| Deployment units | 3 (ECS + Lambda + GH Actions) | **1 (Railway only)** |
 | Client onboarding | IAM cross-account + Snowflake ACCOUNTADMIN | **API key + endpoint URL** |
 | Validation feedback | Async (poll status endpoint) | **Synchronous** |
-| Cold starts | Lambda cold start on first event | **None (ECS always warm)** |
+| Cold starts | Lambda cold start on first event | **None (Railway always warm)** |
 
-**AWS Infrastructure:**
-- **Region:** us-east-1
-- **ECS Cluster:** frontiermind-cluster
-- **ECS Service:** frontiermind-backend
-- **Load Balancer:** frontiermind-alb
+**Infrastructure:**
+- **Compute:** Railway (auto-deploy from GitHub)
+- **AWS Region:** us-east-1 (S3, SES, SNS only)
+- **Custom domain:** `api.frontiermind.co`
 
 ---
 
@@ -553,7 +552,7 @@ CLIENT                     YOUR APP                        S3
 | **Phase 4** | Frontend & Cleanup | Frontend upload refactor, documentation | **IN PROGRESS** |
 | **Phase 5** | Monitoring | CloudWatch metrics, alerting, credential health checks | NOT STARTED |
 
-> **Note:** The S3/Lambda pipeline code is archived in `data-ingestion/processing/s3-lambda/`. Fetcher GitHub Actions workflows remain disabled. All ingestion now routes through the ECS backend API.
+> **Note:** The S3/Lambda pipeline code is archived in `data-ingestion/processing/s3-lambda/`. Fetcher GitHub Actions workflows remain disabled. All ingestion now routes through the Railway backend API.
 
 ### Phase Implementation Details
 
@@ -646,7 +645,7 @@ project/
 │       └── supabase-callback/
 │           └── index.ts             # OAuth callback handler
 │
-├── python-backend/                  # ECS Fargate backend
+├── python-backend/                  # Railway backend
 │   ├── api/
 │   │   └── ingest.py                # Ingestion endpoints (meter-data, upload, sync)
 │   ├── middleware/
@@ -681,7 +680,7 @@ project/
 
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
-| Ingestion strategy | **API-first** (ECS backend) | Single pipeline, synchronous feedback, simpler client onboarding |
+| Ingestion strategy | **API-first** (Railway backend) | Single pipeline, synchronous feedback, simpler client onboarding |
 | S3 role | Optional audit archive | S3 bucket exists but is not in the critical path |
 | Client platform integration | **API push** (HTTP POST) | No IAM cross-account needed, any HTTP client works |
 | Validation | Backend IngestService | Single validation path, uses connection pool |
