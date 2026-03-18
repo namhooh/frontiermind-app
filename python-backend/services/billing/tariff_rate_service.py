@@ -4,7 +4,7 @@ Tariff Rate Service.
 Dispatches tariff rate generation for a project/billing_month:
 - Deterministic (NONE, FIXED_INCREASE, FIXED_DECREASE, PERCENTAGE) → RatePeriodGenerator
 - Floating (REBASED_MARKET_PRICE) → RebasedMarketPriceEngine (after verifying FX + MRP exist)
-- US_CPI → skipped (requires external CPI feed)
+- US_CPI → USCPIEngine (CPI-indexed annual rates from price_index table)
 """
 
 import logging
@@ -14,6 +14,7 @@ from typing import Any, Dict, Optional
 from db.database import get_db_connection
 from services.tariff.rate_period_generator import RatePeriodGenerator
 from services.tariff.rebased_market_price_engine import RebasedMarketPriceEngine
+from services.tariff.us_cpi_engine import USCPIEngine
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,7 @@ class TariffRateService:
     def __init__(self):
         self._rate_generator = RatePeriodGenerator()
         self._rebased_engine = RebasedMarketPriceEngine()
+        self._cpi_engine = USCPIEngine()
 
     def generate(
         self,
@@ -55,6 +57,7 @@ class TariffRateService:
         # Group tariffs by family to avoid redundant work
         has_deterministic = any(t["escalation_type_code"] in DETERMINISTIC_CODES for t in tariffs)
         deterministic_done = False
+        cpi_done = False
 
         for tariff in tariffs:
             esc_code = tariff["escalation_type_code"]
@@ -76,12 +79,11 @@ class TariffRateService:
                     has_error = True
 
             elif esc_code == "US_CPI":
-                results.append({
-                    "tariff_type": "US_CPI",
-                    "clause_tariff_id": tariff["id"],
-                    "status": "skipped",
-                    "reason": "US_CPI requires external CPI feed — not yet supported",
-                })
+                # USCPIEngine handles all CPI tariffs for a project in one call
+                if not cpi_done:
+                    result = self._generate_cpi(project_id, tariff, force_refresh)
+                    results.append(result)
+                    cpi_done = True
 
             else:
                 results.append({
@@ -115,6 +117,29 @@ class TariffRateService:
             logger.error(f"Deterministic rate generation failed for project {project_id}: {e}", exc_info=True)
             return {
                 "tariff_type": tariff["escalation_type_code"],
+                "clause_tariff_id": tariff["id"],
+                "status": "error",
+                "success": False,
+                "error": str(e),
+            }
+
+    def _generate_cpi(
+        self, project_id: int, tariff: dict, force_refresh: bool
+    ) -> Dict[str, Any]:
+        """Generate CPI-indexed tariff rates via USCPIEngine."""
+        try:
+            result = self._cpi_engine.generate(project_id, force_refresh=force_refresh)
+            return {
+                "tariff_type": "US_CPI",
+                "clause_tariff_id": tariff["id"],
+                "status": "computed",
+                "success": True,
+                **result,
+            }
+        except Exception as e:
+            logger.error(f"CPI rate generation failed for project {project_id}: {e}", exc_info=True)
+            return {
+                "tariff_type": "US_CPI",
                 "clause_tariff_id": tariff["id"],
                 "status": "error",
                 "success": False,
@@ -226,15 +251,22 @@ class TariffRateService:
                 return [dict(row) for row in cur.fetchall()]
 
     def _derive_operating_year(self, project_id: int, bm_date: date) -> Optional[int]:
-        """Derive operating year from COD date."""
+        """Derive operating year from clause_tariff.oy_start_date."""
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute("SELECT cod_date FROM project WHERE id = %s", (project_id,))
+                cur.execute("""
+                    SELECT ct.logic_parameters->>'oy_start_date' AS oy_start_date
+                    FROM project p
+                    LEFT JOIN clause_tariff ct
+                        ON ct.project_id = p.id AND ct.is_current = true
+                    WHERE p.id = %s
+                    LIMIT 1
+                """, (project_id,))
                 row = cur.fetchone()
-                if not row or not row["cod_date"]:
+                if not row or not row.get("oy_start_date"):
                     return None
-                cod = row["cod_date"]
-                months_since = (bm_date.year - cod.year) * 12 + (bm_date.month - cod.month)
+                oy_anchor = date.fromisoformat(row["oy_start_date"])
+                months_since = (bm_date.year - oy_anchor.year) * 12 + (bm_date.month - oy_anchor.month)
                 if months_since < 0:
                     return 0
                 return (months_since // 12) + 1

@@ -474,29 +474,35 @@ def _check_duplicate_document(project_id: int, file_hash: str) -> None:
 
 
 def _determine_operating_year(project_id: int, billing_month: "date") -> tuple:
-    """Determine the contract operating year from the project's COD date.
+    """Determine the contract operating year from clause_tariff.oy_start_date.
 
     Returns:
-        Tuple of (operating_year, cod_date). cod_date may be None.
+        Tuple of (operating_year, oy_anchor_date). oy_anchor_date may be None.
     """
     from db.database import get_db_connection
 
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                "SELECT cod_date FROM project WHERE id = %s",
-                (project_id,),
-            )
+            cur.execute("""
+                SELECT ct.logic_parameters->>'oy_start_date' AS oy_start_date
+                FROM project p
+                LEFT JOIN clause_tariff ct
+                    ON ct.project_id = p.id AND ct.is_current = true
+                WHERE p.id = %s
+                LIMIT 1
+            """, (project_id,))
             row = cur.fetchone()
-            if not row or not row["cod_date"]:
-                return 1, None  # Default to year 1 if COD not set
+            if not row or not row.get("oy_start_date"):
+                return 1, None  # Default to year 1 if oy_start_date not set
 
-            cod_date = row["cod_date"]
-            # Operating year = how many full years since COD + 1
-            year_diff = billing_month.year - cod_date.year
-            if billing_month.month < cod_date.month:
+            from datetime import date as _date
+            oy_anchor = _date.fromisoformat(row["oy_start_date"])
+
+            # Operating year = how many full years since anchor + 1
+            year_diff = billing_month.year - oy_anchor.year
+            if billing_month.month < oy_anchor.month:
                 year_diff -= 1
-            return max(1, year_diff + 1), cod_date
+            return max(1, year_diff + 1), oy_anchor
 
 
 def _get_cod_date(project_id: int):

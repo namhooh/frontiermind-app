@@ -174,6 +174,8 @@ async def send_email(request: Request, body: SendEmailRequest, auth: dict = Depe
             include_submission_link=body.include_submission_link,
             submission_fields=body.submission_fields,
             extra_context=body.extra_context,
+            subject_override=body.subject_override,
+            body_html_override=body.body_html_override,
         )
 
         return SendEmailResponse(
@@ -783,7 +785,7 @@ class SubmissionTokenListResponse(BaseModel):
     response_model=SubmissionTokenListResponse,
     summary="List submission tokens",
 )
-async def list_tokens(
+def list_tokens(
     project_id: Optional[int] = Query(None),
     submission_type: Optional[str] = Query(None),
     include_expired: bool = Query(False),

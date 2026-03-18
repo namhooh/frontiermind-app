@@ -398,7 +398,8 @@ class ContractParser:
         contract_id: int,
         file_bytes: bytes,
         filename: str,
-        user_id=None
+        user_id=None,
+        contract_amendment_id: Optional[int] = None,
     ) -> ContractParseResult:
         """
         Process a contract and store results in database (Phase 2).
@@ -608,7 +609,8 @@ class ContractParser:
             self.repository.store_clauses(
                 contract_id=contract_id,
                 clauses=clause_dicts,
-                project_id=project_id  # NEW: pass project_id
+                project_id=project_id,
+                contract_amendment_id=contract_amendment_id,
             )
 
             # Step 7: Update contract status to completed
@@ -1137,6 +1139,32 @@ class ContractParser:
                 f"Pass 2 complete: {len(clauses)} clauses categorized, "
                 f"{summary.unidentified_count} unidentified"
             )
+
+            # ===== POST-PROCESSING: TARGETED EXTRACTION + PAYLOAD ENRICHMENT + VALIDATION =====
+            # Same post-processing as single_pass — catches annexures, weak categories, and gaps
+            if clauses:
+                clauses, post_stats = self._post_process_clauses(
+                    clauses=clauses,
+                    anonymized_text=anonymized_text,
+                    enable_targeted_extraction=self.enable_targeted,
+                    enable_payload_enrichment=True,
+                    enable_validation=self.enable_validation
+                )
+
+                # Update summary with post-processing results
+                clauses_added = (
+                    post_stats['targeted_extraction']['clauses_added'] +
+                    post_stats['validation_pass']['clauses_added']
+                )
+                if clauses_added > 0:
+                    summary.total_clauses_extracted = len(clauses)
+                    # Rebuild category counts
+                    category_counts = {}
+                    for clause in clauses:
+                        cat = clause.category or clause.clause_category or "UNIDENTIFIED"
+                        category_counts[cat] = category_counts.get(cat, 0) + 1
+                    summary.clauses_by_category = category_counts
+                    summary.unidentified_count = category_counts.get("UNIDENTIFIED", 0)
 
             return clauses, summary
 
@@ -1667,6 +1695,21 @@ class ContractParser:
             logger.warning(f"Failed to parse enrichment response: {e}")
             return []
 
+    # Organization subsidiary name patterns — these are the seller in CBE contracts
+    # and should never be created as counterparties.
+    _ORG_SUBSIDIARY_PATTERNS = [
+        "crossboundary energy",
+        "crossboundary",
+        "starsight energy",
+        "starsight power",
+        "starsight",
+    ]
+
+    def _is_org_subsidiary(self, name: str) -> bool:
+        """Check if a party name matches an organization subsidiary pattern."""
+        name_lower = name.lower().strip()
+        return any(pat in name_lower for pat in self._ORG_SUBSIDIARY_PATTERNS)
+
     def _extract_contract_metadata(self, anonymized_text: str) -> dict:
         """
         Extract contract-level metadata (type, parties, dates) using Claude API.
@@ -1736,7 +1779,7 @@ class ContractParser:
             # Parse response
             metadata = parse_metadata_response(response.content[0].text)
 
-            # Store raw extraction in metadata
+            # Store raw extraction in metadata (including both date types)
             result['extraction_metadata'].update({
                 'seller_name': metadata.get('seller_name'),
                 'buyer_name': metadata.get('buyer_name'),
@@ -1746,12 +1789,18 @@ class ContractParser:
                 'facility_location': metadata.get('facility_location'),
                 'capacity_mw': metadata.get('capacity_mw'),
                 'term_years': metadata.get('term_years'),
+                'execution_date': metadata.get('execution_date'),
+                'effective_date': metadata.get('effective_date'),
                 'extraction_notes': metadata.get('extraction_notes', []),
                 'overall_confidence': metadata.get('overall_confidence', 0),
             })
 
             # Extract dates and term
-            result['effective_date'] = metadata.get('effective_date')
+            # contract.effective_date = execution/signature date (operational meaning for this org)
+            # Both dates stored in extraction_metadata for audit
+            result['effective_date'] = (
+                metadata.get('execution_date') or metadata.get('effective_date')
+            )
             result['end_date'] = metadata.get('end_date')
             if metadata.get('term_years') is not None:
                 result['contract_term_years'] = int(metadata['term_years'])
@@ -1771,13 +1820,14 @@ class ContractParser:
                         f"Contract type not matched: {metadata['contract_type']}"
                     )
 
-            # Match counterparty (prefer seller for counterparty FK)
-            # In most PPAs, the "seller" is the counterparty from buyer's perspective
+            # Match counterparty (prefer buyer — the offtaker/customer)
+            # In CBE SSAs/PPAs, the seller is a CBE subsidiary (our org), not a counterparty.
+            # The buyer is the customer/offtaker and should map to the counterparty table.
             if self.lookup_service:
-                # Try to match seller first, then buyer
-                for party_key in ['seller_name', 'buyer_name']:
+                # Try to match buyer first, then seller
+                for party_key in ['buyer_name', 'seller_name']:
                     party_name = metadata.get(party_key)
-                    if party_name:
+                    if party_name and not self._is_org_subsidiary(party_name):
                         match_result = self.lookup_service.match_counterparty(party_name)
                         if match_result:
                             result['counterparty_id'] = match_result['id']
@@ -1789,31 +1839,34 @@ class ContractParser:
                                 f"(ID {match_result['id']}, confidence {match_result['score']:.2f})"
                             )
                             break
+                    elif party_name and self._is_org_subsidiary(party_name):
+                        logger.info(
+                            f"Skipping {party_key} '{party_name}' — recognized as org subsidiary"
+                        )
 
                 if not result['counterparty_id']:
-                    # Auto-create counterparty from seller_name (or buyer_name as fallback)
-                    party_name = metadata.get('seller_name') or metadata.get('buyer_name')
-                    party_type = 'seller' if metadata.get('seller_name') else 'buyer'
+                    # Auto-create counterparty from buyer only (never from seller/org subsidiary)
+                    buyer_name = metadata.get('buyer_name')
 
-                    if party_name:
+                    if buyer_name and not self._is_org_subsidiary(buyer_name):
                         logger.info(
-                            f"No counterparty match found. Auto-creating from {party_type}: '{party_name}'"
+                            f"No counterparty match found. Auto-creating from buyer: '{buyer_name}'"
                         )
                         new_id = self.lookup_service.create_counterparty(
-                            party_name,
-                            counterparty_type=party_type
+                            buyer_name,
+                            counterparty_type='buyer'
                         )
                         if new_id:
                             result['counterparty_id'] = new_id
                             result['extraction_metadata']['counterparty_matched'] = False
                             result['extraction_metadata']['counterparty_auto_created'] = True
-                            result['extraction_metadata']['counterparty_created_from'] = party_type + '_name'
+                            result['extraction_metadata']['counterparty_created_from'] = 'buyer_name'
                             logger.info(
-                                f"Counterparty auto-created: '{party_name}' -> ID {new_id}"
+                                f"Counterparty auto-created: '{buyer_name}' -> ID {new_id}"
                             )
                     else:
                         logger.info(
-                            f"No counterparty match found and no party names to create from. "
+                            f"No counterparty match found and buyer is org subsidiary or missing. "
                             f"Seller: '{metadata.get('seller_name')}', "
                             f"Buyer: '{metadata.get('buyer_name')}'"
                         )

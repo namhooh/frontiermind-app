@@ -228,7 +228,7 @@ def _reaggregate_annual(cur, project_id: int, org_id: int, operating_year: int) 
     "/projects/{project_id}/mrp-refresh",
     summary="Refresh stale annual MRP observations",
 )
-async def refresh_mrp(request: Request, project_id: int):
+def refresh_mrp(request: Request, project_id: int):
     """
     Re-aggregate annual MRP observations that are stale.
 
@@ -288,7 +288,7 @@ async def refresh_mrp(request: Request, project_id: int):
     response_model=MRPObservationListResponse,
     summary="List MRP observations for a project",
 )
-async def list_mrp_observations(
+def list_mrp_observations(
     request: Request,
     project_id: int,
     operating_year: Optional[int] = Query(None, ge=0, description="Filter by operating year (0 = baseline/pre-COD)"),
@@ -925,10 +925,19 @@ async def manual_mrp_entry(
                     row = cur.fetchone()
                     currency_id = row["currency_id"] if row else None
 
-                # Fetch COD date for operating_year calculation
-                cur.execute("SELECT cod_date FROM project WHERE id = %s", (project_id,))
+                # Fetch oy_start_date for operating_year calculation
+                cur.execute("""
+                    SELECT ct.logic_parameters->>'oy_start_date' AS oy_start_date
+                    FROM project p
+                    LEFT JOIN clause_tariff ct
+                        ON ct.project_id = p.id AND ct.is_current = true
+                    WHERE p.id = %s
+                    LIMIT 1
+                """, (project_id,))
                 proj_row = cur.fetchone()
-                cod_date = proj_row["cod_date"] if proj_row else None
+                cod_date = None
+                if proj_row and proj_row.get("oy_start_date"):
+                    cod_date = date.fromisoformat(proj_row["oy_start_date"])
     except HTTPException:
         raise
     except Exception as e:

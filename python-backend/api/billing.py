@@ -102,6 +102,8 @@ class MonthlyBillingResponse(BaseModel):
     degradation_pct: Optional[float] = None
     cod_date: Optional[str] = None  # ISO date string from project.cod_date
     summary: dict[str, Any] = {}
+    total_months: Optional[int] = None  # Total months available (before limit applied)
+    months_returned: Optional[int] = None  # Number of months returned in this response
 
 
 class ManualEntryRequest(BaseModel):
@@ -161,6 +163,8 @@ class MeterBillingResponse(BaseModel):
     months: List[MeterBillingMonth] = []
     currency_code: Optional[str] = None
     hard_currency_code: Optional[str] = None
+    total_months: Optional[int] = None
+    months_returned: Optional[int] = None
 
 
 # ---------------------------------------------------------------------------
@@ -575,8 +579,9 @@ _METER_AGG_DEDUP = """
     response_model=MonthlyBillingResponse,
     summary="Get monthly billing data",
 )
-async def get_monthly_billing(
+def get_monthly_billing(
     project_id: int = Path(..., description="Project ID"),
+    month_limit: Optional[int] = Query(12, alias="months", description="Number of recent months to return. Use 0 for all months."),
 ) -> MonthlyBillingResponse:
     if not USE_DATABASE:
         raise HTTPException(status_code=503, detail="Database not available")
@@ -692,6 +697,11 @@ async def get_monthly_billing(
                     ORDER BY am.billing_month DESC
                 """, {"pid": project_id})
                 month_rows = cur.fetchall()
+                total_month_count = len(month_rows)
+
+                # Apply month limit (rows already sorted DESC)
+                if month_limit and month_limit > 0 and len(month_rows) > month_limit:
+                    month_rows = month_rows[:month_limit]
 
                 # 3b) Per-product kWh actuals
                 cur.execute("""
@@ -756,6 +766,22 @@ async def get_monthly_billing(
                     "total_billing": 0.0,
                     "total_billing_hard": 0.0,
                 }
+
+                # Collect all billing_period_ids for batch invoice fetch
+                all_bp_ids: list[int] = []
+                month_bp_ids: dict[str, Optional[int]] = {}
+                for mr in month_rows:
+                    bp_id = mr.get("billing_period_id")
+                    bm = mr["billing_month"]
+                    bm_str = bm.strftime("%Y-%m-%d") if isinstance(bm, date) else str(bm)
+                    month_bp_ids[bm_str] = bp_id
+                    if bp_id is not None:
+                        all_bp_ids.append(bp_id)
+
+                # Batch-fetch all expected invoices in 2 queries instead of N
+                invoice_by_bp = _read_expected_invoices_batch(
+                    cur, project_id, all_bp_ids
+                ) if all_bp_ids else {}
 
                 for mr in month_rows:
                     bm = mr["billing_month"]
@@ -839,11 +865,9 @@ async def get_monthly_billing(
                     totals["total_billing"] += row_total
                     totals["total_billing_hard"] += row_total_hard
 
-                    # Load expected invoice if billing_period_id exists
-                    exp_inv = None
+                    # Look up pre-fetched expected invoice
                     bp_id = mr.get("billing_period_id")
-                    if bp_id is not None:
-                        exp_inv = _read_expected_invoice(cur, project_id, bp_id)
+                    exp_inv = invoice_by_bp.get(bp_id) if bp_id is not None else None
 
                     rows.append(MonthlyBillingRow(
                         billing_month=bm_str,
@@ -870,6 +894,8 @@ async def get_monthly_billing(
                     degradation_pct=degradation_pct,
                     cod_date=cod_date_str,
                     summary=totals,
+                    total_months=total_month_count,
+                    months_returned=len(rows),
                 )
 
     except HTTPException:
@@ -1135,85 +1161,130 @@ async def export_monthly_billing(
 # ============================================================================
 
 def _read_expected_invoice(cur, project_id: int, billing_period_id: int, invoice_direction: str = "payable", fx_rate: Optional[float] = None) -> Optional[ExpectedInvoiceSummary]:
-    """Read persisted expected invoice and derive section totals from line items."""
+    """Read persisted expected invoice and derive section totals from line items.
+    For batch loading, prefer _read_expected_invoices_batch() instead."""
+    batch = _read_expected_invoices_batch(cur, project_id, [billing_period_id], invoice_direction, fx_rates={billing_period_id: fx_rate})
+    return batch.get(billing_period_id)
+
+
+def _read_expected_invoices_batch(
+    cur,
+    project_id: int,
+    billing_period_ids: list[int],
+    invoice_direction: str = "payable",
+    fx_rates: Optional[dict[int, Optional[float]]] = None,
+) -> dict[int, ExpectedInvoiceSummary]:
+    """Batch-read all expected invoices for given billing_period_ids in 2 queries.
+    Returns a dict mapping billing_period_id -> ExpectedInvoiceSummary."""
+    if not billing_period_ids:
+        return {}
+
+    # 1) Fetch all matching headers in one query
     cur.execute("""
-        SELECT eih.id, eih.version_no, eih.total_amount
+        SELECT DISTINCT ON (eih.billing_period_id)
+               eih.id, eih.billing_period_id, eih.version_no, eih.total_amount
         FROM expected_invoice_header eih
         WHERE eih.project_id = %(pid)s
-          AND eih.billing_period_id = %(bp)s
+          AND eih.billing_period_id = ANY(%(bps)s)
           AND eih.invoice_direction = %(dir)s
           AND eih.is_current = true
-        LIMIT 1
-    """, {"pid": project_id, "bp": billing_period_id, "dir": invoice_direction})
-    header = cur.fetchone()
-    if not header:
-        return None
+        ORDER BY eih.billing_period_id, eih.id DESC
+    """, {"pid": project_id, "bps": billing_period_ids, "dir": invoice_direction})
+    headers = cur.fetchall()
+    if not headers:
+        return {}
 
+    header_by_bp: dict[int, dict] = {}
+    header_ids: list[int] = []
+    for h in headers:
+        header_by_bp[h["billing_period_id"]] = h
+        header_ids.append(h["id"])
+
+    # 2) Fetch ALL line items for ALL headers in one query
     cur.execute("""
-        SELECT eil.*, ilit.code AS type_code, m.name AS meter_name
+        SELECT eil.*, eil.expected_invoice_header_id AS hid,
+               ilit.code AS type_code, m.name AS meter_name
         FROM expected_invoice_line_item eil
         JOIN invoice_line_item_type ilit ON ilit.id = eil.invoice_line_item_type_id
         LEFT JOIN contract_line cl ON cl.id = eil.contract_line_id
         LEFT JOIN meter m ON m.id = cl.meter_id
-        WHERE eil.expected_invoice_header_id = %(hid)s
-        ORDER BY eil.sort_order, eil.id
-    """, {"hid": header["id"]})
+        WHERE eil.expected_invoice_header_id = ANY(%(hids)s)
+        ORDER BY eil.expected_invoice_header_id, eil.sort_order, eil.id
+    """, {"hids": header_ids})
+    all_line_rows = cur.fetchall()
 
-    line_items = []
-    energy_subtotal = 0.0
-    levies_total = 0.0
-    vat_amount = 0.0
-    withholdings_total = 0.0
+    # Group line items by header_id
+    lines_by_header: dict[int, list] = {}
+    for row in all_line_rows:
+        hid = row["hid"]
+        if hid not in lines_by_header:
+            lines_by_header[hid] = []
+        lines_by_header[hid].append(row)
 
-    for row in cur.fetchall():
-        tc = row["type_code"]
-        lt = _decimal_to_float(row["line_total_amount"]) or 0.0
+    # 3) Build ExpectedInvoiceSummary for each billing_period
+    result: dict[int, ExpectedInvoiceSummary] = {}
+    for bp_id, header in header_by_bp.items():
+        hid = header["id"]
+        rows = lines_by_header.get(hid, [])
 
-        if tc in ("ENERGY", "AVAILABLE_ENERGY"):
-            energy_subtotal += lt
-        elif tc == "LEVY":
-            levies_total += lt
-        elif tc == "TAX":
-            vat_amount += lt
-        elif tc == "WITHHOLDING":
-            withholdings_total += abs(lt)
+        line_items = []
+        energy_subtotal = 0.0
+        levies_total = 0.0
+        vat_amount = 0.0
+        withholdings_total = 0.0
 
-        line_items.append(ExpectedInvoiceLineItem(
-            line_item_type_code=tc,
-            component_code=row.get("component_code"),
-            description=row.get("description") or "",
-            quantity=_decimal_to_float(row.get("quantity")),
-            unit_price=_decimal_to_float(row.get("line_unit_price")),
-            basis_amount=_decimal_to_float(row.get("basis_amount")),
-            rate_pct=_decimal_to_float(row.get("rate_pct")),
-            line_total_amount=lt,
-            amount_sign=row.get("amount_sign", 1),
-            sort_order=row.get("sort_order", 0),
-            meter_name=row.get("meter_name"),
-        ))
+        for row in rows:
+            tc = row["type_code"]
+            lt = _decimal_to_float(row["line_total_amount"]) or 0.0
 
-    subtotal_after_levies = energy_subtotal + levies_total
-    invoice_total = subtotal_after_levies + vat_amount
-    net_due = sum(li.line_total_amount for li in line_items)
+            if tc in ("ENERGY", "AVAILABLE_ENERGY"):
+                energy_subtotal += lt
+            elif tc == "LEVY":
+                levies_total += lt
+            elif tc == "TAX":
+                vat_amount += lt
+            elif tc == "WITHHOLDING":
+                withholdings_total += abs(lt)
 
-    net_due_hard = None
-    if fx_rate and fx_rate > 0:
-        net_due_hard = round(net_due / fx_rate, 2)
+            line_items.append(ExpectedInvoiceLineItem(
+                line_item_type_code=tc,
+                component_code=row.get("component_code"),
+                description=row.get("description") or "",
+                quantity=_decimal_to_float(row.get("quantity")),
+                unit_price=_decimal_to_float(row.get("line_unit_price")),
+                basis_amount=_decimal_to_float(row.get("basis_amount")),
+                rate_pct=_decimal_to_float(row.get("rate_pct")),
+                line_total_amount=lt,
+                amount_sign=row.get("amount_sign", 1),
+                sort_order=row.get("sort_order", 0),
+                meter_name=row.get("meter_name"),
+            ))
 
-    return ExpectedInvoiceSummary(
-        header_id=header["id"],
-        version_no=header["version_no"],
-        energy_subtotal=round(energy_subtotal, 2),
-        levies_total=round(levies_total, 2),
-        subtotal_after_levies=round(subtotal_after_levies, 2),
-        vat_amount=round(vat_amount, 2),
-        invoice_total=round(invoice_total, 2),
-        withholdings_total=round(withholdings_total, 2),
-        net_due=round(net_due, 2),
-        net_due_hard_ccy=net_due_hard,
-        fx_rate=fx_rate,
-        line_items=line_items,
-    )
+        subtotal_after_levies = energy_subtotal + levies_total
+        invoice_total = subtotal_after_levies + vat_amount
+        net_due = sum(li.line_total_amount for li in line_items)
+
+        fx_rate = (fx_rates or {}).get(bp_id)
+        net_due_hard = None
+        if fx_rate and fx_rate > 0:
+            net_due_hard = round(net_due / fx_rate, 2)
+
+        result[bp_id] = ExpectedInvoiceSummary(
+            header_id=hid,
+            version_no=header["version_no"],
+            energy_subtotal=round(energy_subtotal, 2),
+            levies_total=round(levies_total, 2),
+            subtotal_after_levies=round(subtotal_after_levies, 2),
+            vat_amount=round(vat_amount, 2),
+            invoice_total=round(invoice_total, 2),
+            withholdings_total=round(withholdings_total, 2),
+            net_due=round(net_due, 2),
+            net_due_hard_ccy=net_due_hard,
+            fx_rate=fx_rate,
+            line_items=line_items,
+        )
+
+    return result
 
 
 @router.get(
@@ -1221,9 +1292,10 @@ def _read_expected_invoice(cur, project_id: int, billing_period_id: int, invoice
     response_model=MeterBillingResponse,
     summary="Get per-meter billing breakdown",
 )
-async def get_meter_billing(
+def get_meter_billing(
     project_id: int = Path(..., description="Project ID"),
     invoice_direction: str = Query("payable", description="Invoice direction: 'payable' or 'receivable'"),
+    month_limit: Optional[int] = Query(12, alias="months", description="Number of recent months to return. Use 0 for all months."),
 ) -> MeterBillingResponse:
     """Per-meter billing breakdown with metered + available energy per meter.
     Includes expected_invoice data when available."""
@@ -1394,9 +1466,21 @@ async def get_meter_billing(
                     if ar.get("billing_period_id"):
                         month_bp_map[bm_str] = ar["billing_period_id"]
 
-                # 5) Assemble months with expected_invoice when available
-                months: list[MeterBillingMonth] = []
-                for bm_str in sorted(month_data.keys(), reverse=True):
+                # 5) Assemble months — first pass builds readings + FX rates,
+                #    then batch-fetch invoices, then attach
+                sorted_month_keys = sorted(month_data.keys(), reverse=True)
+                total_meter_month_count = len(sorted_month_keys)
+
+                # Apply month limit
+                if month_limit and month_limit > 0 and len(sorted_month_keys) > month_limit:
+                    sorted_month_keys = sorted_month_keys[:month_limit]
+
+                months_out: list[MeterBillingMonth] = []
+                # Intermediate: month data without invoice attached yet
+                month_intermediates: list[dict] = []
+                fx_rates_by_bp: dict[int, Optional[float]] = {}
+
+                for bm_str in sorted_month_keys:
                     readings_raw = month_data[bm_str]
                     bm = datetime.strptime(bm_str, "%Y-%m-%d").date()
 
@@ -1459,29 +1543,49 @@ async def get_meter_billing(
                             amount_hard_ccy=round(amount_hard, 2) if amount_hard is not None else None,
                         ))
 
-                    # Try to read persisted expected_invoice (pass FX rate for hard_ccy conversion)
-                    expected_invoice = None
                     bp_id = month_bp_map.get(bm_str)
                     if bp_id:
-                        expected_invoice = _read_expected_invoice(cur, project_id, bp_id, invoice_direction=invoice_direction, fx_rate=month_fx_rate)
+                        fx_rates_by_bp[bp_id] = month_fx_rate
 
-                    months.append(MeterBillingMonth(
-                        billing_month=bm_str,
-                        meter_readings=readings,
-                        total_metered_kwh=round(total_metered, 2),
-                        total_available_kwh=round(total_available, 2) if total_available > 0 else None,
-                        total_energy_kwh=round(total_metered + total_available, 2),
-                        total_amount=round(total_amount, 2) if total_amount > 0 else None,
-                        total_amount_hard_ccy=round(total_amount_hard, 2) if total_amount_hard > 0 else None,
+                    month_intermediates.append({
+                        "billing_month": bm_str,
+                        "readings": readings,
+                        "total_metered": total_metered,
+                        "total_available": total_available,
+                        "total_amount": total_amount,
+                        "total_amount_hard": total_amount_hard,
+                        "bp_id": bp_id,
+                    })
+
+                # Batch-fetch all expected invoices (2 queries instead of N)
+                all_meter_bp_ids = [m["bp_id"] for m in month_intermediates if m["bp_id"]]
+                invoice_by_bp = _read_expected_invoices_batch(
+                    cur, project_id, all_meter_bp_ids, invoice_direction, fx_rates_by_bp
+                ) if all_meter_bp_ids else {}
+
+                # Attach invoices and build final month list
+                for mi in month_intermediates:
+                    expected_invoice = invoice_by_bp.get(mi["bp_id"]) if mi["bp_id"] else None
+
+                    months_out.append(MeterBillingMonth(
+                        billing_month=mi["billing_month"],
+                        meter_readings=mi["readings"],
+                        total_metered_kwh=round(mi["total_metered"], 2),
+                        total_available_kwh=round(mi["total_available"], 2) if mi["total_available"] > 0 else None,
+                        total_energy_kwh=round(mi["total_metered"] + mi["total_available"], 2),
+                        total_amount=round(mi["total_amount"], 2) if mi["total_amount"] > 0 else None,
+                        total_amount_hard_ccy=round(mi["total_amount_hard"], 2) if mi["total_amount_hard"] > 0 else None,
                         expected_invoice=expected_invoice,
                     ))
 
                 return MeterBillingResponse(
                     success=True,
                     meters=meters_info,
-                    months=months,
+                    months=months_out,
                     currency_code=currency_code,
                     hard_currency_code=hard_currency_code,
+                    total_months=total_meter_month_count,
+                    months_returned=len(months_out),
                 )
 
     except HTTPException:

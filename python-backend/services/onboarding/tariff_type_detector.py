@@ -1,12 +1,14 @@
 """
 Tariff type detection from structured data sources.
 
-Outputs:
-  - energy_sale_type_id (FIXED_SOLAR, FLOATING_GRID, FLOATING_GENERATOR, etc.)
-  - escalation_type_id (NONE, PERCENTAGE, US_CPI, REBASED_MARKET_PRICE, etc.)
+Post-migration 059 taxonomy:
+  - escalation_type_id: pricing mechanism (NONE, PERCENTAGE, US_CPI,
+    REBASED_MARKET_PRICE, FLOATING_GRID, FLOATING_GENERATOR,
+    FLOATING_GRID_GENERATOR, NOT_ENERGY_SALES, FIXED_INCREASE, FIXED_DECREASE)
+  - energy_sale_type_id: revenue/product type (ENERGY_SALES,
+    EQUIPMENT_RENTAL_LEASE, LOAN, BESS_LEASE, ENERGY_AS_SERVICE,
+    OTHER_SERVICE, NOT_APPLICABLE)
   - formula_type (inside logic_parameters)
-
-Does NOT output tariff_structure_id (dropped in migration 034).
 
 Signals are combined from:
   - SAGE IND_USE_CPI_INFLATION flag
@@ -52,7 +54,7 @@ def detect_tariff_type(
     """
     Detect tariff type from multiple signal sources.
 
-    Returns TariffTypeResult with energy_sale_type_id, escalation_type_id,
+    Returns TariffTypeResult with escalation_type_code, energy_sale_type_code,
     formula_type, and confidence.
     """
     signals: Dict[str, Any] = {}
@@ -114,23 +116,25 @@ def detect_tariff_type(
     signals["ground_truth"] = ground_truth_type
 
     # ─── Inference Logic ────────────────────────────────────────────────────
+    # Post-059: FLOATING_* are escalation_type codes, not energy_sale_type codes.
+    # energy_sale_type is the revenue type (ENERGY_SALES for all PPA-parsed tariffs).
 
-    # Start with ground truth if available
-    energy_sale_type = None
     escalation_type = None
     formula_type = None
+    energy_sale_type = "ENERGY_SALES"  # Default for PPA/SSA energy contracts
     confidence = 0.75
 
+    # Start with ground truth if available
     if ground_truth_type == "FIXED":
-        energy_sale_type = "FIXED_SOLAR"
+        # Fixed solar tariff — escalation determined below from CPI/masterfile signals
         formula_type = "FIXED"
         confidence = 0.95
     elif ground_truth_type == "GRID":
-        energy_sale_type = "FLOATING_GRID"
+        escalation_type = "FLOATING_GRID"
         formula_type = "FLOATING_GRID"
         confidence = 0.95
     elif ground_truth_type == "GENERATOR":
-        energy_sale_type = "FLOATING_GENERATOR"
+        escalation_type = "FLOATING_GENERATOR"
         formula_type = "FLOATING_GENERATOR"
         confidence = 0.95
     else:
@@ -138,50 +142,47 @@ def detect_tariff_type(
         if has_floor_ceiling:
             # Floor/ceiling implies floating tariff
             if has_generator_product and not has_grid_product:
-                energy_sale_type = "FLOATING_GENERATOR"
+                escalation_type = "FLOATING_GENERATOR"
                 formula_type = "FLOATING_GENERATOR"
             else:
-                energy_sale_type = "FLOATING_GRID"
+                escalation_type = "FLOATING_GRID"
                 formula_type = "FLOATING_GRID"
             confidence = 0.85
         elif has_grid_product:
-            energy_sale_type = "FLOATING_GRID"
+            escalation_type = "FLOATING_GRID"
             formula_type = "FLOATING_GRID"
             confidence = 0.80
         elif has_generator_product:
-            energy_sale_type = "FLOATING_GENERATOR"
+            escalation_type = "FLOATING_GENERATOR"
             formula_type = "FLOATING_GENERATOR"
             confidence = 0.80
         else:
-            energy_sale_type = "FIXED_SOLAR"
             formula_type = "FIXED"
             confidence = 0.70
 
-    # Determine escalation type
-    if has_cpi:
-        escalation_type = "US_CPI"
-        if formula_type == "FIXED":
-            # CPI on a fixed tariff implies indexed escalation
-            pass
-    elif masterfile_esc_type:
-        esc_upper = masterfile_esc_type
-        if "CPI" in esc_upper:
+    # Determine escalation type for non-floating tariffs
+    if escalation_type is None:
+        if has_cpi:
             escalation_type = "US_CPI"
-        elif "FIXED" in esc_upper and "INCREASE" in esc_upper:
-            escalation_type = "FIXED_INCREASE"
-        elif "PERCENT" in esc_upper:
-            escalation_type = "PERCENTAGE"
-        elif "REBASED" in esc_upper or "MARKET" in esc_upper:
-            escalation_type = "REBASED_MARKET_PRICE"
-        elif esc_upper in ("NONE", "FLAT", "NO", "NO ADJUSTMENT"):
-            escalation_type = "NONE"
+        elif masterfile_esc_type:
+            esc_upper = masterfile_esc_type
+            if "CPI" in esc_upper:
+                escalation_type = "US_CPI"
+            elif "FIXED" in esc_upper and "INCREASE" in esc_upper:
+                escalation_type = "FIXED_INCREASE"
+            elif "PERCENT" in esc_upper:
+                escalation_type = "PERCENTAGE"
+            elif "REBASED" in esc_upper or "MARKET" in esc_upper:
+                escalation_type = "REBASED_MARKET_PRICE"
+            elif esc_upper in ("NONE", "FLAT", "NO", "NO ADJUSTMENT"):
+                escalation_type = "NONE"
+            else:
+                escalation_type = "NONE"
         else:
             escalation_type = "NONE"
-    else:
-        escalation_type = "NONE"
 
-    signals["inferred_energy_sale_type"] = energy_sale_type
     signals["inferred_escalation_type"] = escalation_type
+    signals["inferred_energy_sale_type"] = energy_sale_type
 
     # Derive mrp_method from formula_type:
     # - GRID-based formulas → MRP = sum of utility variable charges (ToU)
@@ -194,8 +195,8 @@ def detect_tariff_type(
         mrp_method = "utility_total_charges"
 
     return TariffTypeResult(
-        energy_sale_type_id=energy_sale_type,
-        escalation_type_id=escalation_type,
+        escalation_type_code=escalation_type,
+        energy_sale_type_code=energy_sale_type,
         formula_type=formula_type,
         mrp_method=mrp_method,
         signals=signals,

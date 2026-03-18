@@ -56,8 +56,9 @@ Extract the exact legal names of:
 IMPORTANT: Extract the full legal entity name as stated in the contract (e.g., "SolarCo Energy LLC", not just "Seller")
 
 ### 3. Dates and Term
-- **effective_date**: When the contract becomes effective (format: YYYY-MM-DD or null)
-- **end_date**: When the contract terminates (format: YYYY-MM-DD or null)
+- **execution_date**: The date the contract was signed/executed by the parties (format: YYYY-MM-DD or null). Look for signature blocks, execution pages, or "dated this ___ day of ___" language.
+- **effective_date**: The contractual effective/commencement date — when obligations begin. This may differ from the execution date (e.g., COD, a specified future date, or upon satisfaction of conditions precedent). If ambiguous, use null.
+- **end_date**: When the contract terminates (format: YYYY-MM-DD or null). If only term_years is stated, leave end_date null — it will be derived.
 - **term_years**: Duration in years (integer or null)
 
 ### 4. Project Information (if available)
@@ -78,6 +79,7 @@ Return a JSON object:
     "contract_type_confidence": 0.95,
     "seller_name": "SolarCo Energy LLC",
     "buyer_name": "City of Greenville",
+    "execution_date": "2023-06-15",
     "effective_date": "2024-01-01",
     "end_date": "2044-01-01",
     "term_years": 20,
@@ -104,7 +106,7 @@ Return a JSON object:
 ## IMPORTANT NOTES
 
 1. Extract party names EXACTLY as written (include "LLC", "Inc.", "Corp.", etc.)
-2. If multiple dates are mentioned, use the Contract Effective Date (not execution date)
+2. Extract BOTH execution_date (signing date) and effective_date (commencement date) separately — they are often different dates
 3. For PPAs, the seller is typically the power generator/owner
 4. For O&M, the seller is typically the service provider
 5. If you cannot determine a field with confidence, use null - do not guess

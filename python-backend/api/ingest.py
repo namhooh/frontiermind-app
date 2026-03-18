@@ -57,6 +57,10 @@ from models.reference_price_ingest import (
     ReferencePriceBatchRequest,
     ReferencePriceBatchResponse,
 )
+from models.ingestion import (
+    PriceIndexFetchRequest,
+    PriceIndexFetchResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -594,6 +598,69 @@ async def ingest_fx_rates(
 
 
 # ============================================================================
+# Price Index (BLS CPI) Ingestion Endpoint
+# ============================================================================
+
+
+@router.post(
+    "/price-index/fetch",
+    response_model=PriceIndexFetchResponse,
+    summary="Fetch and ingest price index data from BLS",
+    description="Fetches CPI (or other series) from the BLS Public Data API v1 "
+                "and upserts into the price_index table.",
+)
+@limiter.limit("10/minute")
+async def fetch_price_index(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    body: PriceIndexFetchRequest,
+    auth: dict = Depends(require_api_key),
+) -> PriceIndexFetchResponse:
+    """
+    Fetch price index data from BLS and upsert into price_index table.
+
+    Uses BLS API v1 (no API key required). Default series is CUUR0000SA0
+    (CPI-U All Items, US City Average, Not Seasonally Adjusted).
+    """
+    _authorize_scope(auth, "reference_prices")
+    organization_id = auth["organization_id"]
+
+    import asyncio
+    from services.price_index.price_index_service import PriceIndexService
+
+    svc = PriceIndexService()
+    try:
+        result = await asyncio.to_thread(
+            svc.fetch_and_upsert,
+            organization_id=organization_id,
+            series_ids=body.series_ids,
+            start_year=body.start_year,
+            end_year=body.end_year,
+        )
+    except Exception as e:
+        logger.error(f"Price index fetch failed: {e}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Price index fetch failed: {e}",
+        )
+
+    log_business_event(
+        background_tasks, request,
+        action="IMPORT",
+        resource_type="price_index",
+        organization_id=organization_id,
+        records_affected=result["inserted"] + result["updated"],
+        details={
+            "series_fetched": result["series_fetched"],
+            "inserted": result["inserted"],
+            "updated": result["updated"],
+        },
+    )
+
+    return PriceIndexFetchResponse(**result)
+
+
+# ============================================================================
 # Reference Price Ingestion Endpoint
 # ============================================================================
 
@@ -631,13 +698,23 @@ async def ingest_reference_prices(
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                # Pre-resolve all unique sage_ids → (project_id, cod_date)
+                # Pre-resolve all unique sage_ids → (project_id, oy_start_date)
                 sage_ids = list({e.project_sage_id for e in body.entries})
                 cur.execute("""
-                    SELECT sage_id, id, cod_date FROM project
-                    WHERE sage_id = ANY(%s) AND organization_id = %s
+                    SELECT p.sage_id, p.id,
+                           ct.logic_parameters->>'oy_start_date' AS oy_start_date
+                    FROM project p
+                    LEFT JOIN clause_tariff ct
+                        ON ct.project_id = p.id AND ct.is_current = true
+                    WHERE p.sage_id = ANY(%s) AND p.organization_id = %s
                 """, (sage_ids, organization_id))
-                sage_to_project = {r["sage_id"]: {"id": r["id"], "cod_date": r["cod_date"]} for r in cur.fetchall()}
+                sage_to_project = {}
+                for r in cur.fetchall():
+                    oy_start = None
+                    if r.get("oy_start_date"):
+                        from datetime import date as _dt
+                        oy_start = _dt.fromisoformat(r["oy_start_date"])
+                    sage_to_project[r["sage_id"]] = {"id": r["id"], "cod_date": oy_start}
 
                 # Pre-resolve currency codes → ids
                 ccy_codes = list({e.currency_code for e in body.entries})

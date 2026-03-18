@@ -32,6 +32,10 @@ load_dotenv()
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+# Add parent dir to path so we can import backend modules
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from services.tariff.us_cpi_engine import USCPIEngine
+
 logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
 logger = logging.getLogger(__name__)
 
@@ -52,6 +56,22 @@ def main():
     conn = psycopg2.connect(database_url, cursor_factory=RealDictCursor)
 
     try:
+        # Gate check: verify taxonomy completeness before generating rates
+        incomplete = _check_taxonomy_completeness(conn, args.project)
+        if incomplete:
+            print(f"\nERROR: {len(incomplete)} tariff(s) have incomplete taxonomy (missing tariff_type_id, energy_sale_type_id, or escalation_type_id):")
+            for row in incomplete:
+                missing = []
+                if not row.get('tariff_type_id'):
+                    missing.append('tariff_type_id')
+                if not row.get('energy_sale_type_id'):
+                    missing.append('energy_sale_type_id')
+                if not row.get('escalation_type_id'):
+                    missing.append('escalation_type_id')
+                print(f"  {row['sage_id']:8s} tariff_id={row['tariff_id']} missing: {', '.join(missing)}")
+            print("\nAborting — fix taxonomy IDs before generating tariff_rate rows.")
+            sys.exit(1)
+
         tariffs = _fetch_unpopulated_tariffs(conn, args.project)
         print(f"Found {len(tariffs)} tariffs with base_rate to populate")
 
@@ -100,10 +120,32 @@ def main():
 
         conn.commit()
 
+        # 4. Process US_CPI tariffs via USCPIEngine
+        cpi_projects = _fetch_cpi_projects(conn, args.project)
+        stats["cpi_tariffs"] = 0
+        stats["cpi_periods"] = 0
+
+        if cpi_projects:
+            print(f"\nProcessing {len(cpi_projects)} US_CPI project(s)...")
+            cpi_engine = USCPIEngine()
+            for proj in cpi_projects:
+                try:
+                    result = cpi_engine.generate(proj["project_id"])
+                    stats["cpi_tariffs"] += result["tariffs_processed"]
+                    stats["cpi_periods"] += result["periods_generated"]
+                    logger.info(
+                        f"  {proj['sage_id']}: {result['tariffs_processed']} CPI tariff(s), "
+                        f"{result['periods_generated']} periods"
+                    )
+                except Exception as e:
+                    logger.error(f"  {proj['sage_id']}: CPI generation failed: {e}")
+
         print(f"\nResults:")
         print(f"  valid_from updated:    {stats['valid_from_updated']}")
         print(f"  Annual rows inserted:  {stats['annual_inserted']}")
         print(f"  Monthly rows inserted: {stats['monthly_inserted']}")
+        print(f"  CPI tariffs processed: {stats['cpi_tariffs']}")
+        print(f"  CPI periods generated: {stats['cpi_periods']}")
 
     finally:
         conn.close()
@@ -112,6 +154,35 @@ def main():
 # ---------------------------------------------------------------------------
 # Data fetching
 # ---------------------------------------------------------------------------
+
+
+def _check_taxonomy_completeness(conn, sage_id_filter=None):
+    """Check that all in-scope tariffs have non-null taxonomy IDs."""
+    with conn.cursor() as cur:
+        where_extra = ""
+        params = {}
+        if sage_id_filter:
+            where_extra = "AND p.sage_id = %(sage_id)s"
+            params["sage_id"] = sage_id_filter
+
+        cur.execute(
+            f"""
+            SELECT ct.id AS tariff_id, p.sage_id,
+                   ct.tariff_type_id, ct.energy_sale_type_id, ct.escalation_type_id
+            FROM clause_tariff ct
+            JOIN project p ON ct.project_id = p.id
+            WHERE ct.is_active = true
+              AND ct.is_current = true
+              AND ct.base_rate IS NOT NULL
+              AND (ct.tariff_type_id IS NULL
+                   OR ct.energy_sale_type_id IS NULL
+                   OR ct.escalation_type_id IS NULL)
+              {where_extra}
+            ORDER BY p.sage_id
+            """,
+            params,
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
 def _fetch_unpopulated_tariffs(conn, sage_id_filter=None):
@@ -128,6 +199,7 @@ def _fetch_unpopulated_tariffs(conn, sage_id_filter=None):
             SELECT ct.id AS tariff_id, ct.base_rate, ct.currency_id,
                    ct.valid_from AS ct_valid_from,
                    ct.logic_parameters,
+                   ct.logic_parameters->>'oy_start_date' AS oy_start_date,
                    ct.project_id,
                    c2.code AS currency_code,
                    et.code AS esc_code,
@@ -162,7 +234,12 @@ def _fetch_unpopulated_tariffs(conn, sage_id_filter=None):
 
 
 def _resolve_valid_from(t):
-    """Derive valid_from from available date fields."""
+    """Derive valid_from from available date fields.  oy_start_date is highest priority."""
+    # oy_start_date is a string from JSONB, parse it first
+    oy_start = t.get("oy_start_date")
+    if oy_start:
+        from datetime import date as _d
+        return _d.fromisoformat(oy_start)
     for field in ("ct_valid_from", "cod_date", "effective_date"):
         v = t.get(field)
         if v:
@@ -203,7 +280,7 @@ def _compute_rate(base_rate, esc_code, esc_rate, year):
         return base
     if esc_code == "PERCENTAGE" and esc_rate:
         multiplier = (1 + esc_rate) ** (year - 1)
-        return (base * multiplier).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+        return (base * multiplier).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
     # NONE, US_CPI (no CPI data), or unknown → flat
     return base
 
@@ -359,6 +436,16 @@ def _insert_monthly_rows(cur, t, conn):
     esc_rate = t["esc_rate"]
     valid_from = t["resolved_valid_from"]
 
+    # Pre-load billing_period lookup: (year, month) → id
+    with conn.cursor() as cur2:
+        cur2.execute("SELECT id, start_date FROM billing_period ORDER BY start_date")
+        bp_rows = cur2.fetchall()
+    bp_by_ym = {}
+    for bp in bp_rows:
+        if bp['start_date']:
+            sd = bp['start_date'].date() if hasattr(bp['start_date'], 'date') else bp['start_date']
+            bp_by_ym[(sd.year, sd.month)] = bp['id']
+
     # Fetch exchange rates for this currency
     with conn.cursor() as cur2:
         cur2.execute(
@@ -413,20 +500,24 @@ def _insert_monthly_rows(cur, t, conn):
         # period_start/end for monthly rows: the billing month boundaries
         month_end = (billing_month.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
 
+        bp_id = bp_by_ym.get((billing_month.year, billing_month.month))
+
         cur.execute(
             """
             INSERT INTO tariff_rate (
                 clause_tariff_id, contract_year, rate_granularity, billing_month,
+                billing_period_id,
                 period_start, period_end,
                 hard_currency_id, local_currency_id, billing_currency_id,
                 effective_rate_contract_ccy, effective_rate_hard_ccy,
                 effective_rate_local_ccy, effective_rate_billing_ccy,
                 effective_rate_contract_role,
-                fx_rate_local_id,
+                exchange_rate_id,
                 rate_binding, formula_version, calc_status,
                 calculation_basis, is_current
             ) VALUES (
                 %s, %s, 'monthly', %s,
+                %s,
                 %s, %s,
                 %s, %s, %s,
                 %s, %s, %s, %s,
@@ -443,6 +534,7 @@ def _insert_monthly_rows(cur, t, conn):
                 tariff_id,
                 year,
                 billing_month,
+                bp_id,
                 billing_month,
                 month_end,
                 USD_CURRENCY_ID,
@@ -463,6 +555,32 @@ def _insert_monthly_rows(cur, t, conn):
         logger.info(f"  {t['sage_id']}: {inserted} monthly FX rows ({currency_code})")
 
     return inserted
+
+
+def _fetch_cpi_projects(conn, sage_id_filter=None):
+    """Fetch distinct projects with US_CPI tariffs."""
+    with conn.cursor() as cur:
+        where_extra = ""
+        params = {}
+        if sage_id_filter:
+            where_extra = "AND p.sage_id = %(sage_id)s"
+            params["sage_id"] = sage_id_filter
+
+        cur.execute(
+            f"""
+            SELECT DISTINCT p.id AS project_id, p.sage_id
+            FROM clause_tariff ct
+            JOIN project p ON ct.project_id = p.id
+            JOIN escalation_type et ON ct.escalation_type_id = et.id
+            WHERE ct.is_active = true
+              AND ct.is_current = true
+              AND et.code = 'US_CPI'
+              {where_extra}
+            ORDER BY p.sage_id
+            """,
+            params,
+        )
+        return [dict(r) for r in cur.fetchall()]
 
 
 if __name__ == "__main__":

@@ -45,6 +45,8 @@ class NotificationService:
         include_submission_link: bool = False,
         submission_fields: Optional[List[str]] = None,
         extra_context: Optional[Dict[str, Any]] = None,
+        subject_override: Optional[str] = None,
+        body_html_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         Send email immediately (user-initiated).
@@ -75,10 +77,10 @@ class NotificationService:
             context["submission_url"] = full_url
             self.token_service.store_submission_url(token_raw["token_id"], full_url)
 
-        # Render email
+        # Render email (use overrides if provided, otherwise template values)
         rendered = self.renderer.render_email(
-            subject_template=template["subject_template"],
-            body_html_template=template["body_html"],
+            subject_template=subject_override or template["subject_template"],
+            body_html_template=body_html_override or template["body_html"],
             body_text_template=template.get("body_text"),
             context=context,
         )

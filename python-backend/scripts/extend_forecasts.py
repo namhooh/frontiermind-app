@@ -104,10 +104,10 @@ def _first_of_month(d: date) -> date:
     return date(d.year, d.month, 1)
 
 
-def _compute_operating_year(forecast_month: date, cod_date: date) -> int:
-    """Compute 1-based operating year from COD date."""
-    year_diff = forecast_month.year - cod_date.year
-    if forecast_month.month < cod_date.month:
+def _compute_operating_year(forecast_month: date, oy_anchor: date) -> int:
+    """Compute 1-based operating year from OY anchor date."""
+    year_diff = forecast_month.year - oy_anchor.year
+    if forecast_month.month < oy_anchor.month:
         year_diff -= 1
     return max(1, year_diff + 1)
 
@@ -469,19 +469,25 @@ def run_extension(
                 # Extended timeout for batch operations
                 cur.execute("SET statement_timeout = '300000'")  # 5 minutes
 
-                # Fetch projects with their COD dates
+                # Fetch projects with their OY anchor dates
                 if project_filter:
                     cur.execute("""
-                        SELECT id, sage_id, cod_date
-                        FROM project
-                        WHERE organization_id = %s AND sage_id = %s
+                        SELECT p.id, p.sage_id, p.cod_date,
+                               ct.logic_parameters->>'oy_start_date' AS oy_start_date
+                        FROM project p
+                        LEFT JOIN clause_tariff ct
+                            ON ct.project_id = p.id AND ct.is_current = true
+                        WHERE p.organization_id = %s AND p.sage_id = %s
                     """, (org_id, project_filter))
                 else:
                     cur.execute("""
-                        SELECT id, sage_id, cod_date
-                        FROM project
-                        WHERE organization_id = %s
-                        ORDER BY sage_id
+                        SELECT p.id, p.sage_id, p.cod_date,
+                               ct.logic_parameters->>'oy_start_date' AS oy_start_date
+                        FROM project p
+                        LEFT JOIN clause_tariff ct
+                            ON ct.project_id = p.id AND ct.is_current = true
+                        WHERE p.organization_id = %s
+                        ORDER BY p.sage_id
                     """, (org_id,))
 
                 projects = cur.fetchall()
@@ -493,7 +499,10 @@ def run_extension(
                 for proj in projects:
                     project_id = proj["id"]
                     sage_id = proj["sage_id"]
+                    # Use oy_start_date as canonical anchor, fall back to cod_date
                     cod_date = proj["cod_date"]
+                    if proj.get("oy_start_date"):
+                        cod_date = date.fromisoformat(proj["oy_start_date"])
 
                     logger.info(f"\n--- {sage_id} (id={project_id}) ---")
 

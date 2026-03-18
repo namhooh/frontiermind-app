@@ -223,9 +223,117 @@ def process_reporting_graphs(wb, db_projects, db_counterparties):
     return updates, discrepancies
 
 
+# ─── Taxonomy Mapping Helpers ────────────────────────────────────────────────
+
+# PO Summary col D (Revenue Type) → energy_sale_type code
+REVENUE_TYPE_TO_EST = {
+    'energy sales': 'ENERGY_SALES',
+    'equipment rental': 'EQUIPMENT_RENTAL_LEASE',
+    'finance lease': 'EQUIPMENT_RENTAL_LEASE',
+    'rental': 'EQUIPMENT_RENTAL_LEASE',
+    'boot': 'EQUIPMENT_RENTAL_LEASE',
+    'loan': 'LOAN',
+    'bess': 'BESS_LEASE',
+    'battery': 'BESS_LEASE',
+    'esa': 'ENERGY_AS_SERVICE',
+    'energy as a service': 'ENERGY_AS_SERVICE',
+}
+
+# PO Summary col E (Energy Sale Type) + col F (Connection) → tariff_type code
+SALE_TYPE_TO_TT = {
+    ('ppa', 'grid'): 'TAKE_AND_PAY',
+    ('ppa', 'generator'): 'TAKE_AND_PAY',
+    ('ppa', None): 'TAKE_AND_PAY',
+    ('ssa', 'grid'): 'TAKE_AND_PAY',
+    ('ssa', 'generator'): 'TAKE_AND_PAY',
+    ('ssa', None): 'TAKE_AND_PAY',
+    ('resa', None): 'TAKE_AND_PAY',
+    ('esa', None): 'TAKE_AND_PAY',
+    ('take or pay', None): 'TAKE_OR_PAY',
+    ('take and pay', None): 'TAKE_AND_PAY',
+    ('minimum offtake', None): 'MINIMUM_OFFTAKE',
+    ('finance lease', None): 'FINANCE_LEASE',
+    ('operating lease', None): 'OPERATING_LEASE',
+    ('boot', None): 'OPERATING_LEASE',
+    ('loan', None): 'NOT_APPLICABLE',
+}
+
+
+def _resolve_energy_sale_type_code(revenue_type: str) -> str | None:
+    """Map PO Summary Revenue Type (col D) to energy_sale_type code."""
+    if not revenue_type:
+        return None
+    key = revenue_type.strip().lower()
+    if key in REVENUE_TYPE_TO_EST:
+        return REVENUE_TYPE_TO_EST[key]
+    # Substring match
+    for k, v in REVENUE_TYPE_TO_EST.items():
+        if k in key or key in k:
+            return v
+    return None
+
+
+def _resolve_tariff_type_code(energy_sale_type: str, connection: str | None) -> str | None:
+    """Map PO Summary Energy Sale Type (col E) + Connection (col F) to tariff_type code."""
+    if not energy_sale_type:
+        return None
+    est_key = energy_sale_type.strip().lower()
+    conn_key = connection.strip().lower() if connection else None
+
+    # Try exact (sale_type, connection) pair
+    if (est_key, conn_key) in SALE_TYPE_TO_TT:
+        return SALE_TYPE_TO_TT[(est_key, conn_key)]
+    # Try with None connection
+    if (est_key, None) in SALE_TYPE_TO_TT:
+        return SALE_TYPE_TO_TT[(est_key, None)]
+    # Substring match on sale type
+    for (k_est, k_conn), v in SALE_TYPE_TO_TT.items():
+        if k_est in est_key:
+            if k_conn is None or k_conn == conn_key:
+                return v
+    return None
+
+
+def _resolve_escalation_code(indexation: str, grid_mrp: float | None, gen_mrp: float | None) -> str | None:
+    """Map PO Summary Indexation (col AD) + MRP columns to escalation_type code."""
+    if not indexation:
+        return None
+
+    idx_val = indexation.strip()
+
+    # Check for numeric escalation rate
+    try:
+        rate = float(idx_val)
+        if rate > 0:
+            return 'PERCENTAGE'
+        else:
+            return 'NONE'
+    except ValueError:
+        pass
+
+    upper = idx_val.upper()
+    if 'CPI' in upper:
+        return 'US_CPI'
+    if upper in ('N/A', 'NONE', 'NIL', '-', '0', 'FLAT'):
+        return 'NONE'
+
+    # MRP-based derivation
+    has_grid = grid_mrp is not None and grid_mrp > 0
+    has_gen = gen_mrp is not None and gen_mrp > 0
+    if has_grid and has_gen:
+        return 'FLOATING_GRID_GENERATOR'
+    if has_grid:
+        return 'FLOATING_GRID'
+    if has_gen:
+        return 'FLOATING_GENERATOR'
+
+    return None
+
+
 # ─── 7b: PO Summary ─────────────────────────────────────────────────────────
 
-def process_po_summary(wb, db_projects, db_tariffs, currency_code_to_id=None):
+def process_po_summary(wb, db_projects, db_tariffs, currency_code_to_id=None,
+                       esc_type_map=None, est_type_map=None, tt_type_map=None):
     """Extract tariff params, technical specs from PO Summary tab."""
     log.info("7b: Processing PO Summary tab...")
     rows = read_sheet(wb, 'PO Summary', max_rows=55, max_cols=45)
@@ -403,19 +511,82 @@ def process_po_summary(wb, db_projects, db_tariffs, currency_code_to_id=None):
                     update['fields']['unit'] = f'{tariff_currency.upper()}/kWh'
                     log.info(f"    Currency fix {sage_id} tariff {tid}: → {tariff_currency.upper()} (id={resolved_ccy_id})")
 
-            # A2: Map indexation → escalation_type_id
+            # A2: Map indexation → escalation_type_id (code-based lookup)
             if indexation and not tariff.get('escalation_type_id'):
                 idx_val = indexation.strip()
-                try:
-                    rate = float(idx_val)
-                    if rate > 0:
-                        update['fields']['escalation_type_id'] = 8   # PERCENTAGE
-                        update['lp_fields']['escalation_rate'] = rate
+                esc_code = _resolve_escalation_code(idx_val, grid_mrp, gen_mrp)
+                if esc_code and esc_type_map:
+                    esc_id = esc_type_map.get(esc_code)
+                    if esc_id:
+                        update['fields']['escalation_type_id'] = esc_id
+                        try:
+                            rate = float(idx_val)
+                            if rate > 0:
+                                update['lp_fields']['escalation_rate'] = rate
+                        except ValueError:
+                            pass
                     else:
-                        update['fields']['escalation_type_id'] = 11  # NONE
-                except ValueError:
-                    if 'CPI' in idx_val.upper():
-                        update['fields']['escalation_type_id'] = 9   # US_CPI
+                        # Unknown code — blocking discrepancy
+                        discrepancies.append({
+                            'severity': 'critical', 'category': 'unmapped_taxonomy',
+                            'project': sage_id, 'field': 'escalation_type',
+                            'source_a': f'PO Summary indexation: {idx_val}',
+                            'source_b': f'Resolved code: {esc_code} (not in DB)',
+                            'recommended_action': f'Add escalation_type code={esc_code} to DB',
+                            'status': 'open',
+                        })
+
+            # A3: Map revenue_type → energy_sale_type_id (code-based lookup)
+            if revenue_type and not tariff.get('energy_sale_type_id') and est_type_map:
+                est_code = _resolve_energy_sale_type_code(revenue_type)
+                if est_code:
+                    est_id = est_type_map.get(est_code)
+                    if est_id:
+                        update['fields']['energy_sale_type_id'] = est_id
+                    else:
+                        discrepancies.append({
+                            'severity': 'critical', 'category': 'unmapped_taxonomy',
+                            'project': sage_id, 'field': 'energy_sale_type',
+                            'source_a': f'PO Summary Revenue Type: {revenue_type}',
+                            'source_b': f'Resolved code: {est_code} (not in DB)',
+                            'recommended_action': f'Add energy_sale_type code={est_code} to DB',
+                            'status': 'open',
+                        })
+                else:
+                    discrepancies.append({
+                        'severity': 'critical', 'category': 'unmapped_taxonomy',
+                        'project': sage_id, 'field': 'energy_sale_type',
+                        'source_a': f'PO Summary Revenue Type: {revenue_type}',
+                        'source_b': 'No mapping rule',
+                        'recommended_action': f'Add mapping for revenue_type={revenue_type!r}',
+                        'status': 'open',
+                    })
+
+            # A4: Map energy_sale_type + connection → tariff_type_id (code-based lookup)
+            if energy_sale_type and not tariff.get('tariff_type_id') and tt_type_map:
+                tt_code = _resolve_tariff_type_code(energy_sale_type, connection)
+                if tt_code:
+                    tt_id = tt_type_map.get(tt_code)
+                    if tt_id:
+                        update['fields']['tariff_type_id'] = tt_id
+                    else:
+                        discrepancies.append({
+                            'severity': 'critical', 'category': 'unmapped_taxonomy',
+                            'project': sage_id, 'field': 'tariff_type',
+                            'source_a': f'PO Summary Energy Sale Type: {energy_sale_type}, Connection: {connection}',
+                            'source_b': f'Resolved code: {tt_code} (not in DB)',
+                            'recommended_action': f'Add tariff_type code={tt_code} to DB',
+                            'status': 'open',
+                        })
+                else:
+                    discrepancies.append({
+                        'severity': 'critical', 'category': 'unmapped_taxonomy',
+                        'project': sage_id, 'field': 'tariff_type',
+                        'source_a': f'PO Summary Energy Sale Type: {energy_sale_type}, Connection: {connection}',
+                        'source_b': 'No mapping rule',
+                        'recommended_action': f'Add mapping for energy_sale_type={energy_sale_type!r}, connection={connection!r}',
+                        'status': 'open',
+                    })
 
             # Contract term → end date
             if term and cod_date:
@@ -742,6 +913,7 @@ def main():
         # Load tariffs
         cur.execute("""
             SELECT ct.id, p.sage_id, ct.base_rate, ct.currency_id,
+                   ct.tariff_type_id,
                    est.name as energy_sale_type_name,
                    ct.logic_parameters, ct.energy_sale_type_id,
                    ct.escalation_type_id
@@ -758,7 +930,8 @@ def main():
                 db_tariffs[sid] = []
             db_tariffs[sid].append({
                 'id': row['id'], 'sage_id': sid, 'base_rate': row['base_rate'],
-                'currency_id': row['currency_id'], 'energy_sale_type_name': row['energy_sale_type_name'],
+                'currency_id': row['currency_id'], 'tariff_type_id': row['tariff_type_id'],
+                'energy_sale_type_name': row['energy_sale_type_name'],
                 'logic_parameters': row['logic_parameters'] or {},
                 'energy_sale_type_id': row['energy_sale_type_id'],
                 'escalation_type_id': row['escalation_type_id'],
@@ -767,6 +940,18 @@ def main():
         # Load currency code → id map
         cur.execute("SELECT id, code FROM currency")
         currency_code_to_id = {row['code']: row['id'] for row in cur.fetchall()}
+
+        # Load taxonomy lookup maps (code → id)
+        cur.execute("SELECT id, code FROM escalation_type WHERE is_active = true")
+        esc_type_map = {row['code']: row['id'] for row in cur.fetchall()}
+
+        cur.execute("SELECT id, code FROM energy_sale_type WHERE is_active = true")
+        est_type_map = {row['code']: row['id'] for row in cur.fetchall()}
+
+        cur.execute("SELECT id, code FROM tariff_type")
+        tt_type_map = {row['code']: row['id'] for row in cur.fetchall()}
+
+        log.info(f"Taxonomy maps: {len(esc_type_map)} escalation, {len(est_type_map)} energy_sale, {len(tt_type_map)} tariff_type codes")
 
         # Load existing exchange rates
         cur.execute("SELECT currency_id, rate_date::text as rate_date, rate FROM exchange_rate WHERE organization_id = %s", (ORG_ID,))
@@ -782,7 +967,10 @@ def main():
         all_discrepancies.extend(disc_7a)
 
         # 7b: PO Summary
-        tech_updates, tariff_updates, disc_7b = process_po_summary(wb, db_projects, db_tariffs, currency_code_to_id)
+        tech_updates, tariff_updates, disc_7b = process_po_summary(
+            wb, db_projects, db_tariffs, currency_code_to_id,
+            esc_type_map=esc_type_map, est_type_map=est_type_map, tt_type_map=tt_type_map,
+        )
         all_discrepancies.extend(disc_7b)
 
         # 7c: Exchange Rates

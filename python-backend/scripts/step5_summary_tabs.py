@@ -361,11 +361,16 @@ def _process_project(
 
         # Convert irradiance: Wh/m² → kWh/m²
         ghi_kwh = row.expected_irradiance_wm2 / 1000.0 if row.expected_irradiance_wm2 else None
+        poa_kwh = row.expected_poa_irradiance_wm2 / 1000.0 if row.expected_poa_irradiance_wm2 else None
 
         # Normalize PR
         forecast_pr = row.expected_pr_pct
         if forecast_pr is not None and forecast_pr > 1.0:
             forecast_pr = forecast_pr / 100.0
+
+        forecast_pr_poa = row.expected_pr_poa_pct
+        if forecast_pr_poa is not None and forecast_pr_poa > 1.0:
+            forecast_pr_poa = forecast_pr_poa / 100.0
 
         meta = json.dumps({
             "step": 5,
@@ -377,8 +382,8 @@ def _process_project(
 
         batch_values.append((
             project_id, proj_org_id, row.month,
-            row.expected_output_kwh, ghi_kwh,
-            forecast_pr, meta,
+            row.expected_output_kwh, ghi_kwh, poa_kwh,
+            forecast_pr, forecast_pr_poa, meta,
         ))
 
     if batch_values and dry_run:
@@ -398,19 +403,21 @@ def _process_project(
             """
             INSERT INTO production_forecast (
                 project_id, organization_id, forecast_month,
-                forecast_energy_kwh, forecast_ghi_irradiance,
-                forecast_pr, forecast_source, source_metadata
+                forecast_energy_kwh, forecast_ghi_irradiance, forecast_poa_irradiance,
+                forecast_pr, forecast_pr_poa, forecast_source, source_metadata
             ) VALUES %s
             ON CONFLICT (project_id, forecast_month) DO UPDATE SET
                 forecast_energy_kwh = EXCLUDED.forecast_energy_kwh,
                 forecast_ghi_irradiance = COALESCE(EXCLUDED.forecast_ghi_irradiance, production_forecast.forecast_ghi_irradiance),
+                forecast_poa_irradiance = COALESCE(EXCLUDED.forecast_poa_irradiance, production_forecast.forecast_poa_irradiance),
                 forecast_pr = COALESCE(EXCLUDED.forecast_pr, production_forecast.forecast_pr),
+                forecast_pr_poa = COALESCE(EXCLUDED.forecast_pr_poa, production_forecast.forecast_pr_poa),
                 forecast_source = EXCLUDED.forecast_source,
                 source_metadata = EXCLUDED.source_metadata,
                 updated_at = NOW()
             """,
             batch_values,
-            template="(%s, %s, %s, %s, %s, %s, 'ppw_summary', %s::jsonb)",
+            template="(%s, %s, %s, %s, %s, %s, %s, %s, 'ppw_summary', %s::jsonb)",
             page_size=200,
         )
 
@@ -439,6 +446,7 @@ def _process_project(
                 continue
             ghi_kwh = row.forecast_ghi_wm2 / 1000.0 if row.forecast_ghi_wm2 else None
             poa_kwh = row.forecast_poa_wm2 / 1000.0 if row.forecast_poa_wm2 else None
+            forecast_pr_poa = row.forecast_pr_poa
             meta = json.dumps({
                 "step": 5,
                 "source_tab": "project_tab_technical_model",
@@ -446,8 +454,8 @@ def _process_project(
             })
             tech_batch.append((
                 project_id, proj_org_id, row.month,
-                row.forecast_energy_combined_kwh, ghi_kwh,
-                row.forecast_pr, meta,
+                row.forecast_energy_combined_kwh, ghi_kwh, poa_kwh,
+                row.forecast_pr, forecast_pr_poa, meta,
             ))
 
         if tech_batch and dry_run:
@@ -466,19 +474,21 @@ def _process_project(
                 """
                 INSERT INTO production_forecast (
                     project_id, organization_id, forecast_month,
-                    forecast_energy_kwh, forecast_ghi_irradiance,
-                    forecast_pr, forecast_source, source_metadata
+                    forecast_energy_kwh, forecast_ghi_irradiance, forecast_poa_irradiance,
+                    forecast_pr, forecast_pr_poa, forecast_source, source_metadata
                 ) VALUES %s
                 ON CONFLICT (project_id, forecast_month) DO UPDATE SET
                     forecast_energy_kwh = EXCLUDED.forecast_energy_kwh,
                     forecast_ghi_irradiance = COALESCE(EXCLUDED.forecast_ghi_irradiance, production_forecast.forecast_ghi_irradiance),
+                    forecast_poa_irradiance = COALESCE(EXCLUDED.forecast_poa_irradiance, production_forecast.forecast_poa_irradiance),
                     forecast_pr = COALESCE(EXCLUDED.forecast_pr, production_forecast.forecast_pr),
+                    forecast_pr_poa = COALESCE(EXCLUDED.forecast_pr_poa, production_forecast.forecast_pr_poa),
                     forecast_source = EXCLUDED.forecast_source,
                     source_metadata = EXCLUDED.source_metadata,
                     updated_at = NOW()
                 """,
                 tech_batch,
-                template="(%s, %s, %s, %s, %s, %s, 'ppw_project_tab', %s::jsonb)",
+                template="(%s, %s, %s, %s, %s, %s, %s, %s, 'ppw_project_tab', %s::jsonb)",
                 page_size=200,
             )
 

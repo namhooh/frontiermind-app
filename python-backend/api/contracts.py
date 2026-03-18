@@ -389,6 +389,21 @@ async def parse_contract(
             f"{result.processing_time:.2f}s"
         )
 
+        # Auto-populate production guarantees from extracted clauses
+        if project_id_int:
+            try:
+                from services.production_guarantee_populator import ProductionGuaranteePopulator
+                populator = ProductionGuaranteePopulator()
+                guarantee_result = populator.populate_for_project(
+                    project_id=project_id_int,
+                    contract_id=contract_id,
+                )
+                guarantee_rows = guarantee_result.get("rows_created", 0)
+                if guarantee_rows > 0:
+                    logger.info(f"Production guarantees: {guarantee_rows} rows created for project_id={project_id_int}")
+            except Exception as e:
+                logger.warning(f"Production guarantee population failed (non-critical): {e}")
+
         log_business_event(
             background_tasks, request,
             action="CONTRACT_PARSE",

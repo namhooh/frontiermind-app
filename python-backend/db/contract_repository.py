@@ -318,7 +318,8 @@ class ContractRepository:
         self,
         contract_id: int,
         clauses: List[Dict[str, Any]],
-        project_id: Optional[int] = None
+        project_id: Optional[int] = None,
+        contract_amendment_id: Optional[int] = None,
     ) -> List[int]:
         """
         Store multiple clauses for a contract.
@@ -378,24 +379,26 @@ class ContractRepository:
                             clause_type_id,
                             clause_category_id,
                             clause_responsibleparty_id,
+                            contract_amendment_id,
                             created_at
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, NOW())
                         RETURNING id
                         """,
                         (
                             contract_id,
-                            project_id,  # NEW
+                            project_id,
                             clause.get('name'),
-                            clause.get('section_ref'),  # NEW
+                            clause.get('section_ref'),
                             clause.get('raw_text'),
                             clause.get('summary'),
                             clause.get('beneficiary_party'),
                             clause.get('confidence_score'),
-                            Json(clause.get('normalized_payload')) if clause.get('normalized_payload') else None,  # NEW
-                            clause.get('clause_type_id'),  # Now populated
-                            clause.get('clause_category_id'),  # Now populated
-                            clause.get('clause_responsibleparty_id'),  # NEW
+                            Json(clause.get('normalized_payload')) if clause.get('normalized_payload') else None,
+                            clause.get('clause_type_id'),
+                            clause.get('clause_category_id'),
+                            clause.get('clause_responsibleparty_id'),
+                            contract_amendment_id,
                         )
                     )
                     clause_id = cursor.fetchone()['id']
@@ -416,14 +419,14 @@ class ContractRepository:
                     (contract_id,)
                 )
                 actual_count = cursor.fetchone()['cnt']
-                if actual_count != len(clause_ids):
+                if actual_count < len(clause_ids):
                     logger.error(
                         f"Clause verification FAILED for contract {contract_id}: "
-                        f"inserted {len(clause_ids)}, found {actual_count}"
+                        f"inserted {len(clause_ids)}, found only {actual_count}"
                     )
                     raise Exception(
                         f"Clause storage verification failed for contract {contract_id}: "
-                        f"expected {len(clause_ids)}, found {actual_count}"
+                        f"expected at least {len(clause_ids)}, found {actual_count}"
                     )
                 logger.info(
                     f"Verified {actual_count} clauses persisted for contract {contract_id}"
@@ -808,12 +811,12 @@ class ContractRepository:
         cursor.execute(
             """
             INSERT INTO clause_tariff (
-                contract_id, project_id, tariff_group_key, name, base_rate,
-                energy_sale_type_id, escalation_type_id, currency_id,
-                logic_parameters, valid_from, valid_to,
+                contract_id, project_id, organization_id, tariff_group_key, name,
+                base_rate, energy_sale_type_id, escalation_type_id, currency_id,
+                market_ref_currency_id, logic_parameters, valid_from, valid_to,
                 is_current, source_metadata
             )
-            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             ON CONFLICT (contract_id, tariff_group_key, valid_from, COALESCE(valid_to, '9999-12-31'))
                 WHERE tariff_group_key IS NOT NULL AND is_current = TRUE
             DO UPDATE SET
@@ -824,9 +827,11 @@ class ContractRepository:
                     THEN EXCLUDED.base_rate
                     ELSE clause_tariff.base_rate
                 END,
+                organization_id = COALESCE(EXCLUDED.organization_id, clause_tariff.organization_id),
                 energy_sale_type_id = COALESCE(EXCLUDED.energy_sale_type_id, clause_tariff.energy_sale_type_id),
                 escalation_type_id = COALESCE(EXCLUDED.escalation_type_id, clause_tariff.escalation_type_id),
                 currency_id = COALESCE(EXCLUDED.currency_id, clause_tariff.currency_id),
+                market_ref_currency_id = COALESCE(EXCLUDED.market_ref_currency_id, clause_tariff.market_ref_currency_id),
                 logic_parameters = COALESCE(clause_tariff.logic_parameters, '{}'::jsonb) || EXCLUDED.logic_parameters,
                 valid_from = COALESCE(EXCLUDED.valid_from, clause_tariff.valid_from),
                 valid_to = COALESCE(EXCLUDED.valid_to, clause_tariff.valid_to),
@@ -836,12 +841,14 @@ class ContractRepository:
             (
                 data["contract_id"],
                 data.get("project_id"),
+                data.get("organization_id"),
                 tariff_group_key,
                 name,
                 data.get("base_rate"),
                 data.get("energy_sale_type_id"),
                 data.get("escalation_type_id"),
                 data.get("currency_id"),
+                data.get("market_ref_currency_id"),
                 Json(data.get("logic_parameters", {})),
                 data.get("valid_from"),
                 data.get("valid_to"),
@@ -878,14 +885,15 @@ class ContractRepository:
 
         count = 0
         for prod in products:
-            # Look up billing_product by product_code
+            # Look up billing_product by code
+            product_code = prod.get("product_code") or prod.get("code")
             cursor.execute(
-                "SELECT id FROM billing_product WHERE product_code = %s LIMIT 1",
-                (prod["product_code"],),
+                "SELECT id FROM billing_product WHERE code = %s LIMIT 1",
+                (product_code,),
             )
             bp_row = cursor.fetchone()
             if not bp_row:
-                logger.warning(f"billing_product not found for code={prod['product_code']}, skipping")
+                logger.warning(f"billing_product not found for code={product_code}, skipping")
                 continue
 
             cursor.execute(

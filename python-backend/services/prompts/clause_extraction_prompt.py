@@ -86,12 +86,14 @@ Extract and normalize (use these canonical field names):
 ### 3. PERFORMANCE GUARANTEE
 **Code:** PERFORMANCE_GUARANTEE
 **Description:** Output guarantees, capacity factor, performance ratio, and degradation allowances
-**Look for:** "performance ratio", "capacity factor", "degradation", "output guarantee", "energy production"
+**Look for:** "performance ratio", "capacity factor", "degradation", "output guarantee", "energy production", "required energy output", "guaranteed energy", "minimum energy output", "expected energy output"
+**IMPORTANT:** Check ALL annexures/schedules (especially the last ones) for energy output tables — the threshold percentage is often in the main body but the actual kWh schedule is in an annexure. Extract BOTH the threshold AND any explicit kWh values.
 
 Extract and normalize (use these canonical field names):
-- threshold [T]: Guaranteed performance percentage (PR or CF)
+- threshold [T]: Guaranteed performance percentage — e.g., "80% of Expected Energy Output" → 80.0. CRITICAL: always extract this number.
 - variant [C]: "performance_ratio", "capacity_factor", or "annual_production"
-- guaranteed_annual_production_kwh [T]: Annual energy guarantee (if applicable)
+- guaranteed_annual_production_kwh [T]: Annual energy guarantee in kWh (if explicit schedule/table found in annexure)
+- reference_annex [FD]: Which annexure/schedule contains the energy output table (e.g., "ANNEXURE E: ENERGY OUTPUT")
 - measurement_period [C]: "monthly", "quarterly", "annual"
 - degradation_rate_percent_per_year [FI]: Annual degradation allowance
 - weather_adjustment_method [FD]: How weather affects calculations

@@ -70,6 +70,17 @@ def start():
         replace_existing=True,
     )
 
+    # Fetch BLS CPI data on the 15th of each month at 10:00 UTC
+    scheduler.add_job(
+        _fetch_bls_cpi,
+        "cron",
+        day=15,
+        hour=10,
+        minute=0,
+        id="fetch_bls_cpi",
+        replace_existing=True,
+    )
+
     scheduler.start()
     logger.info("Email notification scheduler started")
 
@@ -120,3 +131,35 @@ async def _process_due_report_schedules():
     from services.reports.scheduler import process_due_report_schedules
 
     await process_due_report_schedules()
+
+
+async def _fetch_bls_cpi():
+    """Job: fetch latest CPI data from BLS for all orgs with price_index rows."""
+    try:
+        from datetime import date
+        from db.database import init_connection_pool, get_db_connection
+        from services.price_index.price_index_service import PriceIndexService
+
+        init_connection_pool()
+        svc = PriceIndexService()
+        current_year = date.today().year
+
+        # Find all orgs that use price_index
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute("SELECT DISTINCT organization_id FROM price_index")
+                org_ids = [row["organization_id"] for row in cursor.fetchall()]
+
+        for org_id in org_ids:
+            result = await asyncio.to_thread(
+                svc.fetch_and_upsert,
+                organization_id=org_id,
+                start_year=current_year - 1,
+                end_year=current_year,
+            )
+            logger.info(
+                f"BLS CPI fetch for org {org_id}: "
+                f"inserted={result['inserted']}, updated={result['updated']}"
+            )
+    except Exception as e:
+        logger.error(f"BLS CPI fetch job failed: {e}", exc_info=True)

@@ -253,16 +253,16 @@ def _compute_rate(
         return base_rate, f"Year {year}: flat rate (no escalation)"
 
     if esc_code == "FIXED_INCREASE":
-        rate = base_rate + escalation_value * y_minus_1
+        rate = (base_rate + escalation_value * y_minus_1).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
         return rate, f"Year {year}: {base_rate} + {escalation_value} x {y_minus_1}"
 
     if esc_code == "FIXED_DECREASE":
-        rate = max(Decimal(0), base_rate - escalation_value * y_minus_1)
+        rate = max(Decimal(0), base_rate - escalation_value * y_minus_1).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
         return rate, f"Year {year}: max(0, {base_rate} - {escalation_value} x {y_minus_1})"
 
     if esc_code == "PERCENTAGE":
         multiplier = (1 + escalation_value) ** y_minus_1
-        rate = (base_rate * multiplier).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+        rate = (base_rate * multiplier).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
         return rate, f"Year {year}: {base_rate} x (1 + {escalation_value})^{y_minus_1}"
 
     # Should not reach here for deterministic types

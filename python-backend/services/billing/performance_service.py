@@ -37,7 +37,8 @@ class PerformanceService:
                 # Get project metadata
                 cur.execute("""
                     SELECT p.organization_id, p.installed_dc_capacity_kwp, p.cod_date,
-                           ct.logic_parameters->>'degradation_pct' AS degradation_pct
+                           ct.logic_parameters->>'degradation_pct' AS degradation_pct,
+                           ct.logic_parameters->>'oy_start_date' AS oy_start_date
                     FROM project p
                     LEFT JOIN clause_tariff ct ON ct.project_id = p.id AND ct.is_current = true
                     WHERE p.id = %s
@@ -49,9 +50,10 @@ class PerformanceService:
 
                 org_id = proj["organization_id"]
                 capacity = _d2f(proj.get("installed_dc_capacity_kwp"))
-                cod_date = proj.get("cod_date")
+                # Use oy_start_date as canonical OY anchor
+                cod_date = date.fromisoformat(proj["oy_start_date"]) if proj.get("oy_start_date") else proj.get("cod_date")
 
-                # Derive operating year from COD
+                # Derive operating year from OY anchor
                 oy = None
                 if cod_date and isinstance(bm_date, date):
                     months_since_cod = (bm_date.year - cod_date.year) * 12 + (bm_date.month - cod_date.month)

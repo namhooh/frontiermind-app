@@ -379,14 +379,15 @@ class LogicParameterEnricher:
                 (clause_tariff_id, contract_id),
             )
         else:
-            # Find the MAIN tariff: tariff_type = ENERGY_SALES, is_active, oldest
+            # Find the MAIN tariff: energy_sale_type = ENERGY_SALES, is_active, oldest
+            # Post-059: revenue/product type is in energy_sale_type (not tariff_type)
             cursor.execute(
                 """
                 SELECT ct.id, ct.logic_parameters, ct.source_metadata
                 FROM clause_tariff ct
-                JOIN tariff_type tt ON tt.id = ct.tariff_type_id
+                JOIN energy_sale_type est ON est.id = ct.energy_sale_type_id
                 WHERE ct.contract_id = %s
-                  AND tt.code = 'ENERGY_SALES'
+                  AND est.code = 'ENERGY_SALES'
                   AND ct.is_active = true
                 ORDER BY ct.created_at ASC
                 LIMIT 1

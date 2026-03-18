@@ -98,7 +98,7 @@ def _escalate_component(
     if esc_type == "FIXED":
         # Compound percentage: base × (1 + pct)^years
         multiplier = (1 + esc_value) ** years_escalated
-        return (base_value * multiplier).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+        return (base_value * multiplier).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
     if esc_type == "ABSOLUTE":
         # Flat amount per year
@@ -155,6 +155,10 @@ class RebasedMarketPriceEngine:
         base_ceiling = Decimal(str(lp["ceiling_rate"]))
         escalation_rules = lp.get("escalation_rules", [])
 
+        # CPI-escalated overrides (set by USCPIEngine for floor_ceiling subtype)
+        cpi_escalated_floor = lp.get("cpi_escalated_floor")
+        cpi_escalated_ceiling = lp.get("cpi_escalated_ceiling")
+
         # 3. Calculate or use provided MRP
         mrp_local: Optional[Decimal] = None
         mrp_totals: Dict[str, Any] = {}
@@ -184,8 +188,15 @@ class RebasedMarketPriceEngine:
             raise ValueError("Either mrp_per_kwh or invoice_line_items must be provided")
 
         # 4. Escalate floor/ceiling
-        escalated_floor = _escalate_component(base_floor, operating_year, escalation_rules, "min_solar_price")
-        escalated_ceiling = _escalate_component(base_ceiling, operating_year, escalation_rules, "max_solar_price")
+        if cpi_escalated_floor is not None:
+            escalated_floor = Decimal(str(cpi_escalated_floor))
+        else:
+            escalated_floor = _escalate_component(base_floor, operating_year, escalation_rules, "min_solar_price")
+
+        if cpi_escalated_ceiling is not None:
+            escalated_ceiling = Decimal(str(cpi_escalated_ceiling))
+        else:
+            escalated_ceiling = _escalate_component(base_ceiling, operating_year, escalation_rules, "max_solar_price")
 
         # 5. Calculate discounted MRP (constant for the year — MRP and discount don't vary monthly)
         discounted_mrp = mrp_local * (1 - discount_pct)
@@ -203,8 +214,8 @@ class RebasedMarketPriceEngine:
             if isinstance(rate_date, str):
                 rate_date = date.fromisoformat(rate_date)
 
-            floor_ghs = (escalated_floor * fx_rate).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
-            ceiling_ghs = (escalated_ceiling * fx_rate).quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+            floor_ghs = (escalated_floor * fx_rate).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
+            ceiling_ghs = (escalated_ceiling * fx_rate).quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
             effective_rate, rate_binding = formula_fn(
                 mrp_local=mrp_local,
@@ -213,7 +224,7 @@ class RebasedMarketPriceEngine:
                 ceiling_local=ceiling_ghs,
             )
 
-            effective_rate = effective_rate.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+            effective_rate = effective_rate.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
 
             disc_pct_display = int(discount_pct * 100) if discount_pct * 100 == int(discount_pct * 100) else float(discount_pct * 100)
             basis = (
@@ -228,7 +239,7 @@ class RebasedMarketPriceEngine:
                 "rate_date": rate_date,
                 "floor_local": floor_ghs,
                 "ceiling_local": ceiling_ghs,
-                "discounted_mrp_local": discounted_mrp.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP),
+                "discounted_mrp_local": discounted_mrp.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP),
                 "effective_tariff_local": effective_rate,
                 "rate_binding": rate_binding,
                 "calculation_basis": basis,
@@ -236,7 +247,7 @@ class RebasedMarketPriceEngine:
 
         # 7. Determine representative annual rate + final effective tariff
         # Representative annual rate = discounted MRP (before floor/ceiling — the annual anchor)
-        representative_rate = discounted_mrp.quantize(Decimal("0.000001"), rounding=ROUND_HALF_UP)
+        representative_rate = discounted_mrp.quantize(Decimal("0.0001"), rounding=ROUND_HALF_UP)
         # Final effective tariff = latest monthly effective rate
         latest_month = monthly_results[-1]
         final_effective_tariff = latest_month["effective_tariff_local"]
@@ -316,7 +327,7 @@ class RebasedMarketPriceEngine:
                     JOIN escalation_type esc ON esc.id = ct.escalation_type_id
                     WHERE ct.project_id = %s
                       AND ct.is_current = true
-                      AND esc.code = 'REBASED_MARKET_PRICE'
+                      AND esc.code IN ('REBASED_MARKET_PRICE', 'FLOATING_GRID', 'FLOATING_GENERATOR', 'FLOATING_GRID_GENERATOR')
                     """,
                     (project_id,),
                 )
@@ -475,7 +486,7 @@ class RebasedMarketPriceEngine:
                             clause_tariff_id, contract_year, rate_granularity,
                             period_start, period_end,
                             hard_currency_id, local_currency_id, billing_currency_id,
-                            fx_rate_hard_id, fx_rate_local_id,
+                            exchange_rate_id,
                             effective_rate_contract_ccy, effective_rate_hard_ccy,
                             effective_rate_local_ccy, effective_rate_billing_ccy,
                             effective_rate_contract_role,
@@ -487,7 +498,7 @@ class RebasedMarketPriceEngine:
                             %s, %s, 'annual',
                             %s, %s,
                             %s, %s, %s,
-                            NULL, %s,
+                            %s,
                             %s, %s, %s, %s,
                             'local',
                             NULL,
@@ -502,7 +513,7 @@ class RebasedMarketPriceEngine:
                             effective_rate_hard_ccy = EXCLUDED.effective_rate_hard_ccy,
                             effective_rate_local_ccy = EXCLUDED.effective_rate_local_ccy,
                             effective_rate_billing_ccy = EXCLUDED.effective_rate_billing_ccy,
-                            fx_rate_local_id = EXCLUDED.fx_rate_local_id,
+                            exchange_rate_id = EXCLUDED.exchange_rate_id,
                             reference_price_id = EXCLUDED.reference_price_id,
                             discount_pct_applied = EXCLUDED.discount_pct_applied,
                             calc_status = 'computed',
@@ -514,7 +525,7 @@ class RebasedMarketPriceEngine:
                             ct_id, operating_year,
                             period_start, period_end,
                             hard_ccy_id, local_ccy_id, billing_ccy_id,
-                            fx_id_map[latest_month_date],  # fx_rate_local_id = latest month's FX
+                            fx_id_map[latest_month_date],  # exchange_rate_id = latest month's FX
                             representative_rate,   # contract_ccy = local
                             annual_hard,           # hard_ccy
                             representative_rate,   # local_ccy
@@ -544,11 +555,21 @@ class RebasedMarketPriceEngine:
                         (ct_id,),
                     )
 
+                    # Pre-load billing_period lookup: (year, month) → id
+                    cur.execute("SELECT id, start_date FROM billing_period ORDER BY start_date")
+                    bp_rows = cur.fetchall()
+                    bp_by_ym = {}
+                    for bp in bp_rows:
+                        if bp['start_date']:
+                            sd = bp['start_date'].date() if hasattr(bp['start_date'], 'date') else bp['start_date']
+                            bp_by_ym[(sd.year, sd.month)] = bp['id']
+
                     new_monthly_ids = []
                     for m in monthly_results:
                         is_current = (m["billing_month"] == latest_month_date)
                         fx_rate = m["fx_rate"]
                         fx_local_id = fx_id_map[m["billing_month"]]
+                        bp_id = bp_by_ym.get((m["billing_month"].year, m["billing_month"].month))
 
                         # Look up monthly reference_price if it exists, else fall back to annual
                         cur.execute("""
@@ -613,9 +634,9 @@ class RebasedMarketPriceEngine:
                             """
                             INSERT INTO tariff_rate (
                                 clause_tariff_id, contract_year, rate_granularity,
-                                billing_month, period_start, period_end,
+                                billing_month, billing_period_id, period_start, period_end,
                                 hard_currency_id, local_currency_id, billing_currency_id,
-                                fx_rate_hard_id, fx_rate_local_id,
+                                exchange_rate_id,
                                 effective_rate_contract_ccy, effective_rate_hard_ccy,
                                 effective_rate_local_ccy, effective_rate_billing_ccy,
                                 effective_rate_contract_role,
@@ -625,9 +646,9 @@ class RebasedMarketPriceEngine:
                                 calc_status, calculation_basis, is_current
                             ) VALUES (
                                 %s, %s, 'monthly',
+                                %s, %s, %s, %s,
                                 %s, %s, %s,
-                                %s, %s, %s,
-                                NULL, %s,
+                                %s,
                                 %s, %s, %s, %s,
                                 'local',
                                 %s::jsonb,
@@ -638,7 +659,8 @@ class RebasedMarketPriceEngine:
                             ON CONFLICT (clause_tariff_id, billing_month)
                                 WHERE rate_granularity = 'monthly'
                             DO UPDATE SET
-                                fx_rate_local_id = EXCLUDED.fx_rate_local_id,
+                                billing_period_id = EXCLUDED.billing_period_id,
+                                exchange_rate_id = EXCLUDED.exchange_rate_id,
                                 effective_rate_contract_ccy = EXCLUDED.effective_rate_contract_ccy,
                                 effective_rate_hard_ccy = EXCLUDED.effective_rate_hard_ccy,
                                 effective_rate_local_ccy = EXCLUDED.effective_rate_local_ccy,
@@ -655,7 +677,7 @@ class RebasedMarketPriceEngine:
                             """,
                             (
                                 ct_id, operating_year,
-                                m["billing_month"], m["billing_month"], month_end,
+                                m["billing_month"], bp_id, m["billing_month"], month_end,
                                 hard_ccy_id, local_ccy_id, billing_ccy_id,
                                 fx_local_id,
                                 m["effective_tariff_local"],  # contract_ccy = local

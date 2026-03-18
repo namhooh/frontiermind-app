@@ -265,7 +265,9 @@ echo -e "${GREEN}  Service is stable${NC}"
 # ============================================================================
 # Get Service URL
 # ============================================================================
-if [ -n "$ALB_DNS" ]; then
+if [ -n "$API_DOMAIN" ]; then
+    SERVICE_URL="https://${API_DOMAIN}"
+elif [ -n "$ALB_DNS" ]; then
     SERVICE_URL="http://${ALB_DNS}"
 else
     # Try to get ALB DNS from infrastructure

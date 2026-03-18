@@ -132,7 +132,7 @@ def phase_a(dry_run: bool, project_filter: Optional[str] = None) -> Dict[str, An
         # external_line_id → contract_line row
         cur.execute("""
             SELECT cl.id, cl.external_line_id, cl.contract_id, cl.energy_category,
-                   cl.meter_id, cl.billing_product_id,
+                   cl.meter_id, cl.billing_product_id, cl.clause_tariff_id,
                    c.project_id, p.sage_id
             FROM contract_line cl
             JOIN contract c ON c.id = cl.contract_id
@@ -240,6 +240,7 @@ def phase_a(dry_run: bool, project_filter: Optional[str] = None) -> Dict[str, An
                 'billing_period_id': bp['id'],
                 'contract_line_id': cl['id'],
                 'meter_id': cl.get('meter_id'),
+                'clause_tariff_id': cl.get('clause_tariff_id'),
                 'period_type': 'monthly',
                 'period_start': period_start,
                 'period_end': period_end,
@@ -280,6 +281,7 @@ def phase_a(dry_run: bool, project_filter: Optional[str] = None) -> Dict[str, An
     if rows_to_insert:
         cols = [
             'billing_period_id', 'contract_line_id', 'meter_id',
+            'clause_tariff_id',
             'period_type', 'period_start', 'period_end',
             'energy_kwh', 'available_energy_kwh', 'total_production',
             'opening_reading', 'closing_reading', 'utilized_reading',
@@ -299,6 +301,26 @@ def phase_a(dry_run: bool, project_filter: Optional[str] = None) -> Dict[str, An
             execute_values(cur, insert_sql, values, page_size=100)
             result['rows_inserted'] = cur.rowcount
             log.info(f'Inserted {cur.rowcount} meter_aggregate rows')
+
+    # Backfill clause_tariff_id on existing rows that were inserted before
+    # contract_line.clause_tariff_id was populated. Runs unconditionally so
+    # re-running step9 after --link-only will always catch existing rows.
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SET statement_timeout = '300s'")
+        cur.execute("""
+            UPDATE meter_aggregate ma
+            SET clause_tariff_id = cl.clause_tariff_id
+            FROM contract_line cl
+            WHERE cl.id = ma.contract_line_id
+              AND ma.clause_tariff_id IS NULL
+              AND cl.clause_tariff_id IS NOT NULL
+              AND ma.organization_id = %s
+              AND ma.period_type = 'monthly'
+        """, (ORG_ID,))
+        backfill_count = cur.rowcount
+        if backfill_count > 0:
+            log.info(f'Backfilled clause_tariff_id on {backfill_count} existing meter_aggregate rows')
 
     result['projects_covered'] = sorted(result['projects_covered'])
     return result

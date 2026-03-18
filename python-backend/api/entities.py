@@ -142,6 +142,7 @@ class ProjectDashboardResponse(BaseModel):
     rate_periods: List[dict] = Field(default_factory=list)
     monthly_rates: List[dict] = Field(default_factory=list)
     tariff_rates: List[dict] = Field(default_factory=list)
+    tariff_formulas: List[dict] = Field(default_factory=list, description="Decomposed pricing formulas from tariff_formula table")
     clauses: List[dict] = Field(default_factory=list)
     amendments: List[dict] = Field(default_factory=list)
     exchange_rates: List[dict] = Field(default_factory=list)
@@ -180,6 +181,7 @@ class ContractPatch(BaseModel):
     contract_status_id: Optional[int] = None
     counterparty_id: Optional[int] = None
     payment_terms: Optional[str] = None
+    has_amendments: Optional[bool] = None
     # extraction_metadata JSONB sub-fields (prefixed meta_)
     meta_payment_terms: Optional[str] = None
     meta_extension_provisions: Optional[str] = None
@@ -262,6 +264,7 @@ class ForecastPatch(BaseModel):
     forecast_ghi_irradiance: Optional[float] = None
     forecast_poa_irradiance: Optional[float] = None
     forecast_pr: Optional[float] = None
+    forecast_pr_poa: Optional[float] = None
     forecast_source: Optional[str] = None
 
 
@@ -399,7 +402,7 @@ def _build_patch_query(
     summary="List all organizations",
     description="Retrieve all organizations for dropdown selection.",
 )
-async def list_organizations() -> OrganizationsListResponse:
+def list_organizations() -> OrganizationsListResponse:
     """
     List all organizations.
 
@@ -465,7 +468,7 @@ async def list_organizations() -> OrganizationsListResponse:
     summary="List projects",
     description="Retrieve projects, optionally filtered by organization.",
 )
-async def list_projects(
+def list_projects(
     organization_id: Optional[int] = Query(
         None,
         description="Filter by organization ID"
@@ -550,7 +553,7 @@ async def list_projects(
     summary="List projects grouped by organization",
     description="Returns all projects with organization names in a single query. Used by the sidebar.",
 )
-async def list_projects_grouped() -> ProjectsGroupedResponse:
+def list_projects_grouped() -> ProjectsGroupedResponse:
     if not USE_DATABASE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -708,7 +711,7 @@ def _serialize_row(row: dict) -> dict:
     summary="Get project dashboard data",
     description="Returns all data for a single project: info, contracts, tariffs, assets, meters, forecasts, guarantees, contacts, and documents.",
 )
-async def get_project_dashboard(
+def get_project_dashboard(
     project_id: int = Path(..., description="Project ID"),
 ) -> ProjectDashboardResponse:
     if not USE_DATABASE:
@@ -874,7 +877,7 @@ async def get_project_dashboard(
                         FROM tariff_rate tr
                         JOIN clause_tariff ct ON ct.id = tr.clause_tariff_id
                         LEFT JOIN currency lc ON lc.id = tr.local_currency_id
-                        LEFT JOIN exchange_rate er ON er.id = tr.fx_rate_local_id
+                        LEFT JOIN exchange_rate er ON er.id = tr.exchange_rate_id
                         WHERE ct.project_id = %(pid)s AND tr.rate_granularity = 'monthly'
                         ORDER BY tr.billing_month DESC
                     ),
@@ -903,6 +906,17 @@ async def get_project_dashboard(
                         WHERE ct.project_id = %(pid)s
                         ORDER BY tr.rate_granularity, tr.contract_year, tr.billing_month DESC NULLS FIRST
                     ),
+                    tariff_formulas_data AS (
+                        SELECT tf.id, tf.clause_tariff_id, tf.formula_name,
+                               tf.formula_text, tf.formula_type,
+                               tf.variables, tf.operations, tf.conditions,
+                               tf.section_ref, tf.extraction_confidence,
+                               tf.extraction_metadata, tf.is_current
+                        FROM tariff_formula tf
+                        JOIN clause_tariff ct ON ct.id = tf.clause_tariff_id
+                        WHERE ct.project_id = %(pid)s AND tf.is_current = true
+                        ORDER BY tf.formula_type, tf.id
+                    ),
                     clauses_data AS (
                         SELECT c.id, c.project_id, c.contract_id, c.clause_category_id,
                                c.name, c.section_ref, c.normalized_payload, c.is_current,
@@ -913,7 +927,7 @@ async def get_project_dashboard(
                         ORDER BY cc.code
                     ),
                     amendments_data AS (
-                        SELECT ca.id, ca.contract_id, ca.amendment_number, ca.amendment_date,
+                        SELECT ca.id, ca.contract_id, ca.amendment_number,
                                ca.effective_date, ca.description, ca.source_metadata, ca.file_path
                         FROM contract_amendment ca
                         JOIN contract c ON c.id = ca.contract_id
@@ -1002,6 +1016,7 @@ async def get_project_dashboard(
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM rate_periods_data d) AS rate_periods,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM monthly_rates_data d) AS monthly_rates,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM tariff_rates_data d) AS tariff_rates,
+                        (SELECT COALESCE(json_agg(d), '[]'::json) FROM tariff_formulas_data d) AS tariff_formulas,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM clauses_data d) AS clauses,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM amendments_data d) AS amendments,
                         (SELECT COALESCE(json_agg(d), '[]'::json) FROM exchange_rates_data d) AS exchange_rates,
@@ -1048,6 +1063,7 @@ async def get_project_dashboard(
                 rate_periods = _parse(row['rate_periods'])
                 monthly_rates = _parse(row['monthly_rates'])
                 tariff_rates = _parse(row['tariff_rates'])
+                tariff_formulas = _parse(row['tariff_formulas'])
 
                 clauses = _parse(row['clauses'])
                 amendments = _parse(row['amendments'])
@@ -1083,6 +1099,7 @@ async def get_project_dashboard(
                     rate_periods=rate_periods,
                     monthly_rates=monthly_rates,
                     tariff_rates=tariff_rates,
+                    tariff_formulas=tariff_formulas,
                     clauses=clauses,
                     amendments=amendments,
                     exchange_rates=exchange_rates,

@@ -22,7 +22,8 @@ from psycopg2.extras import Json
 logger = logging.getLogger(__name__)
 
 
-# Maps pricing_structure values from normalized_payload to escalation_type codes
+# Maps pricing_structure values from normalized_payload to escalation_type codes.
+# Post-migration 059: FLOATING_* codes now live in escalation_type (not energy_sale_type).
 ESCALATION_TYPE_MAP = {
     'fixed': 'NONE',
     'escalating': 'PERCENTAGE',
@@ -31,27 +32,9 @@ ESCALATION_TYPE_MAP = {
     'fixed_increase': 'FIXED_INCREASE',
     'fixed_decrease': 'FIXED_DECREASE',
     'rebased': 'REBASED_MARKET_PRICE',
-}
-
-# Maps pricing_structure values to energy_sale_type codes
-ENERGY_SALE_TYPE_MAP = {
-    'fixed': 'FIXED_SOLAR',
-    'escalating': 'FIXED_SOLAR',
-    'indexed': 'FIXED_SOLAR',
-    'tiered': 'FIXED_SOLAR',
-    'time_of_use': 'FIXED_SOLAR',
     'floating_grid': 'FLOATING_GRID',
     'floating_generator': 'FLOATING_GENERATOR',
-}
-
-# Maps payload tariff_type values to energy_sale_type codes
-# (secondary map — used when pricing_structure doesn't match ENERGY_SALE_TYPE_MAP)
-TARIFF_TYPE_TO_ENERGY_SALE = {
-    'solar_discounted': 'FLOATING_GRID',
-    'grid_reference': 'FLOATING_GRID',
-    'solar_floor': 'FLOATING_GRID',
-    'solar_fixed': 'FIXED_SOLAR',
-    'generator_discounted': 'FLOATING_GENERATOR',
+    'floating_grid_generator': 'FLOATING_GRID_GENERATOR',
 }
 
 
@@ -83,6 +66,7 @@ class TariffBridge:
                 cursor.execute(
                     """
                     SELECT c.project_id, c.contract_term_years,
+                           c.organization_id,
                            p.cod_date, p.sage_id as project_sage_id,
                            c.external_contract_id
                     FROM contract c
@@ -100,6 +84,7 @@ class TariffBridge:
                 if project_id is None:
                     project_id = contract_row.get('project_id')
 
+                organization_id = contract_row.get('organization_id')
                 cod_date = contract_row.get('cod_date')
                 term_years = contract_row.get('contract_term_years')
                 project_sage_id = contract_row.get('project_sage_id') or ''
@@ -142,17 +127,26 @@ class TariffBridge:
                 currency_map = self._get_lookup_map(cursor, 'currency')
                 tariff_type_map = self._get_lookup_map(cursor, 'tariff_type')
 
-                # All PRICING-sourced tariffs default to ENERGY_SALES
-                default_tariff_type_id = tariff_type_map.get('ENERGY_SALES')
+                # All PRICING-sourced tariffs default to ENERGY_SALES revenue type
+                default_energy_sale_type_id = energy_sale_type_map.get('ENERGY_SALES')
 
                 for clause in pricing_clauses:
                     payload = clause.get('normalized_payload') or {}
                     clause_name = clause.get('name') or 'Unknown'
 
                     # Extract base_rate from payload
-                    base_rate = payload.get('base_rate') or payload.get('base_rate_per_kwh')
-                    if base_rate is None:
+                    raw_rate = payload.get('base_rate') or payload.get('base_rate_per_kwh')
+                    if raw_rate is None:
                         logger.debug(f"Skipping clause '{clause_name}' — no base_rate in payload")
+                        continue
+
+                    # Sanitize: extract numeric value from text like "US$0.184 per kWh"
+                    base_rate = self._parse_numeric_rate(raw_rate)
+                    if base_rate is None:
+                        logger.warning(
+                            f"Skipping clause '{clause_name}' — "
+                            f"could not parse numeric rate from '{raw_rate}'"
+                        )
                         continue
 
                     # Build tariff_group_key
@@ -173,28 +167,28 @@ class TariffBridge:
                         )
                         continue
 
-                    # Map pricing_structure to FK IDs
+                    # Map pricing_structure to escalation_type FK
+                    # Post-059: FLOATING_* codes are in escalation_type, not energy_sale_type
                     pricing_structure = (payload.get('pricing_structure') or '').lower()
                     escalation_code = ESCALATION_TYPE_MAP.get(pricing_structure)
-                    energy_sale_code = ENERGY_SALE_TYPE_MAP.get(pricing_structure)
 
-                    # If pricing_structure didn't match, try the tariff_type field
-                    if not energy_sale_code:
-                        tariff_type_value = (payload.get('tariff_type') or '').lower()
-                        energy_sale_code = TARIFF_TYPE_TO_ENERGY_SALE.get(tariff_type_value)
-
-                    # If payload has explicit escalation_type, use it for escalation mapping
+                    # If payload has explicit escalation_type, use it
                     if not escalation_code and payload.get('escalation_type'):
                         escalation_code = ESCALATION_TYPE_MAP.get(
                             (payload['escalation_type']).lower()
                         )
 
                     escalation_type_id = escalation_type_map.get(escalation_code) if escalation_code else None
-                    energy_sale_type_id = energy_sale_type_map.get(energy_sale_code) if energy_sale_code else None
+                    # energy_sale_type is now revenue/product type — default to ENERGY_SALES for PPA parsing
+                    energy_sale_type_id = default_energy_sale_type_id
 
                     # Derive currency_id from payload currency field
                     currency_code = (payload.get('currency') or '').upper()
                     currency_id = currency_map.get(currency_code) if currency_code else None
+
+                    # Market reference currency (for MRP-based tariffs, may differ from billing ccy)
+                    mrp_currency_code = (payload.get('mrp_currency') or payload.get('market_ref_currency') or '').upper()
+                    market_ref_currency_id = currency_map.get(mrp_currency_code) if mrp_currency_code else None
 
                     # Build tariff name
                     tariff_name = f"{project_sage_id} - {clause_name}" if project_sage_id else clause_name
@@ -215,22 +209,22 @@ class TariffBridge:
                     cursor.execute(
                         """
                         INSERT INTO clause_tariff (
-                            project_id, contract_id,
+                            project_id, contract_id, organization_id,
                             tariff_group_key, name,
-                            tariff_type_id, currency_id,
+                            tariff_type_id, currency_id, market_ref_currency_id,
                             escalation_type_id, energy_sale_type_id,
                             base_rate, unit,
                             valid_from, valid_to,
                             logic_parameters, is_active,
                             source_metadata
                         )
-                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true, %s)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, true, %s)
                         RETURNING id
                         """,
                         (
-                            project_id, contract_id,
+                            project_id, contract_id, organization_id,
                             tariff_group_key, tariff_name,
-                            default_tariff_type_id, currency_id,
+                            None, currency_id, market_ref_currency_id,  # tariff_type_id NULL — set from PO Summary
                             escalation_type_id, energy_sale_type_id,
                             base_rate, unit,
                             valid_from, valid_to,
@@ -256,6 +250,63 @@ class TariffBridge:
             f"created {len(created_ids)} clause_tariff records"
         )
         return created_ids
+
+    def link_contract_lines(self, contract_id: int, clause_tariff_ids: List[int]) -> int:
+        """
+        Link contract_line rows to their clause_tariff.
+
+        After bridge_pricing_clauses() creates clause_tariff rows, this method
+        updates contract_line.clause_tariff_id for metered/available lines that
+        don't yet have one assigned.
+
+        When exactly one tariff exists for the contract, all eligible lines are
+        linked to it. When multiple tariffs exist, the first is applied as a
+        default and a warning is logged so the operator can override per-line
+        assignments manually.
+
+        Args:
+            contract_id: Contract whose lines to update
+            clause_tariff_ids: List of clause_tariff IDs for this contract
+
+        Returns:
+            Number of contract_line rows updated
+        """
+        if not clause_tariff_ids:
+            logger.info(f"link_contract_lines: no tariff IDs for contract {contract_id} — skipping")
+            return 0
+
+        if len(clause_tariff_ids) == 1:
+            assign_tariff_id = clause_tariff_ids[0]
+        else:
+            logger.warning(
+                f"link_contract_lines: contract {contract_id} has {len(clause_tariff_ids)} "
+                f"clause_tariffs {clause_tariff_ids} — assigning first ({clause_tariff_ids[0]}) "
+                f"as default; verify per-line assignments manually if rates differ"
+            )
+            assign_tariff_id = clause_tariff_ids[0]
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cursor:
+                cursor.execute(
+                    """
+                    UPDATE contract_line
+                    SET clause_tariff_id = %s
+                    WHERE contract_id = %s
+                      AND energy_category IN ('metered', 'available')
+                      AND clause_tariff_id IS NULL
+                    RETURNING id
+                    """,
+                    (assign_tariff_id, contract_id)
+                )
+                updated_rows = cursor.fetchall()
+                updated_count = len(updated_rows)
+                conn.commit()
+
+        logger.info(
+            f"link_contract_lines: contract {contract_id} → "
+            f"linked {updated_count} contract_line row(s) to clause_tariff {assign_tariff_id}"
+        )
+        return updated_count
 
     def repair_existing_tariff_dates(self, contract_id: int) -> int:
         """
@@ -355,6 +406,27 @@ class TariffBridge:
             f"updated {updated_count} records"
         )
         return updated_count
+
+    @staticmethod
+    def _parse_numeric_rate(raw_value) -> Optional[float]:
+        """Extract numeric rate from values like '0.184', 'US$0.184 per kWh', etc."""
+        if raw_value is None:
+            return None
+        # Already numeric
+        if isinstance(raw_value, (int, float)):
+            return float(raw_value)
+        s = str(raw_value).strip()
+        # Try direct parse
+        try:
+            return float(s)
+        except ValueError:
+            pass
+        # Extract first decimal number from text
+        import re
+        match = re.search(r'(\d+\.?\d*)', s)
+        if match:
+            return float(match.group(1))
+        return None
 
     @staticmethod
     def _get_lookup_map(cursor, table_name: str) -> Dict[str, int]:

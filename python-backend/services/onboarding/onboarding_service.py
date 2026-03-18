@@ -538,11 +538,14 @@ class OnboardingService:
                     ppa_logic_extra["formula_type"] = "GRID_DISCOUNT"
 
             # Main tariff line (energy sales or single service type)
+            # Post-059 taxonomy:
+            #   energy_sale_type_code = revenue/product type (was tariff_type_code pre-059)
+            #   escalation_type_code  = pricing mechanism/escalation
+            #   tariff_type_code      = offtake model (NULL from onboarding — set from PO Summary)
             tariff_line = {
                 "tariff_group_key": f"{ext_contract_id}-MAIN",
                 "tariff_name": f"{excel.project_name or ext_project_id} Main Tariff",
-                "tariff_type_code": excel.contract_service_type,
-                "energy_sale_type_code": excel.energy_sale_type,
+                "energy_sale_type_code": excel.contract_service_type,
                 "escalation_type_code": excel.escalation_type,
                 "billing_currency_code": excel.billing_currency or "USD",
                 "market_ref_currency_code": excel.market_ref_currency,
@@ -577,9 +580,8 @@ class OnboardingService:
                     tariff_lines.append({
                         "tariff_group_key": f"{ext_contract_id}-{svc_type}",
                         "tariff_name": f"{excel.project_name or ext_project_id} {svc_type.replace('_', ' ').title()}",
-                        "tariff_type_code": svc_type,
-                        "energy_sale_type_code": "NOT_ENERGY_SALES",
-                        "escalation_type_code": excel.escalation_type,
+                        "energy_sale_type_code": svc_type,
+                        "escalation_type_code": "NOT_ENERGY_SALES",
                         "billing_currency_code": excel.billing_currency or "USD",
                         "market_ref_currency_code": excel.market_ref_currency,
                         "base_rate": rate,
@@ -1393,8 +1395,9 @@ class OnboardingService:
                     merged["contract_id"] = contract_row["id"]
                     merged["external_contract_id"] = contract_row["external_contract_id"]
 
-                # Resolve FK lookup maps
+                # Resolve FK lookup maps (post-059: all three classification tables)
                 lookup_tables = {
+                    "tariff_type": "tariff_type",
                     "energy_sale_type": "energy_sale_type",
                     "escalation_type": "escalation_type",
                     "currency": "currency",
@@ -1404,13 +1407,16 @@ class OnboardingService:
                     cur.execute(f"SELECT id, code FROM {table}")
                     fk_maps[key] = {row["code"]: row["id"] for row in cur.fetchall()}
 
-                # Resolve tariff FK IDs
+                # Resolve tariff FK IDs (post-059 taxonomy)
                 if merged.get("energy_sale_type_id"):
                     code = merged["energy_sale_type_id"]
                     merged["energy_sale_type_fk"] = fk_maps.get("energy_sale_type", {}).get(code)
                 if merged.get("escalation_type_id"):
                     code = merged["escalation_type_id"]
                     merged["escalation_type_fk"] = fk_maps.get("escalation_type", {}).get(code)
+                if merged.get("tariff_type_id"):
+                    code = merged["tariff_type_id"]
+                    merged["tariff_type_fk"] = fk_maps.get("tariff_type", {}).get(code)
                 if merged.get("contract_currency"):
                     code = merged["contract_currency"]
                     merged["currency_fk"] = fk_maps.get("currency", {}).get(code)
@@ -1578,6 +1584,7 @@ class OnboardingService:
                         "tariff_group_key": tariff_group_key,
                         "name": f"{sage_id} Main Tariff",
                         "base_rate": base_rate,
+                        "tariff_type_id": merged.get("tariff_type_fk"),
                         "energy_sale_type_id": merged.get("energy_sale_type_fk"),
                         "escalation_type_id": merged.get("escalation_type_fk"),
                         "currency_id": merged.get("currency_fk"),

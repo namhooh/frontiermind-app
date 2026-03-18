@@ -22,7 +22,7 @@ _connection_pool: Optional[pool.ThreadedConnectionPool] = None
 
 def init_connection_pool(
     min_connections: int = 1,
-    max_connections: int = 5,  # Reduced from 10 to 5 for Supabase pooler
+    max_connections: int = 10,  # Sync endpoints run in threadpool, need enough connections
     database_url: Optional[str] = None
 ) -> None:
     """

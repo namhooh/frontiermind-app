@@ -192,7 +192,7 @@ _PROTECTED_COLUMNS = {
     "exchange_rate_id", "escalation_base_index_id",
     # tariff_rate protected columns (engine-computed, not user-editable)
     "hard_currency_id", "local_currency_id", "billing_currency_id",
-    "fx_rate_hard_id", "fx_rate_local_id",
+    "exchange_rate_id",
     "effective_rate_contract_ccy", "effective_rate_hard_ccy",
     "effective_rate_local_ccy", "effective_rate_billing_ccy",
     "effective_rate_contract_role",

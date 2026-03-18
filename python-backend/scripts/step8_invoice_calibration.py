@@ -2,9 +2,10 @@
 """
 Step 8: Invoice Calibration & Tax Rule Extraction
 
-Two-phase step:
+Three-phase step:
   Phase A: Extract tax/levy/WHT formulas from invoice PDFs → populate billing_tax_rule
   Phase B: Validate extracted invoice values against DB state → discrepancy report
+  Phase C: Populate received_invoice_header + received_invoice_line_item from extractions
 
 Source: CBE_data_extracts/Invoice samples/*.pdf and *.eml (PDF attachments)
 
@@ -1057,6 +1058,278 @@ def insert_tax_rules(tax_rules: List[Dict], existing_rules: Dict, dry_run: bool)
     return created
 
 
+# ─── Phase C: Received Invoice Population ────────────────────────────────────
+
+# Map extraction line_type → invoice_line_item_type code
+LINE_TYPE_MAP = {
+    'energy': 'ENERGY',
+    'fixed': 'FIXED',
+    'tax': 'TAX',
+    'levy': 'LEVY',
+    'loan': 'FIXED',
+    'rental': 'FIXED',
+    'credit_note': 'LD_CREDIT',
+    'other': 'FIXED',
+}
+
+# Map tax_levy_breakdown code → invoice_line_item_type code
+TAX_CODE_MAP = {
+    'VAT': 'TAX',
+    'WHT': 'WITHHOLDING',
+    'WHVAT': 'WITHHOLDING',
+    'NHIL': 'LEVY',
+    'GETFUND': 'LEVY',
+    'COVID': 'LEVY',
+    'ETIMS': 'LEVY',
+    'OTHER': 'LEVY',
+}
+
+
+def populate_received_invoices(
+    extractions: List[Dict[str, Any]],
+    db_state: Dict[str, Any],
+    dry_run: bool,
+) -> List[Dict]:
+    """
+    Phase C: Insert received_invoice_header + received_invoice_line_item
+    from the Claude-extracted invoice data.
+
+    Idempotent: skips invoices whose invoice_number already exists for the project.
+    """
+    results = []
+
+    # Pre-load line item type IDs
+    line_type_ids: Dict[str, int] = {}
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("SELECT id, code FROM invoice_line_item_type")
+        for row in cur.fetchall():
+            line_type_ids[row['code']] = row['id']
+
+    for ext_record in extractions:
+        sage_id = ext_record['sage_id']
+        extraction: InvoiceExtraction = ext_record['extraction']
+
+        proj = db_state['projects'].get(sage_id)
+        if not proj:
+            log.warning(f"  Phase C: {sage_id} — project not found, skipping")
+            results.append({'sage_id': sage_id, 'status': 'skipped', 'reason': 'project not found'})
+            continue
+
+        project_id = proj['id']
+
+        # Resolve contract_id, counterparty_id, currency_id
+        contract_info = _resolve_contract_info(project_id, extraction.currency, db_state)
+        if not contract_info:
+            log.warning(f"  Phase C: {sage_id} — no contract found, skipping")
+            results.append({'sage_id': sage_id, 'status': 'skipped', 'reason': 'no contract'})
+            continue
+
+        # Resolve billing_period_id from billing_period_month
+        billing_period_id = _resolve_billing_period(extraction.billing_period_month)
+        if not billing_period_id:
+            log.warning(f"  Phase C: {sage_id} — billing period {extraction.billing_period_month} not found, skipping")
+            results.append({'sage_id': sage_id, 'status': 'skipped', 'reason': f'billing period {extraction.billing_period_month} not found'})
+            continue
+
+        # Parse dates
+        invoice_date = _parse_date(extraction.invoice_date)
+        due_date = _parse_date(extraction.due_date)
+
+        # grand_total is the invoice total BEFORE withholding deductions
+        total_amount = extraction.grand_total
+
+        if dry_run:
+            log.info(f"  Phase C [DRY RUN]: {sage_id} — {extraction.invoice_number}, "
+                     f"period={extraction.billing_period_month}, total={total_amount}, "
+                     f"{len(extraction.line_items)} lines + {len(extraction.tax_levy_breakdown)} tax items")
+            results.append({
+                'sage_id': sage_id, 'status': 'dry_run',
+                'invoice_number': extraction.invoice_number,
+                'line_count': len(extraction.line_items) + len(extraction.tax_levy_breakdown),
+            })
+            continue
+
+        with get_db_connection() as conn:
+            cur = conn.cursor()
+
+            # Idempotency: check if invoice_number already exists for this project
+            cur.execute("""
+                SELECT id FROM received_invoice_header
+                WHERE project_id = %s AND invoice_number = %s
+            """, (project_id, extraction.invoice_number))
+            existing = cur.fetchone()
+            if existing:
+                log.info(f"  Phase C: {sage_id} — invoice {extraction.invoice_number} already exists (id={existing['id']}), skipping")
+                results.append({
+                    'sage_id': sage_id, 'status': 'exists',
+                    'invoice_number': extraction.invoice_number,
+                    'existing_id': existing['id'],
+                })
+                continue
+
+            # Insert header
+            cur.execute("""
+                INSERT INTO received_invoice_header (
+                    project_id, contract_id, billing_period_id,
+                    counterparty_id, currency_id,
+                    invoice_number, invoice_date, due_date,
+                    total_amount, status, invoice_direction
+                ) VALUES (
+                    %s, %s, %s, %s, %s, %s, %s, %s, %s,
+                    'verified', 'receivable'
+                )
+                RETURNING id
+            """, (
+                project_id, contract_info['contract_id'], billing_period_id,
+                contract_info['counterparty_id'], contract_info['currency_id'],
+                extraction.invoice_number, invoice_date, due_date,
+                total_amount,
+            ))
+            header_id = cur.fetchone()['id']
+
+            # Insert energy/fixed line items
+            line_count = 0
+            for li in extraction.line_items:
+                # Skip tax/levy lines from line_items — we use tax_levy_breakdown instead
+                if li.line_type in ('tax', 'levy'):
+                    continue
+
+                type_code = LINE_TYPE_MAP.get(li.line_type, 'FIXED')
+                type_id = line_type_ids.get(type_code)
+
+                cur.execute("""
+                    INSERT INTO received_invoice_line_item (
+                        received_invoice_header_id, invoice_line_item_type_id,
+                        description, quantity, line_unit_price, line_total_amount
+                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                """, (
+                    header_id, type_id,
+                    li.description,
+                    li.quantity_kwh,
+                    li.unit_rate,
+                    li.amount,
+                ))
+                line_count += 1
+
+            # Insert tax/levy/withholding line items from tax_levy_breakdown
+            for tax in extraction.tax_levy_breakdown:
+                type_code = TAX_CODE_MAP.get(tax.code, 'LEVY')
+                type_id = line_type_ids.get(type_code)
+
+                # Withholdings are deductions — store as negative
+                amount = tax.amount
+                if tax.code in ('WHT', 'WHVAT') and amount and amount > 0:
+                    amount = -amount
+
+                description = f"{tax.code}"
+                if tax.rate is not None:
+                    description += f" ({tax.rate*100:.1f}%)"
+
+                cur.execute("""
+                    INSERT INTO received_invoice_line_item (
+                        received_invoice_header_id, invoice_line_item_type_id,
+                        description, quantity, line_unit_price, line_total_amount
+                    ) VALUES (%s, %s, %s, %s, %s, %s)
+                """, (
+                    header_id, type_id,
+                    description,
+                    tax.base_amount,  # quantity = base amount the tax applies to
+                    tax.rate,         # unit_price = tax rate
+                    amount,
+                ))
+                line_count += 1
+
+            conn.commit()
+            log.info(f"  Phase C: {sage_id} — inserted invoice {extraction.invoice_number} "
+                     f"(header_id={header_id}, {line_count} line items)")
+            results.append({
+                'sage_id': sage_id, 'status': 'created',
+                'invoice_number': extraction.invoice_number,
+                'header_id': header_id,
+                'line_count': line_count,
+            })
+
+    return results
+
+
+def _resolve_contract_info(
+    project_id: int,
+    currency_code: Optional[str],
+    db_state: Dict,
+) -> Optional[Dict]:
+    """Look up contract_id, counterparty_id, and currency_id for a project."""
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT c.id as contract_id, c.counterparty_id
+            FROM contract c
+            WHERE c.project_id = %s
+            ORDER BY c.id
+            LIMIT 1
+        """, (project_id,))
+        contract = cur.fetchone()
+        if not contract:
+            return None
+
+        # Resolve currency_id from code
+        currency_id = None
+        if currency_code:
+            for cid, code in db_state['currencies'].items():
+                if code.upper() == currency_code.upper():
+                    currency_id = cid
+                    break
+
+        # Fallback: use the clause_tariff currency
+        if not currency_id:
+            cur.execute("""
+                SELECT currency_id FROM clause_tariff
+                WHERE contract_id = %s AND is_current = true
+                LIMIT 1
+            """, (contract['contract_id'],))
+            tariff = cur.fetchone()
+            if tariff:
+                currency_id = tariff['currency_id']
+
+        return {
+            'contract_id': contract['contract_id'],
+            'counterparty_id': contract['counterparty_id'],
+            'currency_id': currency_id,
+        }
+
+
+def _resolve_billing_period(billing_period_month: Optional[str]) -> Optional[int]:
+    """Look up billing_period_id from YYYY-MM string."""
+    if not billing_period_month:
+        return None
+
+    try:
+        parts = billing_period_month.split('-')
+        year, month = int(parts[0]), int(parts[1])
+        start_date = date(year, month, 1)
+    except (ValueError, IndexError):
+        return None
+
+    with get_db_connection() as conn:
+        cur = conn.cursor()
+        cur.execute("""
+            SELECT id FROM billing_period
+            WHERE start_date = %s
+        """, (start_date,))
+        row = cur.fetchone()
+        return row['id'] if row else None
+
+
+def _parse_date(date_str: Optional[str]) -> Optional[date]:
+    """Parse a date string (YYYY-MM-DD) to a date object."""
+    if not date_str:
+        return None
+    try:
+        return datetime.strptime(date_str[:10], '%Y-%m-%d').date()
+    except (ValueError, TypeError):
+        return None
+
+
 # ─── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
@@ -1155,6 +1428,14 @@ def main():
     created_rules = insert_tax_rules(tax_rules, db_state['tax_rules'], args.dry_run)
     log.info(f"  Tax rules created: {len(created_rules)}")
 
+    # Phase C: Populate received_invoice tables
+    log.info("=" * 60)
+    log.info("Phase C: Received Invoice Population")
+    phase_c_results = populate_received_invoices(extractions, db_state, args.dry_run)
+    invoices_created = sum(1 for r in phase_c_results if r['status'] == 'created')
+    invoices_skipped = sum(1 for r in phase_c_results if r['status'] in ('exists', 'skipped'))
+    log.info(f"  Invoices created: {invoices_created}, skipped: {invoices_skipped}")
+
     # ── Gate Checks ──
     gates = []
 
@@ -1209,6 +1490,8 @@ def main():
             'pdfs_parsed': len(extractions),
             'projects_covered': list(set(e['sage_id'] for e in extractions)),
             'tax_rules_created': len(created_rules),
+            'received_invoices_created': invoices_created,
+            'received_invoices_skipped': invoices_skipped,
             'check_counts': {
                 'critical': sum(1 for c in all_checks if c['severity'] == 'critical'),
                 'warning': sum(1 for c in all_checks if c['severity'] == 'warning'),
@@ -1253,6 +1536,7 @@ def main():
             }
             for c in all_checks
         ],
+        'phase_c_received_invoices': phase_c_results,
         'gate_checks': gates,
     }
 

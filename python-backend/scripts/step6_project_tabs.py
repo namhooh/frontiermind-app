@@ -32,6 +32,7 @@ script_dir = Path(__file__).resolve().parent
 project_root = script_dir.parent
 sys.path.insert(0, str(project_root))
 
+from psycopg2.extras import execute_values
 from db.database import init_connection_pool, close_connection_pool, get_db_connection
 from services.onboarding.parsers.plant_performance_parser import PlantPerformanceParser
 
@@ -258,6 +259,9 @@ def process_project(
         conn.autocommit = False
         try:
             with conn.cursor() as cur:
+                # Set generous timeout — default 60s is too short for large projects
+                cur.execute("SET statement_timeout = '300000'")  # 5 min
+
                 # ── 1. Look up project ──
                 cur.execute(
                     "SELECT id, name, cod_date, country, installed_dc_capacity_kwp "
@@ -335,8 +339,9 @@ def process_project(
 
                 # Fetch existing forecast rows
                 cur.execute(
-                    "SELECT id, forecast_month, operating_year, forecast_poa_irradiance, "
-                    "degradation_factor, source_metadata "
+                    "SELECT id, forecast_month, operating_year, forecast_energy_kwh, "
+                    "forecast_poa_irradiance, forecast_ghi_irradiance, "
+                    "forecast_pr, forecast_pr_poa, degradation_factor, source_metadata "
                     "FROM production_forecast "
                     "WHERE project_id = %s ORDER BY forecast_month",
                     (project_id,),
@@ -352,6 +357,9 @@ def process_project(
                 enriched = 0
                 degradation_pct = site_params.get("degradation_pct")
 
+                # Collect batch updates — one tuple per row
+                batch_updates: List[tuple] = []
+
                 for row in existing_rows:
                     fid = row["id"]
                     fmonth = row["forecast_month"]
@@ -363,25 +371,40 @@ def process_project(
                         existing_meta = json.loads(existing_meta)
                     merged_meta = {**existing_meta, **enrichment_meta}
 
-                    # Build per-row updates
-                    updates = {"source_metadata": json.dumps(merged_meta, cls=DateEncoder)}
+                    # Build per-row field values
+                    new_oy = None
+                    new_poa = None
+                    new_ghi = None
+                    new_pr_ghi = None
+                    new_pr_poa = None
+                    new_deg = None
+
+                    # Capacity for PR calculation
+                    db_cap = float(proj["installed_dc_capacity_kwp"]) if proj["installed_dc_capacity_kwp"] else None
 
                     # Enrich from tech model row if available
                     tr = tech_by_month.get(month_key)
                     if tr:
-                        # Fill operating_year if NULL
                         if row["operating_year"] is None and tr.operating_year:
-                            updates["operating_year"] = tr.operating_year
-
-                        # Fill POA irradiance if NULL
+                            new_oy = tr.operating_year
                         if row["forecast_poa_irradiance"] is None and tr.forecast_poa_wm2:
-                            updates["forecast_poa_irradiance"] = tr.forecast_poa_wm2
+                            new_poa = tr.forecast_poa_wm2 / 1000.0  # Wh/m² → kWh/m²
+                        if row.get("forecast_ghi_irradiance") is None and tr.forecast_ghi_wm2:
+                            new_ghi = tr.forecast_ghi_wm2 / 1000.0  # Wh/m² → kWh/m²
 
-                        # Fill degradation_factor if NULL
+                        # Calculate PR from formula: energy / (irradiance × capacity)
+                        energy = float(row["forecast_energy_kwh"]) if row["forecast_energy_kwh"] else None
+                        if energy and db_cap and db_cap > 0:
+                            final_ghi = new_ghi or (float(row["forecast_ghi_irradiance"]) if row.get("forecast_ghi_irradiance") else None)
+                            final_poa = new_poa or (float(row["forecast_poa_irradiance"]) if row.get("forecast_poa_irradiance") else None)
+                            if row.get("forecast_pr") is None and final_ghi and final_ghi > 0:
+                                new_pr_ghi = energy / (final_ghi * db_cap)
+                            if row["forecast_pr_poa"] is None and final_poa and final_poa > 0:
+                                new_pr_poa = energy / (final_poa * db_cap)
+
                         if row["degradation_factor"] is None and degradation_pct:
                             oy = tr.operating_year or row["operating_year"] or 1
-                            factor = (1 - degradation_pct) ** (oy - 1)
-                            updates["degradation_factor"] = round(factor, 6)
+                            new_deg = round((1 - degradation_pct) ** (oy - 1), 6)
 
                         # Per-phase breakdown in source_metadata
                         phase_data = {}
@@ -393,26 +416,42 @@ def process_project(
                             phase_data["ghi_wm2"] = tr.forecast_ghi_wm2
                         if tr.forecast_poa_wm2 is not None:
                             phase_data["poa_wm2"] = tr.forecast_poa_wm2
+                        if tr.forecast_ghi_phase2_wm2 is not None:
+                            phase_data["ghi_phase2_wm2"] = tr.forecast_ghi_phase2_wm2
+                        if tr.forecast_poa_phase2_wm2 is not None:
+                            phase_data["poa_phase2_wm2"] = tr.forecast_poa_phase2_wm2
                         if tr.forecast_pr is not None:
                             phase_data["pr_pct"] = tr.forecast_pr
                         if phase_data:
                             merged_meta["tech_model"] = phase_data
-                            updates["source_metadata"] = json.dumps(merged_meta, cls=DateEncoder)
                     elif row["degradation_factor"] is None and degradation_pct:
-                        # No tech row but we have degradation — compute from operating_year
                         oy = row["operating_year"] or 1
-                        factor = (1 - degradation_pct) ** (oy - 1)
-                        updates["degradation_factor"] = round(factor, 6)
+                        new_deg = round((1 - degradation_pct) ** (oy - 1), 6)
 
-                    if not dry_run:
-                        set_clauses = ", ".join(f"{k} = %({k})s" for k in updates)
-                        updates["fid"] = fid
-                        cur.execute(
-                            f"UPDATE production_forecast SET {set_clauses}, "
-                            f"updated_at = NOW() WHERE id = %(fid)s",
-                            updates,
-                        )
+                    meta_json = json.dumps(merged_meta, cls=DateEncoder)
+                    batch_updates.append((fid, meta_json, new_oy, new_poa, new_ghi, new_pr_ghi, new_pr_poa, new_deg))
                     enriched += 1
+
+                # Batch UPDATE — single query instead of N individual updates
+                if not dry_run and batch_updates:
+                    execute_values(
+                        cur,
+                        """
+                        UPDATE production_forecast AS pf SET
+                            source_metadata = v.meta::jsonb,
+                            operating_year = COALESCE(v.oy::integer, pf.operating_year),
+                            forecast_poa_irradiance = COALESCE(v.poa::numeric, pf.forecast_poa_irradiance),
+                            forecast_ghi_irradiance = COALESCE(v.ghi::numeric, pf.forecast_ghi_irradiance),
+                            forecast_pr = COALESCE(v.pr_ghi::numeric, pf.forecast_pr),
+                            forecast_pr_poa = COALESCE(v.pr_poa::numeric, pf.forecast_pr_poa),
+                            degradation_factor = COALESCE(v.deg::numeric, pf.degradation_factor),
+                            updated_at = NOW()
+                        FROM (VALUES %s) AS v(id, meta, oy, poa, ghi, pr_ghi, pr_poa, deg)
+                        WHERE pf.id = v.id::bigint
+                        """,
+                        batch_updates,
+                        page_size=200,
+                    )
 
                 result.forecasts_enriched = enriched
                 logger.info(

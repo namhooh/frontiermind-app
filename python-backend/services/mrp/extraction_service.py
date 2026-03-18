@@ -325,24 +325,26 @@ class MRPExtractionService:
 
     @staticmethod
     def _compute_operating_year(project_id: int, billing_date) -> int:
-        """Compute operating year from project COD date and billing month.
-
-        Same logic as submissions._determine_operating_year but usable within
-        the extraction service without importing from the API layer.
-        """
+        """Compute operating year from clause_tariff.oy_start_date and billing month."""
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                cur.execute(
-                    "SELECT cod_date FROM project WHERE id = %s",
-                    (project_id,),
-                )
+                cur.execute("""
+                    SELECT ct.logic_parameters->>'oy_start_date' AS oy_start_date
+                    FROM project p
+                    LEFT JOIN clause_tariff ct
+                        ON ct.project_id = p.id AND ct.is_current = true
+                    WHERE p.id = %s
+                    LIMIT 1
+                """, (project_id,))
                 row = cur.fetchone()
-                if not row or not row["cod_date"]:
-                    return 1  # Default to year 1 if COD not set
+                if not row or not row.get("oy_start_date"):
+                    return 1  # Default to year 1 if oy_start_date not set
 
-                cod_date = row["cod_date"]
-                year_diff = billing_date.year - cod_date.year
-                if billing_date.month < cod_date.month:
+                from datetime import date as _date
+                oy_anchor = _date.fromisoformat(row["oy_start_date"])
+
+                year_diff = billing_date.year - oy_anchor.year
+                if billing_date.month < oy_anchor.month:
                     year_diff -= 1
                 return max(1, year_diff + 1)
 

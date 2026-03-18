@@ -56,6 +56,12 @@ class SendEmailRequest(BaseModel):
     extra_context: Optional[Dict[str, Any]] = Field(
         None, description="Additional template context variables"
     )
+    subject_override: Optional[str] = Field(
+        None, description="Override the template subject (one-off edit, does not modify template)"
+    )
+    body_html_override: Optional[str] = Field(
+        None, description="Override the template body HTML (one-off edit, does not modify template)"
+    )
 
     model_config = ConfigDict(
         json_schema_extra={

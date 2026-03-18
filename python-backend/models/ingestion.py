@@ -409,3 +409,23 @@ class FXRateBatchResponse(BaseModel):
     updated: int = 0
     rejected: int = 0
     errors: Optional[List[Dict[str, Any]]] = None
+
+
+# =====================================================
+# Price Index Ingestion Models
+# =====================================================
+
+class PriceIndexFetchRequest(BaseModel):
+    """Request body for POST /api/ingest/price-index/fetch."""
+    series_ids: List[str] = Field(default=["CUUR0000SA0"], max_length=10)
+    start_year: Optional[int] = None
+    end_year: Optional[int] = None
+
+
+class PriceIndexFetchResponse(BaseModel):
+    """Response for price index fetch and upsert."""
+    success: bool = True
+    series_fetched: List[str] = []
+    inserted: int = 0
+    updated: int = 0
+    errors: Optional[List[Dict[str, Any]]] = None

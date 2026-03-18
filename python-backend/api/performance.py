@@ -7,11 +7,12 @@ irradiance comparisons, PR calculations, and availability tracking.
 
 import io
 import logging
+import re
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Path, status
+from fastapi import APIRouter, HTTPException, UploadFile, File, Path, Query, status
 from pydantic import BaseModel, Field
 
 from db.database import get_db_connection, init_connection_pool
@@ -42,6 +43,8 @@ class MeterPerformanceDetail(BaseModel):
     meter_name: Optional[str] = None
     metered_kwh: Optional[float] = None
     available_kwh: Optional[float] = None
+    phase_number: Optional[int] = None
+    phase_cod_date: Optional[str] = None
 
 
 class PerformanceMonth(BaseModel):
@@ -78,6 +81,8 @@ class PlantPerformanceResponse(BaseModel):
     summary: dict[str, Any] = {}
     # Canonical meter list (ordered by contract_line_number)
     meters: List[dict] = []
+    total_months: Optional[int] = None
+    months_returned: Optional[int] = None
 
 
 class ManualPerformanceEntry(BaseModel):
@@ -115,8 +120,9 @@ def _d2f(val: Any) -> Optional[float]:
     response_model=PlantPerformanceResponse,
     summary="Get plant performance analysis",
 )
-async def get_plant_performance(
+def get_plant_performance(
     project_id: int = Path(..., description="Project ID"),
+    month_limit: Optional[int] = Query(12, alias="months", description="Number of recent months to return. Use 0 for all months."),
 ) -> PlantPerformanceResponse:
     if not USE_DATABASE:
         raise HTTPException(status_code=503, detail="Database not available")
@@ -128,7 +134,8 @@ async def get_plant_performance(
                 cur.execute("""
                     SELECT p.installed_dc_capacity_kwp,
                            p.cod_date,
-                           ct.logic_parameters->>'degradation_pct' AS degradation_pct
+                           ct.logic_parameters->>'degradation_pct' AS degradation_pct,
+                           ct.logic_parameters->>'oy_start_date' AS oy_start_date
                     FROM project p
                     LEFT JOIN clause_tariff ct
                         ON ct.project_id = p.id AND ct.is_current = true
@@ -141,13 +148,16 @@ async def get_plant_performance(
 
                 capacity = _d2f(proj.get("installed_dc_capacity_kwp"))
                 degradation_pct = float(proj["degradation_pct"]) if proj.get("degradation_pct") else None
-                cod_date = proj.get("cod_date")
+                # Use oy_start_date as canonical OY anchor
+                cod_date = date.fromisoformat(proj["oy_start_date"]) if proj.get("oy_start_date") else proj.get("cod_date")
 
                 # 2) Get canonical meter list from contract_line (ordered by contract_line_number)
                 cur.execute("""
                     SELECT cl.meter_id, m.name AS meter_name,
                            cl.energy_category::text AS energy_category,
-                           cl.contract_line_number
+                           cl.contract_line_number,
+                           cl.phase_cod_date,
+                           cl.product_desc
                     FROM contract_line cl
                     JOIN contract c ON c.id = cl.contract_id
                     JOIN meter m ON m.id = cl.meter_id
@@ -157,11 +167,33 @@ async def get_plant_performance(
                     ORDER BY cl.contract_line_number
                 """, {"pid": project_id})
                 meter_rows = cur.fetchall()
+
+                # Parse phase number from product_desc
+                def _parse_phase(desc: Optional[str]) -> Optional[int]:
+                    if not desc:
+                        return None
+                    m = re.search(r'phase\s*(\d+)', desc, re.IGNORECASE)
+                    return int(m.group(1)) if m else None
+
                 meters_list = [
-                    {"meter_id": r["meter_id"], "meter_name": r["meter_name"], "energy_category": r["energy_category"]}
+                    {
+                        "meter_id": r["meter_id"],
+                        "meter_name": r["meter_name"],
+                        "energy_category": r["energy_category"],
+                        "phase_number": _parse_phase(r.get("product_desc")),
+                        "phase_cod_date": r["phase_cod_date"].isoformat() if r.get("phase_cod_date") else None,
+                    }
                     for r in meter_rows
                 ]
                 meter_ids_ordered = [r["meter_id"] for r in meter_rows]
+                # Build phase lookup per meter_id
+                meter_phase_map = {
+                    r["meter_id"]: {
+                        "phase_number": _parse_phase(r.get("product_desc")),
+                        "phase_cod_date": r["phase_cod_date"].isoformat() if r.get("phase_cod_date") else None,
+                    }
+                    for r in meter_rows
+                }
 
                 # 3) Get all months from meter_aggregate + production_forecast + plant_performance
                 cur.execute("""
@@ -250,6 +282,11 @@ async def get_plant_performance(
                     ORDER BY am.billing_month DESC
                 """, {"pid": project_id})
                 month_rows = cur.fetchall()
+                total_month_count = len(month_rows)
+
+                # Apply month limit (rows already sorted DESC)
+                if month_limit and month_limit > 0 and len(month_rows) > month_limit:
+                    month_rows = month_rows[:month_limit]
 
                 # 4) Get per-meter breakdown for all months (metered + available energy lines)
                 per_meter_data: dict[str, dict[int, dict]] = {}  # billing_month → {meter_id → {metered, available}}
@@ -315,11 +352,14 @@ async def get_plant_performance(
                     meter_details = []
                     for mid in meter_ids_ordered:
                         md = month_meters.get(mid, {})
+                        phase_info = meter_phase_map.get(mid, {})
                         meter_details.append(MeterPerformanceDetail(
                             meter_id=mid,
                             meter_name=meter_name_map.get(mid),
                             metered_kwh=md.get("metered_kwh"),
                             available_kwh=md.get("available_kwh"),
+                            phase_number=phase_info.get("phase_number"),
+                            phase_cod_date=phase_info.get("phase_cod_date"),
                         ))
 
                     # GHI normalization: actual_ghi is Wh/m² (monthly cumulative)
@@ -366,6 +406,8 @@ async def get_plant_performance(
                     months=months,
                     summary=totals,
                     meters=meters_list,
+                    total_months=total_month_count,
+                    months_returned=len(months),
                 )
 
     except HTTPException:

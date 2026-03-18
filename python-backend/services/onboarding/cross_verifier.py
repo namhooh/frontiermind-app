@@ -326,10 +326,10 @@ class CrossVerifier:
                         merged[v.field_name] = src_val
                         break
 
-        # Add tariff type to merged
+        # Add tariff type detection results to merged (post-059 field names)
         if tariff_type:
-            merged["energy_sale_type_id"] = tariff_type.energy_sale_type_id
-            merged["escalation_type_id"] = tariff_type.escalation_type_id
+            merged["energy_sale_type_id"] = tariff_type.energy_sale_type_code
+            merged["escalation_type_id"] = tariff_type.escalation_type_code
             merged["formula_type"] = tariff_type.formula_type
             if tariff_type.mrp_method:
                 merged["mrp_method"] = tariff_type.mrp_method

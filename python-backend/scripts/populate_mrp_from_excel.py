@@ -89,34 +89,44 @@ def resolve_project(sage_id: str) -> dict | None:
                     if cur_row:
                         currency_id = cur_row["id"]
 
+            cod_date = row["cod_date"].date() if hasattr(row["cod_date"], "date") else row["cod_date"]
+            # Use oy_start_date as canonical OY anchor
+            lp = row["logic_parameters"] or {}
+            oy_start = lp.get("oy_start_date")
+            if oy_start:
+                oy_anchor = date.fromisoformat(oy_start)
+            else:
+                oy_anchor = cod_date
+
             return {
                 "project_id": row["project_id"],
                 "sage_id": row["sage_id"],
                 "project_name": row["project_name"],
-                "cod_date": row["cod_date"].date() if hasattr(row["cod_date"], "date") else row["cod_date"],
+                "cod_date": cod_date,
+                "oy_anchor": oy_anchor,
                 "organization_id": row["organization_id"],
                 "clause_tariff_id": row["clause_tariff_id"],
                 "currency_id": currency_id,
-                "logic_parameters": row["logic_parameters"],
+                "logic_parameters": lp,
             }
 
 
-def compute_operating_year(cod_date: date, billing_month: str) -> int:
+def compute_operating_year(oy_anchor: date, billing_month: str) -> int:
     """
-    Compute operating year from COD date and billing month.
+    Compute operating year from OY anchor date and billing month.
 
-    Operating years are 1-based, counted from COD anniversary.
-    Months before COD get operating_year = 0 (pre-COD).
+    Operating years are 1-based, counted from OY anchor anniversary.
+    Months before anchor get operating_year = 0 (pre-COD).
     """
     year, month = int(billing_month[:4]), int(billing_month[5:7])
     period_start = date(year, month, 1)
 
-    if period_start < cod_date:
+    if period_start < oy_anchor:
         return 0
 
-    # Operating year = floor((months since COD) / 12) + 1
-    months_since_cod = (period_start.year - cod_date.year) * 12 + (period_start.month - cod_date.month)
-    return (months_since_cod // 12) + 1
+    # Operating year = floor((months since anchor) / 12) + 1
+    months_since = (period_start.year - oy_anchor.year) * 12 + (period_start.month - oy_anchor.month)
+    return (months_since // 12) + 1
 
 
 def last_day_of_month(year: int, month: int) -> date:
@@ -167,7 +177,7 @@ def populate_project(
     # 3. Compute operating years and prepare rows
     rows_by_year: dict[int, list] = {}
     for obs in observations:
-        oy = compute_operating_year(project["cod_date"], obs["billing_month"])
+        oy = compute_operating_year(project["oy_anchor"], obs["billing_month"])
         obs["operating_year"] = oy
         rows_by_year.setdefault(oy, []).append(obs)
 

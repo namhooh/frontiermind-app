@@ -371,6 +371,9 @@ class LookupService:
             "INTERCONNECTION": "IA",
             "FINANCIAL_PPA": "VPPA",
             "STORAGE": "ESA",
+            "SSA": "PPA",
+            "SERVICE_SUPPLY_AGREEMENT": "PPA",
+            "SOLAR_SERVICE_AGREEMENT": "PPA",
         }
 
         if normalized in aliases:
@@ -596,6 +599,73 @@ class LookupService:
 
         except Exception as e:
             logger.error(f"Failed to create counterparty '{normalized_name}': {e}")
+            return None
+
+    # =========================================================================
+    # PROJECT / CONTRACT RESOLUTION BY SAGE ID
+    # =========================================================================
+
+    def get_project_by_sage_id(self, sage_id: str, org_id: int) -> Optional[Dict]:
+        """Resolve project row from sage_id.
+
+        Args:
+            sage_id: SAGE customer code (e.g. "MOH01")
+            org_id: Organization ID
+
+        Returns:
+            Dict with id, name, sage_id or None
+        """
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        "SELECT id, name, sage_id FROM project "
+                        "WHERE sage_id = %s AND organization_id = %s",
+                        (sage_id, org_id),
+                    )
+                    row = cursor.fetchone()
+                    return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to resolve project for sage_id '{sage_id}': {e}")
+            return None
+
+    def get_primary_contract_by_sage_id(self, sage_id: str, org_id: int) -> Optional[Dict]:
+        """Resolve primary contract_id from sage_id.
+
+        Picks the primary SSA/PPA/ESA contract by prioritising:
+          1. has_amendments = true (most likely the primary agreement)
+          2. Non-OTHER contract_type
+          3. Lowest contract ID (earliest created = usually the primary)
+
+        Args:
+            sage_id: SAGE customer code (e.g. "MOH01")
+            org_id: Organization ID
+
+        Returns:
+            Dict with contract_id, project_id, contract_name or None
+        """
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cursor:
+                    cursor.execute(
+                        """
+                        SELECT c.id as contract_id, p.id as project_id, c.name as contract_name
+                        FROM contract c
+                        JOIN project p ON p.id = c.project_id
+                        LEFT JOIN contract_type ct ON ct.id = c.contract_type_id
+                        WHERE p.sage_id = %(sage_id)s AND c.organization_id = %(org_id)s
+                        ORDER BY
+                            (c.has_amendments = true) DESC NULLS LAST,
+                            (ct.code IS NOT NULL AND ct.code != 'OTHER') DESC NULLS LAST,
+                            c.id ASC
+                        LIMIT 1
+                        """,
+                        {"sage_id": sage_id, "org_id": org_id},
+                    )
+                    row = cursor.fetchone()
+                    return dict(row) if row else None
+        except Exception as e:
+            logger.error(f"Failed to resolve contract for sage_id '{sage_id}': {e}")
             return None
 
     # =========================================================================
