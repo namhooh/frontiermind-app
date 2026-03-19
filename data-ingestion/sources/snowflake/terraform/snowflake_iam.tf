@@ -39,7 +39,7 @@ variable "aws_region" {
 variable "meter_data_bucket" {
   description = "S3 bucket for meter data"
   type        = string
-  default     = "frontiermind-meter-data"
+  default     = "frontiermind-meter"
 }
 
 variable "org_id" {

@@ -535,7 +535,7 @@ The following API endpoints will be implemented in `python-backend/api/reports.p
 ### S3 Structure
 
 ```
-frontiermind-reports/
+frontiermind-report/
 ├── reports/
 │   └── {org_id}/
 │       └── {year}/
@@ -771,7 +771,7 @@ Add to environment variables (`.env` or AWS Secrets Manager):
 
 ```bash
 # S3 Storage
-REPORTS_S3_BUCKET=frontiermind-reports
+REPORTS_S3_BUCKET=frontiermind-report
 REPORTS_PRESIGNED_URL_EXPIRY=300  # 5 minutes for downloads
 
 # AWS SES (Email)
@@ -831,7 +831,7 @@ aws secretsmanager create-secret \
 
 - [ ] Add dependencies to `requirements.txt`
 - [ ] Add WeasyPrint system dependencies to `Dockerfile`
-- [ ] Create S3 bucket `frontiermind-reports` with lifecycle policies
+- [ ] Create S3 bucket `frontiermind-report` with lifecycle policies
 - [ ] Configure SES domain verification and sending limits
 - [ ] Add secrets to AWS Secrets Manager
 - [ ] Run database migration 018 (already done)
@@ -1195,7 +1195,7 @@ Pre-deployment verification steps to ensure the system is production-ready.
 
 - [ ] Add Python dependencies to `requirements.txt`
 - [ ] Add WeasyPrint system dependencies to `Dockerfile`
-- [ ] Create S3 bucket `frontiermind-reports` with:
+- [ ] Create S3 bucket `frontiermind-report` with:
   - [ ] Lifecycle policy: 90 days Standard, then Glacier
   - [ ] CORS configuration for presigned URL downloads
   - [ ] Bucket policy for `railway-backend` IAM user access

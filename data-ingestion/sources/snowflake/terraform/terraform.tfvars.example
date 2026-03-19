@@ -14,8 +14,8 @@
 # AWS region (default: us-east-1)
 aws_region = "us-east-1"
 
-# S3 bucket for meter data (default: frontiermind-meter-data)
-meter_data_bucket = "frontiermind-meter-data"
+# S3 bucket for meter data (default: frontiermind-meter)
+meter_data_bucket = "frontiermind-meter"
 
 # FrontierMind organization ID for this client
 org_id = 42

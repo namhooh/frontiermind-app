@@ -37,7 +37,7 @@ s3_client = boto3.client('s3')
 secrets_client = boto3.client('secretsmanager')
 
 # Environment variables
-BUCKET_NAME = os.environ.get('BUCKET_NAME', 'frontiermind-meter-data')
+BUCKET_NAME = os.environ.get('BUCKET_NAME', 'frontiermind-meter')
 
 
 def get_secret(secret_name: str) -> str:

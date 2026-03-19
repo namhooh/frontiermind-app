@@ -15,7 +15,7 @@ class Config:
 
     # AWS
     aws_region: str = os.getenv("AWS_REGION", "us-east-1")
-    s3_bucket: str = os.getenv("METER_DATA_BUCKET", "frontiermind-meter-data")
+    s3_bucket: str = os.getenv("METER_DATA_BUCKET", "frontiermind-meter")
 
     # Supabase
     supabase_url: str = os.getenv("SUPABASE_URL", "")

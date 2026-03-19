@@ -15,7 +15,7 @@
 set -e
 
 # Configuration
-BUCKET_NAME="frontiermind-meter-data"
+BUCKET_NAME="frontiermind-meter"
 REGION="${AWS_REGION:-us-east-1}"
 LAMBDA_ROLE_NAME="frontiermind-validator-lambda-role"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

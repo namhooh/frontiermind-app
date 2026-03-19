@@ -138,7 +138,7 @@ def _authorize_scope(auth: dict, required_scope: str) -> None:
 MAX_UPLOAD_SIZE = int(os.getenv("MAX_UPLOAD_SIZE_BYTES", str(50 * 1024 * 1024)))
 
 # S3 configuration
-S3_BUCKET = os.getenv("METER_DATA_BUCKET", "frontiermind-meter-data")
+S3_BUCKET = os.getenv("METER_DATA_BUCKET", "frontiermind-meter")
 AWS_REGION = os.getenv("AWS_REGION", "us-east-1")
 
 # Security: Presigned URL expiration times (in seconds)

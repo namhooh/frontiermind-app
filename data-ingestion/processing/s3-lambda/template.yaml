@@ -5,7 +5,7 @@ Description: FrontierMind Meter Data Validator Lambda
 Parameters:
   BucketName:
     Type: String
-    Default: frontiermind-meter-data
+    Default: frontiermind-meter
     Description: S3 bucket name for meter data (must already exist)
 
   Environment:

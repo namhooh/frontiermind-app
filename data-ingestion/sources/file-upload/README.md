@@ -247,12 +247,12 @@ For larger datasets, split into multiple files.
 Files uploaded via presigned URL follow this path structure:
 
 ```
-s3://frontiermind-meter-data/raw/{source}/{org_id}/{date}/{file_id}_{filename}
+s3://frontiermind-meter/raw/{source}/{org_id}/{date}/{file_id}_{filename}
 ```
 
 Example:
 ```
-s3://frontiermind-meter-data/raw/snowflake/1/2026-01-17/abc123_readings.parquet
+s3://frontiermind-meter/raw/snowflake/1/2026-01-17/abc123_readings.parquet
 ```
 
 ---

@@ -33,11 +33,11 @@
         },
         {
           "name": "METER_DATA_BUCKET",
-          "value": "frontiermind-meter-data"
+          "value": "frontiermind-meter"
         },
         {
           "name": "REPORTS_S3_BUCKET",
-          "value": "frontiermind-reports"
+          "value": "frontiermind-report"
         },
         {
           "name": "PORT",

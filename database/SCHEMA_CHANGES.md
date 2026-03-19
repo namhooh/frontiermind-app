@@ -201,7 +201,7 @@ This document tracks major schema versions and their associated changes.
 - Helper functions: `start_ingestion_log(p_data_source_id)`, `complete_ingestion_log_success()`, `complete_ingestion_log_quarantine()`, `get_ingestion_stats()`
 
 **Infrastructure:**
-- S3 bucket: `frontiermind-meter-data`
+- S3 bucket: `frontiermind-meter`
 - Validator Lambda for S3-triggered ingestion
 - GitHub Actions for scheduled fetchers (future phases)
 
@@ -2269,7 +2269,7 @@ per-meter performance detail, and restructured frontend tabs.
 
 **Infrastructure Context:**
 - AWS SES domain: `mail.frontiermind.co` (verified via DKIM)
-- Inbound email: MX → SES → S3 (`frontiermind-email-ingest`) + SNS notification
+- Inbound email: MX → SES → S3 (`frontiermind-email`) + SNS notification
 - Outbound sender: `SES_SENDER_EMAIL` secret updated to `cbe@mail.frontiermind.co`
 - Task definition env vars: `SES_INGEST_BUCKET`, `SES_SENDER_DOMAIN`
 

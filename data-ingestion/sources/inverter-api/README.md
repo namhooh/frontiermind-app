@@ -110,7 +110,7 @@ The `BaseFetcher` class provides:
 | `SUPABASE_SERVICE_KEY` | Supabase service role key | Yes |
 | `ENCRYPTION_KEY` | Fernet key for credential encryption | Yes |
 | `AWS_REGION` | AWS region for S3 | Yes |
-| `METER_DATA_BUCKET` | S3 bucket name | No (default: frontiermind-meter-data) |
+| `METER_DATA_BUCKET` | S3 bucket name | No (default: frontiermind-meter) |
 | `ENPHASE_CLIENT_ID` | Enphase OAuth client ID | For Enphase |
 | `ENPHASE_CLIENT_SECRET` | Enphase OAuth client secret | For Enphase |
 | `SMA_CLIENT_ID` | SMA OAuth client ID | For SMA |

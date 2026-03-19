@@ -39,7 +39,7 @@ class ReportStorage:
     """
 
     # Default configuration
-    DEFAULT_BUCKET = "frontiermind-reports"
+    DEFAULT_BUCKET = "frontiermind-report"
     DEFAULT_REGION = "us-east-1"
     DEFAULT_PRESIGNED_EXPIRY = 300  # 5 minutes
 
@@ -379,7 +379,7 @@ class LocalStorage:
         """
         self._base_path = base_path or os.getenv(
             'REPORTS_LOCAL_PATH',
-            '/tmp/frontiermind-reports'
+            '/tmp/frontiermind-report'
         )
         os.makedirs(self._base_path, exist_ok=True)
 

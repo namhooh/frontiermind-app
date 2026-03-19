@@ -45,7 +45,7 @@ Before starting, obtain the following from your FrontierMind contact:
 | Organization ID | Your FrontierMind org ID | `42` |
 | IAM Role ARN | FrontierMind's cross-account role | `arn:aws:iam::123456789012:role/frontiermind-snowflake-access` |
 | External ID | Unique ID for your integration | `fm_org_42_snowflake` |
-| S3 Bucket | Target bucket name | `frontiermind-meter-data` |
+| S3 Bucket | Target bucket name | `frontiermind-meter` |
 | S3 Path Prefix | Your designated upload path | `raw/snowflake/42/` |
 
 ---
@@ -61,7 +61,7 @@ CREATE OR REPLACE STORAGE INTEGRATION frontiermind_integration
   STORAGE_PROVIDER = 'S3'
   ENABLED = TRUE
   STORAGE_AWS_ROLE_ARN = 'arn:aws:iam::FRONTIERMIND_ACCOUNT:role/frontiermind-snowflake-access'
-  STORAGE_ALLOWED_LOCATIONS = ('s3://frontiermind-meter-data/raw/snowflake/YOUR_ORG_ID/');
+  STORAGE_ALLOWED_LOCATIONS = ('s3://frontiermind-meter/raw/snowflake/YOUR_ORG_ID/');
 
 -- Grant usage to the role that will run COPY INTO
 GRANT USAGE ON INTEGRATION frontiermind_integration TO ROLE DATA_ENGINEER;
@@ -83,7 +83,7 @@ Create a stage pointing to your FrontierMind S3 path:
 
 ```sql
 CREATE OR REPLACE STAGE frontiermind_stage
-  URL = 's3://frontiermind-meter-data/raw/snowflake/YOUR_ORG_ID/'
+  URL = 's3://frontiermind-meter/raw/snowflake/YOUR_ORG_ID/'
   STORAGE_INTEGRATION = frontiermind_integration
   FILE_FORMAT = (TYPE = PARQUET);
 ```

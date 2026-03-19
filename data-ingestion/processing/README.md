@@ -90,7 +90,7 @@ After deploying the Lambda, add the S3 trigger:
 
 ```bash
 aws s3api put-bucket-notification-configuration \
-  --bucket frontiermind-meter-data \
+  --bucket frontiermind-meter \
   --notification-configuration '{
     "LambdaFunctionConfigurations": [{
       "LambdaFunctionArn": "arn:aws:lambda:us-east-1:ACCOUNT_ID:function:frontiermind-validator-production",
@@ -107,7 +107,7 @@ aws s3api put-bucket-notification-configuration \
 ## S3 Bucket Structure
 
 ```
-s3://frontiermind-meter-data/
+s3://frontiermind-meter/
 ├── raw/                          # Landing zone (source data)
 │   ├── solaredge/{org_id}/{date}/
 │   ├── enphase/{org_id}/{date}/

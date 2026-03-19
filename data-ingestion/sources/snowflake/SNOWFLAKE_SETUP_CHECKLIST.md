@@ -12,7 +12,7 @@ Before diving into the steps, here's how the trust relationship between Frontier
 
 | Party | What They Have |
 |-------|----------------|
-| **FrontierMind** | AWS account with S3 bucket (`frontiermind-meter-data`) and IAM roles |
+| **FrontierMind** | AWS account with S3 bucket (`frontiermind-meter`) and IAM roles |
 | **Client** | Snowflake account with data to export |
 | **Snowflake** | Managed AWS infrastructure that executes COPY INTO commands |
 
@@ -98,7 +98,7 @@ Send the following to the client:
 | Organization ID | `___` |
 | IAM Role ARN | `arn:aws:iam::___:role/frontiermind-snowflake-org-___` |
 | External ID | `fm_org_____snowflake` |
-| S3 Bucket | `frontiermind-meter-data` |
+| S3 Bucket | `frontiermind-meter` |
 | S3 Path Prefix | `raw/snowflake/___/` |
 | API Endpoint | `https://api.frontiermind.co` |
 | API Key | `___` |
@@ -149,7 +149,7 @@ After receiving Snowflake IAM details:
 
 - [ ] Check S3 for file arrival (FrontierMind)
   ```bash
-  aws s3 ls s3://frontiermind-meter-data/raw/snowflake/${ORG_ID}/ --recursive
+  aws s3 ls s3://frontiermind-meter/raw/snowflake/${ORG_ID}/ --recursive
   ```
 
 - [ ] Check Lambda CloudWatch logs (FrontierMind)
@@ -244,8 +244,8 @@ If integration needs to be disabled:
 terraform destroy -target=aws_iam_role.snowflake_access_org_${ORG_ID}
 
 # Archive existing data (optional)
-aws s3 mv s3://frontiermind-meter-data/raw/snowflake/${ORG_ID}/ \
-          s3://frontiermind-meter-data/archive/snowflake/${ORG_ID}/ --recursive
+aws s3 mv s3://frontiermind-meter/raw/snowflake/${ORG_ID}/ \
+          s3://frontiermind-meter/archive/snowflake/${ORG_ID}/ --recursive
 ```
 
 ### Client

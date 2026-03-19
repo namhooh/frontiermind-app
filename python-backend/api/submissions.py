@@ -435,7 +435,7 @@ def _upload_to_s3(file_bytes: bytes, s3_key: str, content_type: Optional[str] = 
             detail={"success": False, "message": "S3 storage is not available"},
         )
 
-    bucket = os.getenv("MRP_S3_BUCKET", "frontiermind-mrp-uploads")
+    bucket = os.getenv("MRP_S3_BUCKET", "frontiermind-mrp")
     region = os.getenv("AWS_REGION", "us-east-1")
 
     s3_client = boto3.client("s3", region_name=region)

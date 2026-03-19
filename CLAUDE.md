@@ -184,7 +184,7 @@ restartPolicyMaxRetries = 3
 | Resource | Value |
 |----------|-------|
 | **Region** | us-east-1 |
-| **S3 Buckets** | `frontiermind-meter-data`, `frontiermind-reports`, `frontiermind-email`, `frontiermind-mrp-uploads` |
+| **S3 Buckets** | `frontiermind-meter`, `frontiermind-report`, `frontiermind-email`, `frontiermind-mrp` |
 | **SES Domain** | `mail.frontiermind.co` |
 | **SNS Topic** | `frontiermind-email-ingest` |
 | **IAM User** | `railway-backend` (programmatic access for S3 + SES) |

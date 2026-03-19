@@ -397,8 +397,8 @@ else
                 "s3:ListBucket"
             ],
             "Resource": [
-                "arn:aws:s3:::frontiermind-meter-data",
-                "arn:aws:s3:::frontiermind-meter-data/*"
+                "arn:aws:s3:::frontiermind-meter",
+                "arn:aws:s3:::frontiermind-meter/*"
             ]
         }
     ]
