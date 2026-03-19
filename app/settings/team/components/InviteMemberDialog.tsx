@@ -25,7 +25,7 @@ interface InviteMemberDialogProps {
 
 const ROLE_OPTIONS = [
   { value: 'admin', label: 'Admin', description: 'Full access including user management' },
-  { value: 'approver', label: 'Approver', description: 'Can edit and approve invoices/MRP' },
+  { value: 'approver', label: 'Approver', description: 'Can edit and approve' },
   { value: 'editor', label: 'Editor', description: 'Can view and edit data' },
   { value: 'viewer', label: 'Viewer', description: 'Read-only access' },
 ] as const

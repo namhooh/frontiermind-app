@@ -229,24 +229,14 @@ class JWTOnly:
         request: Request,
         credentials: Optional[HTTPAuthorizationCredentials] = Security(_bearer_scheme),
     ) -> dict:
-        # Dev auth bypass
+        # Dev auth bypass — match SupabaseAuth: skip JWT and DB lookup entirely
         if os.getenv("DEV_AUTH_BYPASS") == "true" and os.getenv("ENVIRONMENT") != "production":
-            user_id = os.getenv("DEV_USER_ID", "dev-user")
-            # Look up org from role table
-            try:
-                with get_db_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            "SELECT organization_id, role_type FROM role WHERE user_id = %s AND is_active = true LIMIT 1",
-                            (user_id,),
-                        )
-                        row = cur.fetchone()
-            except Exception as e:
-                logger.error(f"DB error in JWTOnly dev bypass: {e}")
-                raise HTTPException(status_code=503, detail="Database unavailable")
-            if not row:
-                raise HTTPException(status_code=403, detail="No active membership found")
-            return {"user_id": user_id, "organization_id": row["organization_id"], "role": row["role_type"]}
+            org_id_header = request.headers.get("X-Organization-ID")
+            return {
+                "user_id": os.getenv("DEV_USER_ID", "dev-user"),
+                "organization_id": int(org_id_header) if org_id_header else 1,
+                "role": "admin",
+            }
 
         # Demo token
         demo_token = os.getenv("DEMO_ACCESS_TOKEN")

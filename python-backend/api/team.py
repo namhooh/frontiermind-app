@@ -106,6 +106,7 @@ async def _generate_invite_link(email: str, full_name: str) -> dict:
                 "type": "invite",
                 "email": email,
                 "data": {"full_name": full_name},
+                "redirect_to": os.getenv("FRONTEND_URL", "http://localhost:3000") + "/auth/accept-invite",
             },
         )
         if resp.status_code >= 400:
@@ -181,17 +182,39 @@ async def get_me(
 
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            cur.execute(
-                """
-                SELECT id, user_id, organization_id, role_type, name, email,
-                       department, job_title, member_status AS status, is_active,
-                       invited_by, invited_at, accepted_at
-                FROM role
-                WHERE user_id = %s AND organization_id = %s AND is_active = true
-                LIMIT 1
-                """,
-                (user_id, org_id),
-            )
+            # Dev bypass uses a fake user_id that isn't a valid UUID;
+            # fall back to querying by org only
+            try:
+                import uuid as _uuid
+                _uuid.UUID(user_id)
+                is_valid_uuid = True
+            except (ValueError, AttributeError):
+                is_valid_uuid = False
+
+            if is_valid_uuid:
+                cur.execute(
+                    """
+                    SELECT id, user_id, organization_id, role_type, name, email,
+                           department, job_title, member_status AS status, is_active,
+                           invited_by, invited_at, accepted_at
+                    FROM role
+                    WHERE user_id = %s AND organization_id = %s AND is_active = true
+                    LIMIT 1
+                    """,
+                    (user_id, org_id),
+                )
+            else:
+                cur.execute(
+                    """
+                    SELECT id, user_id, organization_id, role_type, name, email,
+                           department, job_title, member_status AS status, is_active,
+                           invited_by, invited_at, accepted_at
+                    FROM role
+                    WHERE organization_id = %s AND is_active = true
+                    LIMIT 1
+                    """,
+                    (org_id,),
+                )
             row = cur.fetchone()
 
     if not row:
@@ -553,3 +576,47 @@ async def reactivate_member(
     )
 
     return TeamMemberResponse(**_row_to_member(row))
+
+
+@router.post("/accept-invite", summary="Accept an invite (called by invited user)")
+@limit_admin
+async def accept_invite(
+    request: Request,
+    background_tasks: BackgroundTasks,
+    auth: dict = Depends(require_jwt_only),
+) -> dict:
+    """Mark the current user's invite as accepted. Updates member_status and is_active."""
+    user_id = auth["user_id"]
+    org_id = auth["organization_id"]
+
+    now = datetime.now(timezone.utc)
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                UPDATE role
+                SET member_status = 'active', is_active = true, accepted_at = %s, updated_at = NOW()
+                WHERE user_id = %s AND organization_id = %s AND member_status = 'invited'
+                RETURNING id, email
+                """,
+                (now, user_id, org_id),
+            )
+            row = cur.fetchone()
+            conn.commit()
+
+    if not row:
+        return {"success": True, "message": "Already active or not found"}
+
+    background_tasks.add_task(
+        audit_service.log_event,
+        AuditEvent(
+            action="INVITE_ACCEPTED",
+            resource_type="role",
+            resource_id=str(row["id"]),
+            resource_name=row.get("email"),
+            organization_id=org_id,
+            user_id=user_id,
+        ),
+    )
+
+    return {"success": True, "message": "Invite accepted"}
