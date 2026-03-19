@@ -1,16 +1,16 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 /**
  * Accept Invite Page
  *
  * Handles the Supabase invite link flow:
- * 1. Signs out any existing session (admin who sent the invite)
- * 2. Processes the invite token from the URL hash
- * 3. Prompts the new user to set a password
- * 4. Updates member_status from 'invited' to 'active' via backend
+ * 1. Supabase client auto-processes the invite token from the URL hash
+ *    and establishes a session for the invited user (replacing any existing session)
+ * 2. Prompts the new user to set a password
+ * 3. Updates member_status from 'invited' to 'active' via backend
  */
 export default function AcceptInvitePage() {
   const [password, setPassword] = useState('')
@@ -20,51 +20,50 @@ export default function AcceptInvitePage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [userEmail, setUserEmail] = useState<string | null>(null)
+  const readyRef = useRef(false)
 
   const supabase = createClient()
 
   useEffect(() => {
-    async function processInvite() {
-      try {
-        // Sign out any existing session first
-        await supabase.auth.signOut()
-
-        // Supabase invite links use PKCE flow — the token is exchanged
-        // automatically when the page loads via the Supabase client.
-        // We need to listen for the auth state change.
-        const { data: { subscription } } = supabase.auth.onAuthStateChange(
-          async (event, session) => {
-            if (session?.user) {
-              setUserEmail(session.user.email ?? null)
-              setLoading(false)
-            }
-          }
-        )
-
-        // Also check if session already exists (token already exchanged)
-        const { data: { session } } = await supabase.auth.getSession()
+    // Listen for auth state changes — Supabase client will auto-process
+    // the invite token from the URL hash (#access_token=...&type=invite)
+    // and fire a SIGNED_IN or TOKEN_REFRESHED event with the new session.
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(
+      (event, session) => {
+        if (readyRef.current) return
         if (session?.user) {
+          readyRef.current = true
           setUserEmail(session.user.email ?? null)
           setLoading(false)
         }
+      }
+    )
 
-        // If no session after a delay, the token may be invalid/expired
-        setTimeout(() => {
-          setLoading((prev) => {
-            if (prev) {
-              setError('Invite link is invalid or expired. Please ask your admin to send a new invite.')
-            }
-            return false
-          })
-        }, 5000)
-
-        return () => subscription.unsubscribe()
-      } catch {
-        setError('Failed to process invite link')
+    // Also check if the token was already exchanged by the time this runs
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      if (readyRef.current) return
+      // Only accept if this looks like the invited user's session
+      // (i.e. there's a hash fragment in the URL indicating a fresh token exchange)
+      const hash = window.location.hash
+      if (session?.user && (hash.includes('access_token') || hash.includes('type=invite'))) {
+        readyRef.current = true
+        setUserEmail(session.user.email ?? null)
         setLoading(false)
       }
+    })
+
+    // Timeout: if no session after 8 seconds, the link is bad
+    const timer = setTimeout(() => {
+      if (!readyRef.current) {
+        setError('Invite link is invalid or expired. Please ask your admin to send a new invite.')
+        setLoading(false)
+      }
+    }, 8000)
+
+    return () => {
+      subscription.unsubscribe()
+      clearTimeout(timer)
     }
-    processInvite()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -106,7 +105,7 @@ export default function AcceptInvitePage() {
           })
         }
       } catch {
-        // Non-critical — status update can be done manually
+        // Non-critical — admin can manually update status
       }
 
       setSuccess(true)
