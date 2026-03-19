@@ -129,13 +129,13 @@ class EmailIngestService:
 
         # If no explicit S3 action, construct path from notification content
         if not s3_action:
-            bucket = os.getenv("EMAIL_INGEST_S3_BUCKET", "frontiermind-email-ingest")
+            bucket = os.getenv("EMAIL_INGEST_S3_BUCKET", "frontiermind-email")
             message_id = mail_info.get("messageId", "")
             if not message_id:
                 raise ValueError("No messageId in SES notification")
             s3_key = message_id
         else:
-            bucket = s3_action.get("bucketName", os.getenv("EMAIL_INGEST_S3_BUCKET", "frontiermind-email-ingest"))
+            bucket = s3_action.get("bucketName", os.getenv("EMAIL_INGEST_S3_BUCKET", "frontiermind-email"))
             s3_key = s3_action.get("objectKey", "")
 
         if not s3_key:
@@ -502,7 +502,7 @@ class EmailIngestService:
         )
 
         # Upload to S3
-        bucket = os.getenv("EMAIL_INGEST_S3_BUCKET", "frontiermind-email-ingest")
+        bucket = os.getenv("EMAIL_INGEST_S3_BUCKET", "frontiermind-email")
         self._upload_to_s3(file_bytes, bucket, s3_key, part.get("content_type"))
 
         att_id = self.repo.create_inbound_attachment({

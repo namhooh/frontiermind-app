@@ -172,7 +172,7 @@ class AttachmentProcessingService:
             bucket = parts[0]
             key = parts[1] if len(parts) > 1 else ""
         else:
-            bucket = os.getenv("EMAIL_INGEST_S3_BUCKET", "frontiermind-email-ingest")
+            bucket = os.getenv("EMAIL_INGEST_S3_BUCKET", "frontiermind-email")
             key = s3_path
 
         s3 = boto3.client("s3", region_name=os.getenv("AWS_REGION", "us-east-1"))

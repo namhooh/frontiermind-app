@@ -145,7 +145,7 @@ No DNS changes needed when adding new organizations — SES uses a wildcard rece
 2. **Add DNS records** (MX, SPF, DKIM, DMARC) via domain registrar
 3. **Create receipt rule set** with a single rule:
    - Recipients: `*@mail.frontiermind.co` (catch-all)
-   - Action 1: Store to S3 bucket `frontiermind-email-ingest`
+   - Action 1: Store to S3 bucket `frontiermind-email`
    - Action 2: SNS notification to `frontiermind-email-ingest` topic
 4. **Request production access** (exit SES sandbox) for outbound sending
 5. **Create SNS subscription** → HTTPS endpoint on Railway backend
@@ -162,7 +162,7 @@ No DNS changes needed when adding new organizations — SES uses a wildcard rece
         │
         ▼
 2. SES receives → Receipt Rule triggers:
-   a. Store raw MIME to S3: s3://frontiermind-email-ingest/{message-id}
+   a. Store raw MIME to S3: s3://frontiermind-email/{message-id}
    b. Publish SNS notification with message-id + recipients
         │
         ▼
@@ -220,7 +220,7 @@ Every inbound email provides a complete audit record:
 | Subject context | `Subject` header | `ingest_email.subject` |
 | Body context | Email body (text/plain) | `ingest_email.body_text` |
 | Original file | Email attachment | S3 `ingest/{org_id}/attachments/` |
-| Raw email | Full MIME | S3 `frontiermind-email-ingest/{message-id}` |
+| Raw email | Full MIME | S3 `frontiermind-email/{message-id}` |
 | Processing result | Pipeline output | `ingest_email.status`, `ingest_email.processing_result` |
 
 If a counterparty disputes a parsed value, the raw MIME in S3 is the immutable source of truth.
@@ -581,7 +581,7 @@ Six-tab dashboard plus compose action:
 | `SES_SENDER_DOMAIN` | Yes | Verified SES sender domain (`mail.frontiermind.co`) |
 | `SES_SENDER_NAME` | No | Display name (default: "FrontierMind") |
 | `SES_CONFIGURATION_SET` | No | SES configuration set for tracking |
-| `SES_INGEST_BUCKET` | Yes | S3 bucket for raw inbound emails (`frontiermind-email-ingest`) |
+| `SES_INGEST_BUCKET` | Yes | S3 bucket for raw inbound emails (`frontiermind-email`) |
 | `SES_INGEST_SNS_TOPIC_ARN` | Yes | SNS topic ARN for inbound email notifications |
 | `APP_BASE_URL` | Yes | Base URL for submission links (set in Railway env vars; default: `http://localhost:3000`) |
 
@@ -602,7 +602,7 @@ Required permissions (attached via `FrontierMind_BackendAccess` policy):
       "Sid": "S3IngestRead",
       "Effect": "Allow",
       "Action": ["s3:GetObject", "s3:PutObject"],
-      "Resource": "arn:aws:s3:::frontiermind-email-ingest/*"
+      "Resource": "arn:aws:s3:::frontiermind-email/*"
     },
     {
       "Sid": "SNSConfirm",
@@ -834,7 +834,7 @@ POST /api/inbound-email/attachments/{attachment_id}/process — Trigger extracti
 **SNS subscription (one-time after deploy):**
 ```bash
 aws sns subscribe \
-  --topic-arn arn:aws:sns:us-east-1:724772070642:frontiermind-email-ingest \
+  --topic-arn arn:aws:sns:us-east-1:876762733200:frontiermind-email-ingest \
   --protocol https \
   --endpoint https://api.frontiermind.co/api/inbound-email/webhook
 ```

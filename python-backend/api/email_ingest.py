@@ -393,7 +393,7 @@ async def get_attachment_download(
             bucket = parts[0]
             key = parts[1] if len(parts) > 1 else ""
         else:
-            bucket = os.getenv("EMAIL_INGEST_S3_BUCKET", "frontiermind-email-ingest")
+            bucket = os.getenv("EMAIL_INGEST_S3_BUCKET", "frontiermind-email")
             key = s3_path
 
         try:

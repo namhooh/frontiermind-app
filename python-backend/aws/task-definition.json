@@ -53,7 +53,7 @@
         },
         {
           "name": "SES_INGEST_BUCKET",
-          "value": "frontiermind-email-ingest"
+          "value": "frontiermind-email"
         },
         {
           "name": "SES_SENDER_DOMAIN",
