@@ -118,6 +118,11 @@ async def sns_webhook(request: Request):
 
         return JSONResponse(content={"success": True, **result})
 
+    except ValueError as e:
+        # Non-retryable errors (invalid JSON, missing fields) — return 200 to stop SNS retries
+        logger.warning(f"SNS webhook non-retryable error: {e}")
+        return JSONResponse(content={"success": False, "message": str(e)})
+
     except Exception as e:
         logger.error(f"SNS webhook processing failed: {e}", exc_info=True)
         # Return 500 so SNS retries

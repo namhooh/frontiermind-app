@@ -141,6 +141,11 @@ class EmailIngestService:
         if not s3_key:
             raise ValueError("Cannot determine S3 key from SES notification")
 
+        # Skip SES setup test notifications (same filter as _handle_s3_event)
+        if s3_key == "AMAZON_SES_SETUP_NOTIFICATION":
+            logger.debug(f"Skipping SES setup notification in bucket {bucket}")
+            return {"action": "skipped", "reason": "SES setup notification"}
+
         s3_raw_path = f"s3://{bucket}/{s3_key}"
         return self.process_inbound_email(s3_raw_path, bucket, s3_key)
 
