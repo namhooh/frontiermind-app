@@ -177,6 +177,24 @@ restartPolicyMaxRetries = 3
 
 **Environment variables** are set in the Railway dashboard (not in code). All secrets (API keys, DB URL, AWS credentials) are Railway env vars.
 
+**Key Railway env vars:**
+
+| Variable | Value | Purpose |
+|----------|-------|---------|
+| `DATABASE_URL` | `postgresql://...pooler.supabase.com:6543/postgres` | Supabase connection (Transaction Pooler) |
+| `AWS_ACCESS_KEY_ID` | *(secret)* | IAM credentials for `railway-backend` user |
+| `AWS_SECRET_ACCESS_KEY` | *(secret)* | IAM credentials for `railway-backend` user |
+| `AWS_REGION` | `us-east-1` | AWS region |
+| `METER_DATA_BUCKET` | `frontiermind-meter` | S3 bucket for meter data |
+| `REPORTS_S3_BUCKET` | `frontiermind-report` | S3 bucket for generated reports |
+| `EMAIL_INGEST_S3_BUCKET` | `frontiermind-email` | S3 bucket for inbound email MIME |
+| `MRP_S3_BUCKET` | `frontiermind-mrp` | S3 bucket for MRP uploads |
+| `SES_SENDER_EMAIL` | `cbe@mail.frontiermind.co` | Outbound email sender address |
+| `SES_SENDER_DOMAIN` | `mail.frontiermind.co` | SES verified domain |
+| `OAUTH_STATE_SECRET` | *(secret)* | HMAC signing key for OAuth state |
+| `ENCRYPTION_KEY` | *(secret)* | AES-256-GCM key for credential encryption |
+| `ENVIRONMENT` | `production` | Guards dev-only features (e.g. `DEV_AUTH_BYPASS`) |
+
 **View logs:** Railway dashboard → Deployments → select deployment → Logs
 
 ### AWS Resources (S3 / SES / SNS)
