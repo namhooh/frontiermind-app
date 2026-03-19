@@ -19,6 +19,7 @@ from pydantic import BaseModel
 from db.database import init_connection_pool
 from db.ingest_repository import IngestRepository
 from middleware.supabase_auth import require_supabase_auth
+from middleware.authorization import require_approve_access
 from models.email_ingest import (
     ApproveMessageResponse,
     AttachmentProcessingResponse,
@@ -227,6 +228,7 @@ async def approve_message(
     body: ReviewAction = ReviewAction(),
     auth: dict = Depends(require_supabase_auth),
 ) -> ApproveMessageResponse:
+    require_approve_access(auth)
     require_repo()
     org_id = validate_org_access(request, auth)
 

@@ -49,7 +49,7 @@ export async function updateSession(request: NextRequest) {
 
   // Protect PAGE routes only (not API routes - they handle their own auth)
   // NOTE: '/' temporarily removed for workflow testing
-  const protectedPaths = ['/test-queries', '/dashboard']
+  const protectedPaths = ['/projects', '/notifications', '/client-setup', '/contract-workflow', '/pii-redaction', '/test-queries', '/dashboard', '/settings']
   const isProtected = protectedPaths.some(path =>
     pathname === path ||
     pathname.startsWith(path + '/')

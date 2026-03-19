@@ -54,6 +54,7 @@ from api.performance import router as performance_router
 from api.portfolio import router as portfolio_router
 from api.email_ingest import router as email_ingest_router
 from api.export import router as export_router
+from api.team import router as team_router
 
 # Import email notification scheduler
 from services.email import scheduler as email_scheduler
@@ -139,6 +140,7 @@ app.include_router(performance_router)
 app.include_router(portfolio_router)
 app.include_router(email_ingest_router)
 app.include_router(export_router)
+app.include_router(team_router)
 
 
 @app.get("/", response_model=Dict[str, str])

@@ -18,6 +18,8 @@ from psycopg2.extras import Json
 
 from db.database import get_db_connection, init_connection_pool
 from middleware.api_key_auth import require_api_key
+from middleware.supabase_auth import require_supabase_auth
+from middleware.authorization import require_write_access, require_approve_access
 from middleware.rate_limiter import limiter
 from models.mrp import (
     AggregateMRPRequest,
@@ -228,7 +230,7 @@ def _reaggregate_annual(cur, project_id: int, org_id: int, operating_year: int) 
     "/projects/{project_id}/mrp-refresh",
     summary="Refresh stale annual MRP observations",
 )
-def refresh_mrp(request: Request, project_id: int):
+def refresh_mrp(request: Request, project_id: int, auth: dict = Depends(require_supabase_auth)):
     """
     Re-aggregate annual MRP observations that are stale.
 
@@ -236,7 +238,8 @@ def refresh_mrp(request: Request, project_id: int):
     observations have been updated more recently than the annual itself.
     Called on page load to ensure the dashboard always shows fresh data.
     """
-    org_id = _get_org_id(request)
+    require_write_access(auth)
+    org_id = auth["organization_id"]
     _validate_project_ownership(project_id, org_id)
 
     refreshed = []
@@ -294,9 +297,10 @@ def list_mrp_observations(
     operating_year: Optional[int] = Query(None, ge=0, description="Filter by operating year (0 = baseline/pre-COD)"),
     verification_status: Optional[str] = Query(None, description="Filter by verification status"),
     observation_type: Optional[str] = Query("monthly", description="monthly or annual"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> MRPObservationListResponse:
     """List monthly or annual MRP observations for a project."""
-    org_id = _get_org_id(request)
+    org_id = auth["organization_id"]
     _validate_project_ownership(project_id, org_id)
 
     # Build query with dynamic filters
@@ -379,13 +383,15 @@ async def aggregate_mrp(
     request: Request,
     project_id: int,
     body: AggregateMRPRequest,
+    auth: dict = Depends(require_supabase_auth),
 ) -> AggregateMRPResponse:
     """
     Aggregate monthly observations into a single annual MRP value.
 
     Weighted average: SUM(total_variable_charges) / SUM(total_kwh_invoiced)
     """
-    org_id = _get_org_id(request)
+    require_write_access(auth)
+    org_id = auth["organization_id"]
     _validate_project_ownership(project_id, org_id)
 
     try:
@@ -569,9 +575,11 @@ async def delete_observation(
     request: Request,
     project_id: int,
     observation_id: int,
+    auth: dict = Depends(require_supabase_auth),
 ):
     """Delete an MRP observation. Only disputed observations may be deleted."""
-    org_id = _get_org_id(request)
+    require_write_access(auth)
+    org_id = auth["organization_id"]
     _validate_project_ownership(project_id, org_id)
 
     try:
@@ -641,9 +649,11 @@ async def verify_observation(
     project_id: int,
     observation_id: int,
     body: VerifyObservationRequest,
+    auth: dict = Depends(require_supabase_auth),
 ) -> VerifyObservationResponse:
     """Update verification status of an MRP observation."""
-    org_id = _get_org_id(request)
+    require_approve_access(auth)
+    org_id = auth["organization_id"]
     _validate_project_ownership(project_id, org_id)
 
     try:
@@ -744,12 +754,14 @@ async def admin_mrp_upload(
     project_id: int,
     file: UploadFile = File(...),
     billing_month: str = Form(..., description="Billing month in YYYY-MM format"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> AdminUploadResponse:
     """
     Admin upload endpoint — same pipeline as token upload but authenticated
     via X-Organization-ID header (no submission token required).
     """
-    org_id = _get_org_id(request)
+    require_write_access(auth)
+    org_id = auth["organization_id"]
     _validate_project_ownership(project_id, org_id)
 
     # 1. Validate billing_month format
@@ -882,6 +894,7 @@ async def manual_mrp_entry(
     request: Request,
     project_id: int,
     body: ManualMRPBatchRequest,
+    auth: dict = Depends(require_supabase_auth),
 ) -> ManualMRPBatchResponse:
     """
     Insert manually-sourced MRP tariff rates for a project.
@@ -890,9 +903,10 @@ async def manual_mrp_entry(
     and total_kwh_invoiced are left NULL. Supports pre-COD baseline data
     when is_baseline=True (sets operating_year=0).
     """
+    require_write_access(auth)
     from calendar import monthrange
 
-    org_id = _get_org_id(request)
+    org_id = auth["organization_id"]
     _validate_project_ownership(project_id, org_id)
 
     # Resolve currency_id

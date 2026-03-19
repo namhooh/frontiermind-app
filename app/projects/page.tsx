@@ -9,6 +9,7 @@ import { IS_DEMO } from '@/lib/demoMode'
 import { toast } from 'sonner'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/app/components/ui/tabs'
 import { adminClient, type ProjectDashboardResponse, type MRPObservation, type SubmissionTokenItem } from '@/lib/api/adminClient'
+import { createClient } from '@/lib/supabase/client'
 import { fmtNum } from './utils/formatters'
 import { toOpts } from './utils/constants'
 import { createClientResourceCache } from './utils/clientResourceCache'
@@ -100,6 +101,34 @@ function ProjectsPageContent() {
   const [activeTab, setActiveTab] = useState<DashboardTabValue>('overview')
   const [mountedTabs, setMountedTabs] = useState<Set<DashboardTabValue>>(() => new Set(['overview']))
   const projectRequestRef = useRef(0)
+
+  // Resolve org from Supabase session and set on adminClient
+  useEffect(() => {
+    async function resolveOrg() {
+      if (IS_DEMO) {
+        adminClient.setOrganizationId(1)
+        return
+      }
+      try {
+        const supabase = createClient()
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data } = await supabase
+            .from('role')
+            .select('organization_id')
+            .eq('user_id', user.id)
+            .eq('is_active', true)
+            .limit(1)
+            .single()
+          if (data) adminClient.setOrganizationId(data.organization_id)
+        }
+      } catch {
+        // Fallback: org 1 for dev
+        if (process.env.NODE_ENV === 'development') adminClient.setOrganizationId(1)
+      }
+    }
+    resolveOrg()
+  }, [])
 
   const resetTabState = useCallback(() => {
     setActiveTab('overview')

@@ -87,7 +87,7 @@ export interface UserRole {
   id: number
   user_id: string
   organization_id: number
-  role_type: 'admin' | 'staff'
+  role_type: 'admin' | 'approver' | 'editor' | 'viewer'
   is_active: boolean
   organization_name?: string
 }
@@ -110,7 +110,7 @@ export async function getUserRole(userId: string): Promise<UserRole | null> {
 }
 
 export interface RequireAuthOptions {
-  requiredRole?: 'admin' | 'staff'
+  requiredRole?: 'admin' | 'approver' | 'editor' | 'viewer'
   requireMFA?: boolean  // Override global MFA requirement for specific routes
 }
 
@@ -118,7 +118,7 @@ export interface RequireAuthOptions {
  * Require authentication with optional role and MFA verification.
  *
  * @param options - Authentication options
- * @param options.requiredRole - Required role ('admin' | 'staff')
+ * @param options.requiredRole - Required role ('admin' | 'approver' | 'editor' | 'viewer')
  * @param options.requireMFA - Override global MFA requirement (default: uses SECURITY_CONFIG.REQUIRE_MFA)
  *
  * @throws Error('Unauthorized') - User not authenticated
@@ -128,7 +128,7 @@ export interface RequireAuthOptions {
  * @throws Error('Insufficient permissions') - User lacks required role
  */
 export async function requireAuth(
-  options?: RequireAuthOptions | 'admin' | 'staff'
+  options?: RequireAuthOptions | 'admin' | 'approver' | 'editor' | 'viewer'
 ): Promise<{ user: AuthenticatedUser; role: UserRole }> {
   // Handle legacy single-argument format
   const opts: RequireAuthOptions = typeof options === 'string'

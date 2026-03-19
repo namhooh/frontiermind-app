@@ -150,7 +150,10 @@ function NotificationsPageContent() {
           .eq('is_active', true)
           .limit(1)
           .single()
-        if (data) setOrganizationId(data.organization_id)
+        if (data) {
+          setOrganizationId(data.organization_id)
+          adminClient.setOrganizationId(data.organization_id)
+        }
       }
     }
     loadOrg()

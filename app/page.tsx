@@ -64,6 +64,18 @@ export default function LandingPage() {
               View onboarded project data, contracts, and technical details
             </p>
           </Link>
+
+          <Link
+            href="/settings/team"
+            className="bg-white rounded-xl border border-slate-200 p-6 hover:border-blue-300 hover:shadow-md transition-all group"
+          >
+            <h2 className="text-lg font-semibold text-slate-900 group-hover:text-blue-600 transition-colors">
+              Settings
+            </h2>
+            <p className="text-sm text-slate-500 mt-1">
+              Manage team members, roles, and organization settings
+            </p>
+          </Link>
         </div>
       </div>
     </div>

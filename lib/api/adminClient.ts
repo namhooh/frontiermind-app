@@ -573,6 +573,40 @@ export class AdminAPIError extends Error {
 }
 
 // ============================================================================
+// Team Management Interfaces
+// ============================================================================
+
+export interface TeamMember {
+  id: number
+  user_id: string
+  organization_id: number
+  role_type: 'admin' | 'approver' | 'editor' | 'viewer'
+  name: string | null
+  email: string | null
+  department: string | null
+  job_title: string | null
+  status: 'invited' | 'active' | 'suspended' | 'deactivated'
+  is_active: boolean
+  invited_by: string | null
+  invited_at: string | null
+  accepted_at: string | null
+}
+
+export interface InviteMemberRequest {
+  email: string
+  full_name: string
+  role_type: 'admin' | 'approver' | 'editor' | 'viewer'
+  department?: string
+  job_title?: string
+}
+
+export interface UpdateMemberRequest {
+  role_type?: 'admin' | 'approver' | 'editor' | 'viewer'
+  department?: string
+  job_title?: string
+}
+
+// ============================================================================
 // Client Configuration
 // ============================================================================
 
@@ -590,6 +624,7 @@ export class AdminClient {
   private baseUrl: string
   private enableLogging: boolean
   private getAuthToken?: () => Promise<string | null>
+  private organizationId?: number
 
   constructor(config: AdminClientConfig = {}) {
     this.baseUrl = config.baseUrl || API_BASE_URL
@@ -597,9 +632,14 @@ export class AdminClient {
     this.getAuthToken = config.getAuthToken
   }
 
+  setOrganizationId(id: number): void {
+    this.organizationId = id
+  }
+
   private async getAuthHeaders(orgId?: number): Promise<Record<string, string>> {
     const headers: Record<string, string> = {}
-    if (orgId != null) headers['X-Organization-ID'] = String(orgId)
+    const effectiveOrgId = orgId ?? this.organizationId
+    if (effectiveOrgId != null) headers['X-Organization-ID'] = String(effectiveOrgId)
     if (this.getAuthToken) {
       const token = await this.getAuthToken()
       if (token) headers['Authorization'] = `Bearer ${token}`
@@ -632,16 +672,19 @@ export class AdminClient {
 
   async listOrganizations(): Promise<OrganizationResponse[]> {
     this.log('Listing organizations')
-    const response = await fetch(`${this.baseUrl}/api/organizations`)
+    const headers = await this.getAuthHeaders()
+    const response = await fetch(`${this.baseUrl}/api/organizations`, { headers })
     const data = await this.handleResponse<{ organizations: OrganizationResponse[] }>(response)
     return data.organizations
   }
 
   async createOrganization(request: CreateOrganizationRequest): Promise<OrganizationResponse> {
     this.log('Creating organization', request)
+    const headers = await this.getAuthHeaders()
+    headers['Content-Type'] = 'application/json'
     const response = await fetch(`${this.baseUrl}/api/organizations`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(request),
     })
     return this.handleResponse<OrganizationResponse>(response)
@@ -653,7 +696,8 @@ export class AdminClient {
 
   async listDataSources(): Promise<DataSourceResponse[]> {
     this.log('Listing data sources')
-    const response = await fetch(`${this.baseUrl}/api/data-sources`)
+    const headers = await this.getAuthHeaders()
+    const response = await fetch(`${this.baseUrl}/api/data-sources`, { headers })
     const data = await this.handleResponse<{ data_sources: DataSourceResponse[] }>(response)
     return data.data_sources
   }
@@ -715,22 +759,25 @@ export class AdminClient {
 
   async listProjects(organizationId?: number): Promise<ProjectListItem[]> {
     this.log('Listing projects', { organizationId })
+    const headers = await this.getAuthHeaders(organizationId)
     const params = organizationId != null ? `?organization_id=${organizationId}` : ''
-    const response = await fetch(`${this.baseUrl}/api/projects${params}`)
+    const response = await fetch(`${this.baseUrl}/api/projects${params}`, { headers })
     const data = await this.handleResponse<{ projects: ProjectListItem[] }>(response)
     return data.projects
   }
 
   async listProjectsGrouped(): Promise<ProjectGroupedItem[]> {
     this.log('Listing projects grouped by organization')
-    const response = await fetch(`${this.baseUrl}/api/projects/grouped`)
+    const headers = await this.getAuthHeaders()
+    const response = await fetch(`${this.baseUrl}/api/projects/grouped`, { headers })
     const data = await this.handleResponse<{ projects: ProjectGroupedItem[] }>(response)
     return data.projects
   }
 
   async getProjectDashboard(projectId: number): Promise<ProjectDashboardResponse> {
     this.log('Fetching project dashboard', { projectId })
-    const response = await fetch(`${this.baseUrl}/api/projects/${projectId}/dashboard`)
+    const headers = await this.getAuthHeaders()
+    const response = await fetch(`${this.baseUrl}/api/projects/${projectId}/dashboard`, { headers })
     return this.handleResponse<ProjectDashboardResponse>(response)
   }
 
@@ -758,11 +805,13 @@ export class AdminClient {
     this.log('Patching entity', request)
     const { entity, entityId, projectId, fields } = request
     const scopeParam = projectId != null ? `?project_id=${projectId}` : ''
+    const headers = await this.getAuthHeaders()
+    headers['Content-Type'] = 'application/json'
     const response = await fetch(
       `${this.baseUrl}/api/${entity}/${entityId}${scopeParam}`,
       {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(fields),
       }
     )
@@ -776,11 +825,13 @@ export class AdminClient {
     notes?: string
   }): Promise<{ success: boolean; id: number }> {
     this.log('Adding billing product', request)
+    const headers = await this.getAuthHeaders()
+    headers['Content-Type'] = 'application/json'
     const response = await fetch(
       `${this.baseUrl}/api/billing-products`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(request),
       }
     )
@@ -789,9 +840,10 @@ export class AdminClient {
 
   async removeBillingProduct(junctionId: number): Promise<{ success: boolean; id: number }> {
     this.log('Removing billing product', { junctionId })
+    const headers = await this.getAuthHeaders()
     const response = await fetch(
       `${this.baseUrl}/api/billing-products/${junctionId}`,
-      { method: 'DELETE' }
+      { method: 'DELETE', headers }
     )
     return this.handleResponse<{ success: boolean; id: number }>(response)
   }
@@ -811,11 +863,13 @@ export class AdminClient {
     escalation_only?: boolean
   }): Promise<{ success: boolean; id: number }> {
     this.log('Adding contact', request)
+    const headers = await this.getAuthHeaders(request.organization_id)
+    headers['Content-Type'] = 'application/json'
     const response = await fetch(
       `${this.baseUrl}/api/contacts`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(request),
       }
     )
@@ -824,9 +878,10 @@ export class AdminClient {
 
   async removeContact(contactId: number): Promise<{ success: boolean; id: number }> {
     this.log('Removing contact', { contactId })
+    const headers = await this.getAuthHeaders()
     const response = await fetch(
       `${this.baseUrl}/api/contacts/${contactId}`,
-      { method: 'DELETE' }
+      { method: 'DELETE', headers }
     )
     return this.handleResponse<{ success: boolean; id: number }>(response)
   }
@@ -840,11 +895,12 @@ export class AdminClient {
     orgId: number
   ): Promise<{ success: boolean; refreshed_operating_years: number[] }> {
     this.log('Refreshing stale MRP annuals', { projectId, orgId })
+    const headers = await this.getAuthHeaders(orgId)
     const response = await fetch(
       `${this.baseUrl}/api/projects/${projectId}/mrp-refresh`,
       {
         method: 'POST',
-        headers: { 'X-Organization-ID': String(orgId) },
+        headers,
       }
     )
     return this.handleResponse<{ success: boolean; refreshed_operating_years: number[] }>(response)
@@ -861,9 +917,10 @@ export class AdminClient {
     if (params?.operating_year != null) searchParams.set('operating_year', String(params.operating_year))
     if (params?.verification_status) searchParams.set('verification_status', params.verification_status)
     const qs = searchParams.toString()
+    const headers = await this.getAuthHeaders(orgId)
     const response = await fetch(
       `${this.baseUrl}/api/projects/${projectId}/mrp-observations${qs ? `?${qs}` : ''}`,
-      { headers: { 'X-Organization-ID': String(orgId) } }
+      { headers }
     )
     return this.handleResponse<MRPObservationsResponse>(response)
   }
@@ -874,11 +931,13 @@ export class AdminClient {
     body: { operating_year: number; include_pending: boolean }
   ): Promise<AggregateMRPResponse> {
     this.log('Aggregating MRP', { projectId, orgId, body })
+    const headers = await this.getAuthHeaders(orgId)
+    headers['Content-Type'] = 'application/json'
     const response = await fetch(
       `${this.baseUrl}/api/projects/${projectId}/mrp-aggregate`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Organization-ID': String(orgId) },
+        headers,
         body: JSON.stringify(body),
       }
     )
@@ -892,11 +951,13 @@ export class AdminClient {
     body: { verification_status: string; notes?: string }
   ): Promise<VerifyObservationResponse> {
     this.log('Verifying MRP observation', { projectId, orgId, observationId, body })
+    const headers = await this.getAuthHeaders(orgId)
+    headers['Content-Type'] = 'application/json'
     const response = await fetch(
       `${this.baseUrl}/api/projects/${projectId}/mrp-observations/${observationId}`,
       {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json', 'X-Organization-ID': String(orgId) },
+        headers,
         body: JSON.stringify(body),
       }
     )
@@ -909,11 +970,12 @@ export class AdminClient {
     observationId: number
   ): Promise<{ success: boolean; message: string }> {
     this.log('Deleting MRP observation', { projectId, orgId, observationId })
+    const headers = await this.getAuthHeaders(orgId)
     const response = await fetch(
       `${this.baseUrl}/api/projects/${projectId}/mrp-observations/${observationId}`,
       {
         method: 'DELETE',
-        headers: { 'X-Organization-ID': String(orgId) },
+        headers,
       }
     )
     return this.handleResponse<{ success: boolean; message: string }>(response)
@@ -944,11 +1006,12 @@ export class AdminClient {
     formData: FormData
   ): Promise<AdminUploadResponse> {
     this.log('Uploading MRP invoice', { projectId, orgId })
+    const headers = await this.getAuthHeaders(orgId)
     const response = await fetch(
       `${this.baseUrl}/api/projects/${projectId}/mrp-upload`,
       {
         method: 'POST',
-        headers: { 'X-Organization-ID': String(orgId) },
+        headers,
         body: formData,
       }
     )
@@ -961,11 +1024,13 @@ export class AdminClient {
     body: ManualMRPBatchRequest
   ): Promise<ManualMRPBatchResponse> {
     this.log('Submitting manual MRP rates', { projectId, orgId, count: body.entries.length })
+    const headers = await this.getAuthHeaders(orgId)
+    headers['Content-Type'] = 'application/json'
     const response = await fetch(
       `${this.baseUrl}/api/projects/${projectId}/mrp-manual`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Organization-ID': String(orgId) },
+        headers,
         body: JSON.stringify(body),
       }
     )
@@ -1012,8 +1077,10 @@ export class AdminClient {
 
   async getSpreadsheetTables(projectId: number): Promise<SpreadsheetTable[]> {
     this.log('Fetching spreadsheet tables', { projectId })
+    const headers = await this.getAuthHeaders()
     const response = await fetch(
-      `${this.baseUrl}/api/spreadsheet/tables?project_id=${projectId}`
+      `${this.baseUrl}/api/spreadsheet/tables?project_id=${projectId}`,
+      { headers }
     )
     const data = await this.handleResponse<SpreadsheetTablesResponse>(response)
     return data.tables
@@ -1021,11 +1088,13 @@ export class AdminClient {
 
   async querySpreadsheetData(request: SpreadsheetQueryRequest): Promise<SpreadsheetQueryResponse> {
     this.log('Querying spreadsheet data', request)
+    const headers = await this.getAuthHeaders()
+    headers['Content-Type'] = 'application/json'
     const response = await fetch(
       `${this.baseUrl}/api/spreadsheet/query`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(request),
       }
     )
@@ -1034,11 +1103,13 @@ export class AdminClient {
 
   async saveSpreadsheetChanges(request: SpreadsheetSaveRequest): Promise<SpreadsheetSaveResponse> {
     this.log('Saving spreadsheet changes', request)
+    const headers = await this.getAuthHeaders()
+    headers['Content-Type'] = 'application/json'
     const response = await fetch(
       `${this.baseUrl}/api/spreadsheet/save`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(request),
       }
     )
@@ -1054,8 +1125,10 @@ export class AdminClient {
     const params = new URLSearchParams()
     if (opts?.months !== undefined) params.set('months', String(opts.months))
     const qs = params.toString()
+    const headers = await this.getAuthHeaders()
     const response = await fetch(
-      `${this.baseUrl}/api/projects/${projectId}/monthly-billing${qs ? `?${qs}` : ''}`
+      `${this.baseUrl}/api/projects/${projectId}/monthly-billing${qs ? `?${qs}` : ''}`,
+      { headers }
     )
     return this.handleResponse<MonthlyBillingResponse>(response)
   }
@@ -1064,9 +1137,10 @@ export class AdminClient {
     this.log('Importing monthly billing', { projectId, filename: file.name })
     const formData = new FormData()
     formData.append('file', file)
+    const headers = await this.getAuthHeaders()
     const response = await fetch(
       `${this.baseUrl}/api/projects/${projectId}/monthly-billing/import`,
-      { method: 'POST', body: formData }
+      { method: 'POST', headers, body: formData }
     )
     return this.handleResponse<MonthlyBillingImportResponse>(response)
   }
@@ -1076,11 +1150,13 @@ export class AdminClient {
     body: { billing_month: string; actual_kwh?: number; forecast_kwh?: number }
   ): Promise<MonthlyBillingImportResponse> {
     this.log('Adding manual billing entry', { projectId, body })
+    const headers = await this.getAuthHeaders()
+    headers['Content-Type'] = 'application/json'
     const response = await fetch(
       `${this.baseUrl}/api/projects/${projectId}/monthly-billing/manual`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
       }
     )
@@ -1096,8 +1172,10 @@ export class AdminClient {
     const params = new URLSearchParams()
     if (opts?.months !== undefined) params.set('months', String(opts.months))
     const qs = params.toString()
+    const headers = await this.getAuthHeaders()
     const response = await fetch(
-      `${this.baseUrl}/api/projects/${projectId}/meter-billing${qs ? `?${qs}` : ''}`
+      `${this.baseUrl}/api/projects/${projectId}/meter-billing${qs ? `?${qs}` : ''}`,
+      { headers }
     )
     return this.handleResponse<MeterBillingResponse>(response)
   }
@@ -1107,11 +1185,13 @@ export class AdminClient {
     body: { billing_month: string; idempotency_key?: string; invoice_direction?: 'payable' | 'receivable' }
   ): Promise<Record<string, unknown>> {
     this.log('Generating expected invoice', { projectId, body })
+    const headers = await this.getAuthHeaders()
+    headers['Content-Type'] = 'application/json'
     const response = await fetch(
       `${this.baseUrl}/api/projects/${projectId}/billing/generate-expected-invoice`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
       }
     )
@@ -1127,8 +1207,10 @@ export class AdminClient {
     const params = new URLSearchParams()
     if (opts?.months !== undefined) params.set('months', String(opts.months))
     const qs = params.toString()
+    const headers = await this.getAuthHeaders()
     const response = await fetch(
-      `${this.baseUrl}/api/projects/${projectId}/plant-performance${qs ? `?${qs}` : ''}`
+      `${this.baseUrl}/api/projects/${projectId}/plant-performance${qs ? `?${qs}` : ''}`,
+      { headers }
     )
     return this.handleResponse<PlantPerformanceResponse>(response)
   }
@@ -1146,11 +1228,13 @@ export class AdminClient {
     }
   ): Promise<MonthlyBillingImportResponse> {
     this.log('Adding plant performance entry', { projectId, body })
+    const headers = await this.getAuthHeaders()
+    headers['Content-Type'] = 'application/json'
     const response = await fetch(
       `${this.baseUrl}/api/projects/${projectId}/plant-performance/manual`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers,
         body: JSON.stringify(body),
       }
     )
@@ -1161,9 +1245,10 @@ export class AdminClient {
     this.log('Importing plant performance', { projectId, filename: file.name })
     const formData = new FormData()
     formData.append('file', file)
+    const headers = await this.getAuthHeaders()
     const response = await fetch(
       `${this.baseUrl}/api/projects/${projectId}/plant-performance/import`,
-      { method: 'POST', body: formData }
+      { method: 'POST', headers, body: formData }
     )
     return this.handleResponse<MonthlyBillingImportResponse>(response)
   }
@@ -1174,9 +1259,10 @@ export class AdminClient {
 
   async applyDegradation(projectId: number): Promise<{ success: boolean; updated_rows: number; annual_degradation_pct: number }> {
     this.log('Applying degradation', { projectId })
+    const headers = await this.getAuthHeaders()
     const response = await fetch(
       `${this.baseUrl}/api/projects/${projectId}/apply-degradation`,
-      { method: 'POST' }
+      { method: 'POST', headers }
     )
     return this.handleResponse<{ success: boolean; updated_rows: number; annual_degradation_pct: number }>(response)
   }
@@ -1187,16 +1273,20 @@ export class AdminClient {
 
   async getPortfolioRevenueSummary(organizationId: number): Promise<PortfolioRevenueSummaryResponse> {
     this.log('Fetching portfolio revenue summary', { organizationId })
+    const headers = await this.getAuthHeaders(organizationId)
     const response = await fetch(
-      `${this.baseUrl}/api/portfolio/revenue-summary?organization_id=${organizationId}`
+      `${this.baseUrl}/api/portfolio/revenue-summary?organization_id=${organizationId}`,
+      { headers }
     )
     return this.handleResponse<PortfolioRevenueSummaryResponse>(response)
   }
 
   async exportMonthlyBilling(projectId: number): Promise<Blob> {
     this.log('Exporting monthly billing', { projectId })
+    const headers = await this.getAuthHeaders()
     const response = await fetch(
-      `${this.baseUrl}/api/projects/${projectId}/monthly-billing/export`
+      `${this.baseUrl}/api/projects/${projectId}/monthly-billing/export`,
+      { headers }
     )
     if (!response.ok) {
       const errorBody = await response.json().catch(() => ({}))
@@ -1207,6 +1297,68 @@ export class AdminClient {
     }
     return response.blob()
   }
+
+  // ==========================================================================
+  // Team Management
+  // ==========================================================================
+
+  async getMe(): Promise<TeamMember> {
+    this.log('Getting current user membership')
+    const headers = await this.getAuthHeaders()
+    const response = await fetch(`${this.baseUrl}/api/team/me`, { headers })
+    return this.handleResponse<TeamMember>(response)
+  }
+
+  async listTeamMembers(): Promise<TeamMember[]> {
+    this.log('Listing team members')
+    const headers = await this.getAuthHeaders()
+    const response = await fetch(`${this.baseUrl}/api/team/members`, { headers })
+    return this.handleResponse<TeamMember[]>(response)
+  }
+
+  async inviteTeamMember(body: InviteMemberRequest): Promise<TeamMember> {
+    this.log('Inviting team member', body)
+    const headers = await this.getAuthHeaders()
+    headers['Content-Type'] = 'application/json'
+    const response = await fetch(`${this.baseUrl}/api/team/invite`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+    })
+    return this.handleResponse<TeamMember>(response)
+  }
+
+  async updateTeamMember(memberId: number, body: UpdateMemberRequest): Promise<TeamMember> {
+    this.log('Updating team member', { memberId, ...body })
+    const headers = await this.getAuthHeaders()
+    headers['Content-Type'] = 'application/json'
+    const response = await fetch(`${this.baseUrl}/api/team/members/${memberId}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify(body),
+    })
+    return this.handleResponse<TeamMember>(response)
+  }
+
+  async deactivateTeamMember(memberId: number): Promise<TeamMember> {
+    this.log('Deactivating team member', { memberId })
+    const headers = await this.getAuthHeaders()
+    const response = await fetch(`${this.baseUrl}/api/team/members/${memberId}/deactivate`, {
+      method: 'POST',
+      headers,
+    })
+    return this.handleResponse<TeamMember>(response)
+  }
+
+  async reactivateTeamMember(memberId: number): Promise<TeamMember> {
+    this.log('Reactivating team member', { memberId })
+    const headers = await this.getAuthHeaders()
+    const response = await fetch(`${this.baseUrl}/api/team/members/${memberId}/reactivate`, {
+      method: 'POST',
+      headers,
+    })
+    return this.handleResponse<TeamMember>(response)
+  }
 }
 
 // ============================================================================
@@ -1216,9 +1368,18 @@ export class AdminClient {
 export const adminClient = new AdminClient({
   getAuthToken: async () => {
     if (typeof window === 'undefined') return null
+    // Demo mode: use static demo token (no Supabase session exists)
+    if (process.env.NEXT_PUBLIC_DEMO_MODE === 'true') {
+      return process.env.NEXT_PUBLIC_DEMO_ACCESS_TOKEN ?? null
+    }
     const { createClient } = await import('@/lib/supabase/client')
     const supabase = createClient()
     const { data: { session } } = await supabase.auth.getSession()
     return session?.access_token ?? null
   },
 })
+
+// Default org for initial page loads (overridden by auth resolution in projects/page.tsx)
+if (typeof process !== 'undefined' && process.env?.NODE_ENV === 'development') {
+  adminClient.setOrganizationId(1)
+}

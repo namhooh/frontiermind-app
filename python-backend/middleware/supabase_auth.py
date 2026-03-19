@@ -128,6 +128,7 @@ class SupabaseAuth:
             }
 
         # Demo access token – allows read-only demo access in production
+        # Pinned to org 1 only; mutating methods are blocked.
         demo_token = os.getenv("DEMO_ACCESS_TOKEN")
         if (
             demo_token
@@ -135,9 +136,21 @@ class SupabaseAuth:
             and credentials.credentials == demo_token
         ):
             org_id = _get_org_id_from_header(request)
+            # Pin demo to org 1
+            if org_id != 1:
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Demo access is restricted to organization 1",
+                )
+            # Block mutating methods for demo
+            if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+                raise HTTPException(
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="Demo access is read-only",
+                )
             return {
                 "user_id": "demo-user",
-                "organization_id": org_id,
+                "organization_id": 1,
                 "role": "viewer",
             }
 
@@ -198,3 +211,91 @@ class SupabaseAuth:
 
 # Singleton instance for use as a FastAPI dependency
 require_supabase_auth = SupabaseAuth()
+
+
+class JWTOnly:
+    """
+    Validates the JWT and looks up the user's org membership from the role table.
+
+    Unlike SupabaseAuth, this does NOT require X-Organization-ID header.
+    Used for bootstrap endpoints like /api/team/me where the frontend
+    doesn't yet know its organization_id.
+
+    Returns dict with 'user_id', 'organization_id', 'role'.
+    """
+
+    async def __call__(
+        self,
+        request: Request,
+        credentials: Optional[HTTPAuthorizationCredentials] = Security(_bearer_scheme),
+    ) -> dict:
+        # Dev auth bypass
+        if os.getenv("DEV_AUTH_BYPASS") == "true" and os.getenv("ENVIRONMENT") != "production":
+            user_id = os.getenv("DEV_USER_ID", "dev-user")
+            # Look up org from role table
+            try:
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            "SELECT organization_id, role_type FROM role WHERE user_id = %s AND is_active = true LIMIT 1",
+                            (user_id,),
+                        )
+                        row = cur.fetchone()
+            except Exception as e:
+                logger.error(f"DB error in JWTOnly dev bypass: {e}")
+                raise HTTPException(status_code=503, detail="Database unavailable")
+            if not row:
+                raise HTTPException(status_code=403, detail="No active membership found")
+            return {"user_id": user_id, "organization_id": row["organization_id"], "role": row["role_type"]}
+
+        # Demo token
+        demo_token = os.getenv("DEMO_ACCESS_TOKEN")
+        if demo_token and credentials is not None and credentials.credentials == demo_token:
+            return {"user_id": "demo-user", "organization_id": 1, "role": "viewer"}
+
+        if credentials is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Missing Authorization header",
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        token = credentials.credentials
+        if not token:
+            raise HTTPException(status_code=401, detail="Empty token", headers={"WWW-Authenticate": "Bearer"})
+
+        secret = _get_jwt_secret()
+        try:
+            payload = jwt.decode(token, secret, algorithms=["HS256"], audience="authenticated")
+        except jwt.ExpiredSignatureError:
+            raise HTTPException(status_code=401, detail="Token expired", headers={"WWW-Authenticate": "Bearer"})
+        except jwt.InvalidTokenError as e:
+            raise HTTPException(status_code=401, detail=f"Invalid token: {e}", headers={"WWW-Authenticate": "Bearer"})
+
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Token missing 'sub' claim", headers={"WWW-Authenticate": "Bearer"})
+
+        # Look up membership from role table (no org header needed)
+        try:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        "SELECT organization_id, role_type FROM role WHERE user_id = %s AND is_active = true LIMIT 1",
+                        (user_id,),
+                    )
+                    row = cur.fetchone()
+        except Exception as e:
+            logger.error(f"DB error in JWTOnly: {e}")
+            raise HTTPException(status_code=503, detail="Database unavailable for auth check")
+
+        if not row:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={"success": False, "error": "NotMember", "message": "No active membership found"},
+            )
+
+        return {"user_id": user_id, "organization_id": row["organization_id"], "role": row["role_type"]}
+
+
+require_jwt_only = JWTOnly()

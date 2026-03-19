@@ -1178,6 +1178,14 @@ database/
 - Population script: `python-backend/scripts/populate_oy_start_date.py` — set `oy_start_date = cod_date` for 36 clause_tariff rows; LOI01 kept at Transfer Date (2019-10-31)
 - All 10 OY code paths updated to read `oy_start_date` directly instead of falling back to `project.cod_date`
 
+**v12.1 (Role Expansion & Team Management)** - Complete
+- Migration: `063_role_expansion.sql`
+- Modified: `role` table — expanded `role_type` constraint to `admin/approver/editor/viewer`, added `department`, `job_title`, `status`, `invited_by`, `invited_at`, `accepted_at`, `deactivated_at` columns
+- RLS enabled on `role` table with self-read and admin-read/write policies
+- Extended: `audit_action_type` with `MEMBER_INVITED`, `MEMBER_ROLE_CHANGED`, `MEMBER_DEACTIVATED`, `MEMBER_REACTIVATED`, `INVITE_ACCEPTED`
+- New API: `python-backend/api/team.py` — team management endpoints
+- New authorization helpers: `require_approve_access()`, `require_admin()`
+
 ---
 
 ## Best Practices

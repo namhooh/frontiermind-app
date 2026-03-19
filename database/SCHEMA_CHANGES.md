@@ -2700,3 +2700,40 @@ Source: PO Summary col E "Energy Sale Type" (offtake model)
 - `python-backend/scripts/step11p_pricing_extraction.py` — Orchestrator script
 
 ---
+
+### v12.1 - 2026-03-19 (Role Expansion & Team Management)
+
+**Description:** Expanded role system from `admin/staff` to `admin/approver/editor/viewer`, added invite lifecycle fields, enabled RLS on the `role` table, and added audit action types for team management.
+
+**Migration:** `database/migrations/063_role_expansion.sql`
+
+**Changes to `role` table:**
+- **Modified constraint:** `role_role_type_check` now allows `admin`, `approver`, `editor`, `viewer` (was `admin`, `staff`)
+- **Migrated data:** existing `staff` rows updated to `editor`
+- **New columns:** `department VARCHAR`, `job_title VARCHAR`, `status VARCHAR NOT NULL DEFAULT 'active'` (with CHECK: `invited`, `active`, `suspended`, `deactivated`), `invited_by UUID`, `invited_at TIMESTAMPTZ`, `accepted_at TIMESTAMPTZ`, `deactivated_at TIMESTAMPTZ`
+- **RLS enabled:** Three policies — `role_self_read` (user reads own row), `role_admin_read` (admin reads org), `role_admin_write` (admin writes org)
+
+**Extended enum: `audit_action_type`**
+- `MEMBER_INVITED`, `MEMBER_ROLE_CHANGED`, `MEMBER_DEACTIVATED`, `MEMBER_REACTIVATED`, `INVITE_ACCEPTED`
+
+**New API endpoints:** `python-backend/api/team.py`
+- `GET /api/team/me` — current user's membership
+- `GET /api/team/members` — list org members (admin only)
+- `POST /api/team/invite` — invite new member (admin only)
+- `PATCH /api/team/members/{id}` — update member (admin only)
+- `POST /api/team/members/{id}/deactivate` — deactivate (admin only)
+- `POST /api/team/members/{id}/reactivate` — reactivate (admin only)
+
+**Authorization changes:**
+- `require_write_access()` now allows `admin`, `approver`, `editor` (removed stale `owner`)
+- New: `require_approve_access()` — `admin`, `approver` only
+- New: `require_admin()` — `admin` only
+- MRP verify endpoint upgraded from `require_write_access` to `require_approve_access`
+- Email ingest approve endpoint now requires `require_approve_access`
+
+**Frontend changes:**
+- New page: `/settings/team` — team management UI
+- Browser `role` table queries replaced with `/api/team/me` endpoint (3 files)
+- `/settings` added to protected paths in middleware
+
+---
