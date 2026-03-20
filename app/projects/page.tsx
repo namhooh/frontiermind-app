@@ -6,6 +6,7 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { ArrowLeft, Loader2, Pencil, PencilOff, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
 import { IS_DEMO } from '@/lib/demoMode'
+import { SignOutButton } from '@/app/components/SignOutButton'
 import { toast } from 'sonner'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/app/components/ui/tabs'
 import { adminClient, type ProjectDashboardResponse, type MRPObservation, type SubmissionTokenItem } from '@/lib/api/adminClient'
@@ -432,13 +433,16 @@ function ProjectsPageContent() {
               {editMode ? 'Finish Editing' : 'Edit'}
             </button>
             {!IS_DEMO && (
-              <Link
-                href="/"
-                className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
-              >
-                <ArrowLeft className="h-4 w-4" />
-                Back to Home
-              </Link>
+              <>
+                <Link
+                  href="/"
+                  className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
+                >
+                  <ArrowLeft className="h-4 w-4" />
+                  Back to Home
+                </Link>
+                <SignOutButton />
+              </>
             )}
           </div>
         </div>
