@@ -523,7 +523,7 @@ function ProjectsPageContent() {
           {/* Main Content */}
           <div className="flex-1 min-w-0">
             {!selectedProjectId && !loading && (
-              <PortfolioHome />
+              <PortfolioHome orgId={orgId} />
             )}
 
             {selectedProjectId && loading && (

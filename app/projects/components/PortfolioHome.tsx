@@ -12,14 +12,15 @@ import {
 } from '@/lib/api/adminClient'
 import { formatMonth, fmtNum, fmtCurrency } from '@/app/projects/utils/formatters'
 
-// TODO: Replace with value from auth context once user authentication is implemented.
-const CURRENT_ORGANIZATION_ID = 1
+interface PortfolioHomeProps {
+  orgId?: number
+}
 
 // ---------------------------------------------------------------------------
 // Component
 // ---------------------------------------------------------------------------
 
-export function PortfolioHome() {
+export function PortfolioHome({ orgId }: PortfolioHomeProps) {
   const [data, setData] = useState<PortfolioRevenueSummaryResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -27,17 +28,18 @@ export function PortfolioHome() {
   const [showProjects, setShowProjects] = useState(false)
 
   const fetchData = useCallback(async () => {
+    if (!orgId) return
     setLoading(true)
     setError(null)
     try {
-      const resp = await adminClient.getPortfolioRevenueSummary(CURRENT_ORGANIZATION_ID)
+      const resp = await adminClient.getPortfolioRevenueSummary(orgId)
       setData(resp)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to load portfolio data')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [orgId])
 
   useEffect(() => {
     fetchData()
