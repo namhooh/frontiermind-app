@@ -1401,19 +1401,22 @@ export class AdminClient {
   // Change Requests
   // ==========================================================================
 
-  async getChangeRequestSummary(projectId: number): Promise<ChangeRequestSummary> {
+  async getChangeRequestSummary(projectId?: number): Promise<ChangeRequestSummary> {
     this.log('Getting change request summary', { projectId })
     const headers = await this.getAuthHeaders()
-    const response = await fetch(`${this.baseUrl}/api/change-requests/summary?project_id=${projectId}`, { headers })
+    const params = projectId != null ? `?project_id=${projectId}` : ''
+    const response = await fetch(`${this.baseUrl}/api/change-requests/summary${params}`, { headers })
     return this.handleResponse<ChangeRequestSummary>(response)
   }
 
-  async listChangeRequests(projectId: number, status?: string): Promise<ChangeRequest[]> {
+  async listChangeRequests(projectId?: number, status?: string): Promise<ChangeRequest[]> {
     this.log('Listing change requests', { projectId, status })
     const headers = await this.getAuthHeaders()
-    const params = new URLSearchParams({ project_id: String(projectId) })
+    const params = new URLSearchParams()
+    if (projectId) params.set('project_id', String(projectId))
     if (status) params.set('status', status)
-    const response = await fetch(`${this.baseUrl}/api/change-requests?${params}`, { headers })
+    const qs = params.toString()
+    const response = await fetch(`${this.baseUrl}/api/change-requests${qs ? `?${qs}` : ''}`, { headers })
     return this.handleResponse<ChangeRequest[]>(response)
   }
 

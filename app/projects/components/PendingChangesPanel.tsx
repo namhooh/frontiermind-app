@@ -8,7 +8,7 @@ import { adminClient, type ChangeRequest } from '@/lib/api/adminClient'
 import { toast } from 'sonner'
 
 interface PendingChangesPanelProps {
-  projectId: number
+  projectId?: number
   open: boolean
   onClose: () => void
   userRole: string

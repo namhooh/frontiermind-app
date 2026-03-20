@@ -215,18 +215,17 @@ function ProjectsPageContent() {
     })
   }, [])
 
-  // Pending change request count
+  // Pending change request count (org-wide, not per-project)
   const refreshPendingCount = useCallback(() => {
-    if (!selectedProjectId) return
-    adminClient.getChangeRequestSummary(selectedProjectId)
+    if (!orgId) return
+    adminClient.getChangeRequestSummary()
       .then((s) => setPendingCount(s.pending + s.conflicted))
       .catch(() => {})
-  }, [selectedProjectId])
+  }, [orgId])
 
   useEffect(() => {
-    if (!selectedProjectId) { setPendingCount(0); return }
     refreshPendingCount()
-  }, [selectedProjectId, refreshPendingCount])
+  }, [refreshPendingCount])
 
   const refreshDashboard = useCallback(async (options?: { force?: boolean; includeMrp?: boolean }) => {
     if (!selectedProjectId) return
@@ -461,7 +460,7 @@ function ProjectsPageContent() {
                 {editMode ? 'Finish Editing' : 'Edit'}
               </button>
             )}
-            {selectedProjectId && pendingCount > 0 && (
+            {pendingCount > 0 && (
               <button
                 onClick={() => setPendingPanelOpen(true)}
                 className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
@@ -619,19 +618,17 @@ function ProjectsPageContent() {
           </div>
         </div>
       </div>
-      {selectedProjectId && (
-        <PendingChangesPanel
-          projectId={selectedProjectId}
-          open={pendingPanelOpen}
-          onClose={() => setPendingPanelOpen(false)}
-          userRole={userRole}
-          userId={userId}
-          onChanged={() => {
-            refreshPendingCount()
-            refreshDashboard({ force: true })
-          }}
-        />
-      )}
+      <PendingChangesPanel
+        projectId={selectedProjectId ?? undefined}
+        open={pendingPanelOpen}
+        onClose={() => setPendingPanelOpen(false)}
+        userRole={userRole}
+        userId={userId}
+        onChanged={() => {
+          refreshPendingCount()
+          if (selectedProjectId) refreshDashboard({ force: true })
+        }}
+      />
     </div>
   )
 }

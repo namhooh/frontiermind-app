@@ -220,22 +220,26 @@ def create_change_request(
 @limit_admin
 async def get_summary(
     request: Request,
-    project_id: int = Query(...),
+    project_id: int | None = Query(None),
     auth: dict = Depends(require_supabase_auth),
 ) -> SummaryOut:
     org_id = auth["organization_id"]
+    where = "organization_id = %s AND change_request_status IN ('pending', 'conflicted')"
+    params: list = [org_id]
+    if project_id is not None:
+        where += " AND project_id = %s"
+        params.append(project_id)
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                """
+                f"""
                 SELECT
                     COUNT(*) FILTER (WHERE change_request_status = 'pending') AS pending,
                     COUNT(*) FILTER (WHERE change_request_status = 'conflicted') AS conflicted
                 FROM change_request
-                WHERE organization_id = %s AND project_id = %s
-                  AND change_request_status IN ('pending', 'conflicted')
+                WHERE {where}
                 """,
-                (org_id, project_id),
+                params,
             )
             row = cur.fetchone()
     return SummaryOut(pending=row["pending"], conflicted=row["conflicted"])
@@ -245,13 +249,16 @@ async def get_summary(
 @limit_admin
 async def list_change_requests(
     request: Request,
-    project_id: int = Query(...),
+    project_id: int | None = Query(None),
     status_filter: str | None = Query(None, alias="status"),
     auth: dict = Depends(require_supabase_auth),
 ) -> list[ChangeRequestOut]:
     org_id = auth["organization_id"]
-    where = "cr.organization_id = %s AND cr.project_id = %s"
-    params: list = [org_id, project_id]
+    where = "cr.organization_id = %s"
+    params: list = [org_id]
+    if project_id is not None:
+        where += " AND cr.project_id = %s"
+        params.append(project_id)
     if status_filter:
         where += " AND cr.change_request_status = %s"
         params.append(status_filter)
