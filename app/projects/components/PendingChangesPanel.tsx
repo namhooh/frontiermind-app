@@ -36,6 +36,7 @@ export function PendingChangesPanel({ projectId, open, onClose, userRole, userId
   const [requests, setRequests] = useState<ChangeRequest[]>([])
   const [loading, setLoading] = useState(false)
   const [actionLoading, setActionLoading] = useState<number | null>(null)
+  const [bulkLoading, setBulkLoading] = useState(false)
   const [filter, setFilter] = useState<'pending' | 'all'>('pending')
 
   const canApprove = userRole === 'admin' || userRole === 'approver'
@@ -102,6 +103,34 @@ export function PendingChangesPanel({ projectId, open, onClose, userRole, userId
     }
   }
 
+  const pendingRequests = requests.filter(r => r.change_request_status === 'pending')
+
+  const handleApproveAll = async () => {
+    if (!pendingRequests.length) return
+    // Filter out own requests (four-eyes)
+    const approvable = pendingRequests.filter(r => r.requested_by !== userId)
+    if (!approvable.length) {
+      toast.error('Cannot approve your own requests (four-eyes principle)')
+      return
+    }
+    setBulkLoading(true)
+    let approved = 0
+    let failed = 0
+    for (const cr of approvable) {
+      try {
+        const result = await adminClient.approveChangeRequest(cr.id)
+        if (result.success) approved++
+        else failed++
+      } catch {
+        failed++
+      }
+    }
+    setBulkLoading(false)
+    toast.success(`Approved ${approved} change${approved !== 1 ? 's' : ''}${failed ? `, ${failed} failed` : ''}`)
+    await loadRequests()
+    onChanged?.()
+  }
+
   if (!open) return null
 
   return (
@@ -115,6 +144,15 @@ export function PendingChangesPanel({ projectId, open, onClose, userRole, userId
         <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
           <h2 className="text-sm font-semibold text-slate-900">Pending Changes</h2>
           <div className="flex items-center gap-2">
+            {canApprove && pendingRequests.length > 0 && (
+              <button
+                onClick={handleApproveAll}
+                disabled={bulkLoading}
+                className="text-xs font-medium text-green-700 bg-green-50 border border-green-200 rounded px-2 py-1 hover:bg-green-100 disabled:opacity-50"
+              >
+                {bulkLoading ? 'Approving...' : `Approve All (${pendingRequests.length})`}
+              </button>
+            )}
             <select
               value={filter}
               onChange={(e) => setFilter(e.target.value as 'pending' | 'all')}

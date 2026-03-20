@@ -22,8 +22,9 @@ class ApprovalPolicy:
     display_name: str = ""
 
 
-# Phase 1: independent fields only
+# Phase 1 + Phase 2 fields
 POLICIES: dict[str, ApprovalPolicy] = {
+    # Phase 1: independent fields
     "exchange_rate_update": ApprovalPolicy(
         policy_key="exchange_rate_update",
         fields={("exchange_rate", "rate")},
@@ -36,6 +37,31 @@ POLICIES: dict[str, ApprovalPolicy] = {
             ("production_guarantee", "p50_annual_kwh"),
         },
         display_name="Guarantee Value Change",
+    ),
+    # Phase 2: pricing and contract fields
+    "base_rate_update": ApprovalPolicy(
+        policy_key="base_rate_update",
+        fields={
+            ("clause_tariff", "base_rate"),
+            ("clause_tariff", "lp_floor_rate"),
+            ("clause_tariff", "lp_ceiling_rate"),
+            ("clause_tariff", "lp_discount_pct"),
+        },
+        display_name="Base Rate / Pricing Bounds Change",
+    ),
+    "tariff_rate_update": ApprovalPolicy(
+        policy_key="tariff_rate_update",
+        fields={("tariff_rate", "effective_rate_contract_ccy")},
+        display_name="Tariff Rate Change",
+    ),
+    "contract_terms_update": ApprovalPolicy(
+        policy_key="contract_terms_update",
+        fields={
+            ("contract", "effective_date"),
+            ("contract", "end_date"),
+            ("contract", "contract_term_years"),
+        },
+        display_name="Contract Terms Change",
     ),
 }
 
