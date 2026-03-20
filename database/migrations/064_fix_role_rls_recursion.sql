@@ -14,7 +14,7 @@ DROP POLICY IF EXISTS role_admin_write ON role;
 
 -- Create a SECURITY DEFINER function that checks admin status
 -- without triggering RLS (runs as the function owner, not the caller)
-CREATE OR REPLACE FUNCTION is_org_admin(check_org_id BIGINT)
+CREATE OR REPLACE FUNCTION is_org_admin(p_org_id BIGINT)
 RETURNS BOOLEAN
 LANGUAGE sql
 SECURITY DEFINER
@@ -24,7 +24,7 @@ AS $$
   SELECT EXISTS (
     SELECT 1 FROM role
     WHERE user_id = auth.uid()
-      AND organization_id = check_org_id
+      AND organization_id = p_org_id
       AND role_type = 'admin'
       AND is_active = true
   );
