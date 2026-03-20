@@ -1,7 +1,25 @@
 import Link from 'next/link'
+import { redirect } from 'next/navigation'
+import { createClient } from '@/lib/supabase/server'
 import { SignOutButton } from './components/SignOutButton'
 
-export default function LandingPage() {
+export default async function LandingPage() {
+  // Non-admin users go straight to the project dashboard
+  const supabase = await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (user) {
+    const { data } = await supabase
+      .from('role')
+      .select('role_type')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .limit(1)
+      .single()
+    if (data && data.role_type !== 'admin') {
+      redirect('/projects')
+    }
+  }
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
       <div className="max-w-2xl w-full">

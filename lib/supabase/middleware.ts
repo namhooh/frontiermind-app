@@ -47,11 +47,6 @@ export async function updateSession(request: NextRequest) {
     return NextResponse.redirect(new URL('/projects', request.url))
   }
 
-  // Redirect authenticated users from landing page → dashboard
-  if (pathname === '/' && user) {
-    return NextResponse.redirect(new URL('/projects', request.url))
-  }
-
   // Protect PAGE routes only (not API routes - they handle their own auth)
   // NOTE: '/' temporarily removed for workflow testing
   const protectedPaths = ['/projects', '/notifications', '/client-setup', '/contract-workflow', '/pii-redaction', '/test-queries', '/dashboard', '/settings']
