@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { adminClient, type ProjectGroupedItem } from '@/lib/api/adminClient'
-import { BarChart3, Bell, ChevronDown, ChevronRight, Loader2, Search, X } from 'lucide-react'
+import { BarChart3, Bell, ChevronDown, ChevronRight, Loader2, Search, Settings, LogOut, X } from 'lucide-react'
 import Link from 'next/link'
+import { createClient } from '@/lib/supabase/client'
 
 type SortBy = 'name' | 'sage_id' | 'country'
 
@@ -12,9 +13,11 @@ interface ProjectSidebarProps {
   onSelectProject: (id: number) => void
   onSelectHome?: () => void
   orgId?: number
+  userName?: string | null
+  userRole?: string
 }
 
-export function ProjectSidebar({ selectedProjectId, onSelectProject, onSelectHome, orgId }: ProjectSidebarProps) {
+export function ProjectSidebar({ selectedProjectId, onSelectProject, onSelectHome, orgId, userName, userRole }: ProjectSidebarProps) {
   const [projects, setProjects] = useState<ProjectGroupedItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -247,6 +250,39 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject, onSelectHom
           ))}
         </ul>
       )}
+
+      {/* User profile & settings */}
+      <div className="border-t border-slate-200 mt-3 pt-3">
+        {userName && (
+          <div className="px-3 py-1.5 text-xs text-slate-500">
+            <span className="font-medium text-slate-700">{userName}</span>
+            {userRole && (
+              <span className="ml-1.5 text-xs text-slate-400">
+                ({userRole.charAt(0).toUpperCase() + userRole.slice(1)})
+              </span>
+            )}
+          </div>
+        )}
+        <Link
+          href="/settings/team"
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-slate-600 hover:bg-slate-100 transition-colors"
+        >
+          <Settings className="h-4 w-4 shrink-0" />
+          Settings
+        </Link>
+        <button
+          type="button"
+          onClick={async () => {
+            const supabase = createClient()
+            await supabase.auth.signOut()
+            window.location.href = '/login'
+          }}
+          className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm text-slate-500 hover:bg-slate-100 hover:text-red-600 transition-colors"
+        >
+          <LogOut className="h-4 w-4 shrink-0" />
+          Sign out
+        </button>
+      </div>
     </nav>
   )
 }

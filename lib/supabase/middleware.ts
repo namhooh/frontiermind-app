@@ -42,9 +42,14 @@ export async function updateSession(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname
 
-  // Redirect authenticated users away from login page
+  // Redirect authenticated users away from login page → straight to dashboard
   if (pathname === '/login' && user) {
-    return NextResponse.redirect(new URL('/', request.url))
+    return NextResponse.redirect(new URL('/projects', request.url))
+  }
+
+  // Redirect authenticated users from landing page → dashboard
+  if (pathname === '/' && user) {
+    return NextResponse.redirect(new URL('/projects', request.url))
   }
 
   // Protect PAGE routes only (not API routes - they handle their own auth)

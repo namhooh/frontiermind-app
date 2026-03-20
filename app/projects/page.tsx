@@ -6,7 +6,6 @@ import dynamic from 'next/dynamic'
 import Link from 'next/link'
 import { ArrowLeft, Loader2, Pencil, PencilOff, PanelLeftClose, PanelLeftOpen, Clock } from 'lucide-react'
 import { IS_DEMO } from '@/lib/demoMode'
-import { SignOutButton } from '@/app/components/SignOutButton'
 import { PendingChangesPanel } from './components/PendingChangesPanel'
 import { toast } from 'sonner'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/app/components/ui/tabs'
@@ -108,6 +107,7 @@ function ProjectsPageContent() {
   const [pendingCount, setPendingCount] = useState(0)
   const [pendingPanelOpen, setPendingPanelOpen] = useState(false)
   const [orgId, setOrgId] = useState<number | undefined>()
+  const [userName, setUserName] = useState<string | null>(null)
 
   // Resolve org and user role from Supabase session
   useEffect(() => {
@@ -124,7 +124,7 @@ function ProjectsPageContent() {
           setUserId(user.id)
           const { data } = await supabase
             .from('role')
-            .select('organization_id, role_type')
+            .select('organization_id, role_type, name')
             .eq('user_id', user.id)
             .eq('is_active', true)
             .limit(1)
@@ -133,6 +133,7 @@ function ProjectsPageContent() {
             adminClient.setOrganizationId(data.organization_id)
             setOrgId(data.organization_id)
             setUserRole(data.role_type)
+            setUserName(data.name)
           }
         }
       } catch {
@@ -470,16 +471,13 @@ function ProjectsPageContent() {
               </button>
             )}
             {!IS_DEMO && (
-              <>
-                <Link
-                  href="/"
-                  className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                  Back to Home
-                </Link>
-                <SignOutButton />
-              </>
+              <Link
+                href="/"
+                className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
+              >
+                <ArrowLeft className="h-4 w-4" />
+                Back to Home
+              </Link>
             )}
           </div>
         </div>
@@ -505,6 +503,8 @@ function ProjectsPageContent() {
                   onSelectProject={handleSelectProject}
                   onSelectHome={handleSelectHome}
                   orgId={orgId}
+                  userName={userName}
+                  userRole={userRole}
                 />
               </div>
             ) : (
