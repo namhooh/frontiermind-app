@@ -107,18 +107,24 @@ export default function AcceptInvitePage() {
 
       // Update member_status from 'invited' to 'active' via backend
       try {
-        const { data: { session } } = await supabase.auth.getSession()
-        if (session?.access_token) {
+        const { data: { session: freshSession } } = await supabase.auth.getSession()
+        if (freshSession?.access_token) {
           const { getApiBaseUrl } = await import('@/lib/api/config')
-          await fetch(`${getApiBaseUrl()}/api/team/accept-invite`, {
+          const baseUrl = getApiBaseUrl()
+          const resp = await fetch(`${baseUrl}/api/team/accept-invite`, {
             method: 'POST',
             headers: {
-              'Authorization': `Bearer ${session.access_token}`,
+              'Authorization': `Bearer ${freshSession.access_token}`,
             },
           })
+          if (!resp.ok) {
+            console.error('accept-invite failed:', resp.status, await resp.text().catch(() => ''))
+          }
+        } else {
+          console.error('accept-invite: no session available after password set')
         }
-      } catch {
-        // Non-critical — admin can manually update status
+      } catch (err) {
+        console.error('accept-invite call error:', err)
       }
 
       setSuccess(true)
