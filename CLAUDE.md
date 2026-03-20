@@ -18,6 +18,7 @@ Contract Compliance & Invoicing Verification Engine for renewable energy project
 | **DATABASE_GUIDE.md** | Database schema and migrations |
 | **IMPLEMENTATION_GUIDE_REPORT_GENERATION.md** | Report generation system |
 | **IMPLEMENTATION_GUIDE_EMAIL_NOTIFICATIONS.md** | Email & notification engine, inbound ingestion, dev auth bypass |
+| **contract-digitization/docs/IMPLEMENTATION_GUIDE_PRICING_TARIFF_EXTRACTION.md** | Pricing & tariff formula extraction compiler pipeline (Step 11P) |
 | **.claude/skills/sync-figma.md** | Detailed Figma-to-code workflow |
 
 ## Commands
@@ -28,9 +29,61 @@ npm run build    # Production build
 npm run lint     # ESLint
 ```
 
+### API Authentication & Authorization
+
+**Every** backend endpoint (except OAuth pre-auth and public submission-token endpoints) requires authentication. The middleware validates the JWT, extracts the user ID, and confirms org membership against the `role` table.
+
+**Two auth mechanisms exist:**
+
+| Mechanism | Middleware | Used by |
+|-----------|-----------|---------|
+| Supabase JWT | `require_supabase_auth` | All dashboard/frontend endpoints |
+| API Key (HMAC) | `require_api_key` | Machine-to-machine ingestion, export, onboarding |
+
+**Authorization (tenant scoping):** Shared helpers in `middleware/authorization.py`:
+- `assert_project_in_org(project_id, org_id)` — verifies resource belongs to authenticated org
+- `assert_contract_in_org`, `assert_contact_in_org`, `assert_clause_in_org`, etc.
+- `enforce_org(body_org_id, auth)` — rejects body/query org that doesn't match auth
+- `require_write_access(auth)` — blocks `viewer` role from mutations
+- All reads are scoped to `auth["organization_id"]`; all writes verify resource ownership
+
+**Demo token:** `DEMO_ACCESS_TOKEN` grants read-only access pinned to org 1 only. POST/PUT/PATCH/DELETE are blocked at the middleware level.
+
+**Frontend:** `adminClient.ts` sends `Authorization: Bearer <jwt>` and `X-Organization-ID` on every request via `getAuthHeaders()`. Org is resolved from the Supabase session's `role` table on page load (`adminClient.setOrganizationId()`).
+
 ### Dev Auth Bypass
 
-Backend endpoints behind `require_supabase_auth` need a valid JWT. For local dev, set `DEV_AUTH_BYPASS=true` in `python-backend/.env` to skip JWT validation (blocked in production by `ENVIRONMENT != production` guard). The frontend auto-falls back to `organizationId=1` when `NODE_ENV=development`. See **IMPLEMENTATION_GUIDE_EMAIL_NOTIFICATIONS.md § Local Development** for details.
+For local dev, set `DEV_AUTH_BYPASS=true` in `python-backend/.env` to skip JWT validation (blocked in production by `ENVIRONMENT != production` guard). The `X-Organization-ID` header is still required. The frontend defaults to org 1 in development. See **IMPLEMENTATION_GUIDE_EMAIL_NOTIFICATIONS.md § Local Development** for details.
+
+### Change Request Workflow (Two-Step Approval)
+
+Financially sensitive fields require a two-step edit/approval workflow. When an **editor** edits a designated field, the change is queued as a `change_request` instead of being applied directly. An **approver** or **admin** must then review and approve/reject.
+
+**Designated fields (Phase 1):**
+- `exchange_rate.rate` — currency conversion rate
+- `production_guarantee.guaranteed_kwh` — annual guarantee target
+- `production_guarantee.p50_annual_kwh` — P50 baseline
+
+**Behavior by role:**
+| Role | Non-designated fields | Designated fields |
+|------|----------------------|-------------------|
+| `admin` | Immediate save | Immediate save (auto-approved audit trail) |
+| `approver` | Immediate save | Immediate save (auto-approved audit trail) |
+| `editor` | Immediate save | Creates change request (pending approval) |
+| `viewer` | Read-only | Read-only |
+
+**Key files:**
+- `python-backend/services/approval_config.py` — policy registry (add/remove fields here)
+- `python-backend/api/change_requests.py` — API endpoints (summary, list, approve, reject, cancel, assign)
+- `python-backend/api/entities.py` → `_execute_patch()` — intercepts designated fields for editors
+- `app/projects/components/PendingChangesPanel.tsx` — approval UI
+- `database/migrations/065_change_request.sql` — schema
+
+**Four-eyes principle:** Requester cannot approve their own change request (`allow_self_approve = false` in policy).
+
+**Conflict detection:** `base_updated_at` is captured at submission. If the target row's `updated_at` changes before approval, the request moves to `conflicted` status.
+
+**Approver assignment:** From `project.default_approver_id`, falling back to any active admin/approver in the org.
 
 ## Project Structure
 

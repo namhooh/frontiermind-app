@@ -99,7 +99,9 @@ database/
 │   ├── 058_sage_bp_import.sql                        # SAGE BP import data
 │   ├── 059_tariff_taxonomy_restructure.sql           # Tariff classification taxonomy restructure: tariff_type→offtake model, energy_sale_type→revenue type, escalation_type→expanded with FLOATING_* flat codes
 │   ├── 060_tariff_rate_billing_period.sql            # tariff_rate cleanup: add billing_period_id FK, drop fx_rate_hard_id, rename fx_rate_local_id → exchange_rate_id
-│   ├── 062_tariff_formula.sql                       # Tariff formula decomposition: computation graphs from PPA pricing sections (Step 11P)
+│   ├── 062_tariff_formula.sql                       # Tariff formula + amendment versioning. Variables use semantic bindings (resolver_registry.py)
+│   ├── 063_role_expansion.sql                       # Role expansion (admin/approver/editor/viewer), member_status enum, invite lifecycle, RLS
+│   ├── 065_change_request.sql                       # Change request workflow: two-step edit/approval for sensitive fields
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -1185,6 +1187,23 @@ database/
 - Extended: `audit_action_type` with `MEMBER_INVITED`, `MEMBER_ROLE_CHANGED`, `MEMBER_DEACTIVATED`, `MEMBER_REACTIVATED`, `INVITE_ACCEPTED`
 - New API: `python-backend/api/team.py` — team management endpoints
 - New authorization helpers: `require_approve_access()`, `require_admin()`
+
+**v12.2 (Change Request Workflow)** - Complete
+- Migration: `065_change_request.sql`
+- New enum: `change_request_status` (pending, conflicted, approved, rejected, cancelled, superseded)
+- New table: `change_request` — two-step edit/approval workflow for financially sensitive fields
+  - Polymorphic reference: `target_table` + `target_id` + `field_name` (same pattern as `audit_log`)
+  - Old/new values stored as JSONB
+  - Conflict detection via `base_updated_at` comparison
+  - Immutability trigger on terminal states (approved, rejected, cancelled, superseded)
+  - `auto_approved` flag for admin/approver audit trail
+  - `assigned_approver_id` set at submission from `project.default_approver_id` or org fallback
+  - Unique index prevents duplicate pending requests for same field
+- Modified table: `project` — added `default_approver_id UUID`
+- Extended enum: `audit_action_type` with `CHANGE_REQUESTED`, `CHANGE_APPROVED`, `CHANGE_REJECTED`
+- Approval policy registry: `python-backend/services/approval_config.py`
+- Phase 1 designated fields: `exchange_rate.rate`, `production_guarantee.guaranteed_kwh`, `production_guarantee.p50_annual_kwh`
+- New API: `python-backend/api/change_requests.py` — summary, list, approve, reject, cancel, assign
 
 ---
 
