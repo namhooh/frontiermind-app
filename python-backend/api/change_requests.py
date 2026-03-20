@@ -9,8 +9,18 @@ Endpoints for the two-step edit/approval workflow:
 
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
+from decimal import Decimal
 from typing import Optional
+
+
+def _json_default(obj):
+    """JSON serializer for types not handled by default."""
+    if isinstance(obj, Decimal):
+        return float(obj)
+    if isinstance(obj, (datetime, date)):
+        return obj.isoformat()
+    raise TypeError(f"Object of type {type(obj).__name__} is not JSON serializable")
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
@@ -187,8 +197,8 @@ def create_change_request(
                 (
                     org_id, project_id, table, target_id,
                     field_name,
-                    json.dumps(old_value) if old_value is not None else None,
-                    json.dumps(new_value),
+                    json.dumps(old_value, default=_json_default) if old_value is not None else None,
+                    json.dumps(new_value, default=_json_default),
                     display_label, policy_key,
                     cr_status, auto_approved,
                     requested_by, now,
