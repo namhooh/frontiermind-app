@@ -4,9 +4,10 @@ import { useState, useCallback, useEffect, useMemo, Suspense, useRef } from 'rea
 import { useSearchParams } from 'next/navigation'
 import dynamic from 'next/dynamic'
 import Link from 'next/link'
-import { ArrowLeft, Loader2, Pencil, PencilOff, PanelLeftClose, PanelLeftOpen } from 'lucide-react'
+import { ArrowLeft, Loader2, Pencil, PencilOff, PanelLeftClose, PanelLeftOpen, Clock } from 'lucide-react'
 import { IS_DEMO } from '@/lib/demoMode'
 import { SignOutButton } from '@/app/components/SignOutButton'
+import { PendingChangesPanel } from './components/PendingChangesPanel'
 import { toast } from 'sonner'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/app/components/ui/tabs'
 import { adminClient, type ProjectDashboardResponse, type MRPObservation, type SubmissionTokenItem } from '@/lib/api/adminClient'
@@ -102,8 +103,12 @@ function ProjectsPageContent() {
   const [activeTab, setActiveTab] = useState<DashboardTabValue>('overview')
   const [mountedTabs, setMountedTabs] = useState<Set<DashboardTabValue>>(() => new Set(['overview']))
   const projectRequestRef = useRef(0)
+  const [userRole, setUserRole] = useState<string>('viewer')
+  const [userId, setUserId] = useState<string>('')
+  const [pendingCount, setPendingCount] = useState(0)
+  const [pendingPanelOpen, setPendingPanelOpen] = useState(false)
 
-  // Resolve org from Supabase session and set on adminClient
+  // Resolve org and user role from Supabase session
   useEffect(() => {
     async function resolveOrg() {
       if (IS_DEMO) {
@@ -114,14 +119,18 @@ function ProjectsPageContent() {
         const supabase = createClient()
         const { data: { user } } = await supabase.auth.getUser()
         if (user) {
+          setUserId(user.id)
           const { data } = await supabase
             .from('role')
-            .select('organization_id')
+            .select('organization_id, role_type')
             .eq('user_id', user.id)
             .eq('is_active', true)
             .limit(1)
             .single()
-          if (data) adminClient.setOrganizationId(data.organization_id)
+          if (data) {
+            adminClient.setOrganizationId(data.organization_id)
+            setUserRole(data.role_type)
+          }
         }
       } catch {
         // Fallback: org 1 for dev
@@ -307,6 +316,21 @@ function ProjectsPageContent() {
     }
   }, [activeTab, selectedProjectId, dashboard, fetchMrpData, applyMrpData, clearMrpData])
 
+  // Fetch pending change request count for active project
+  useEffect(() => {
+    if (!selectedProjectId) { setPendingCount(0); return }
+    adminClient.getChangeRequestSummary(selectedProjectId)
+      .then((s) => setPendingCount(s.pending + s.conflicted))
+      .catch(() => setPendingCount(0))
+  }, [selectedProjectId])
+
+  const refreshPendingCount = useCallback(() => {
+    if (!selectedProjectId) return
+    adminClient.getChangeRequestSummary(selectedProjectId)
+      .then((s) => setPendingCount(s.pending + s.conflicted))
+      .catch(() => {})
+  }, [selectedProjectId])
+
   // Build lookup options from dashboard response
   const lookups = dashboard?.lookups ?? {}
   const contractTypeOpts = useMemo(() => toOpts(lookups.contract_types), [lookups.contract_types])
@@ -421,17 +445,28 @@ function ProjectsPageContent() {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => setEditMode(!editMode)}
-              className={`inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border transition-colors ${
-                editMode
-                  ? 'bg-red-600 text-white border-red-600 hover:bg-red-700'
-                  : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
-              }`}
-            >
-              {editMode ? <PencilOff className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
-              {editMode ? 'Finish Editing' : 'Edit'}
-            </button>
+            {userRole !== 'viewer' && (
+              <button
+                onClick={() => setEditMode(!editMode)}
+                className={`inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border transition-colors ${
+                  editMode
+                    ? 'bg-red-600 text-white border-red-600 hover:bg-red-700'
+                    : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                {editMode ? <PencilOff className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
+                {editMode ? 'Finish Editing' : 'Edit'}
+              </button>
+            )}
+            {selectedProjectId && pendingCount > 0 && (
+              <button
+                onClick={() => setPendingPanelOpen(true)}
+                className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
+              >
+                <Clock className="h-3.5 w-3.5" />
+                {pendingCount} pending
+              </button>
+            )}
             {!IS_DEMO && (
               <>
                 <Link
@@ -580,6 +615,19 @@ function ProjectsPageContent() {
           </div>
         </div>
       </div>
+      {selectedProjectId && (
+        <PendingChangesPanel
+          projectId={selectedProjectId}
+          open={pendingPanelOpen}
+          onClose={() => setPendingPanelOpen(false)}
+          userRole={userRole}
+          userId={userId}
+          onChanged={() => {
+            refreshPendingCount()
+            refreshDashboard({ force: true })
+          }}
+        />
+      )}
     </div>
   )
 }

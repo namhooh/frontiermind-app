@@ -94,33 +94,41 @@ export function EditableCell({
     setEditing(false)
     setError(false)
     try {
-      await adminClient.patchEntity({
+      const result = await adminClient.patchEntity({
         entity,
         entityId,
         projectId,
         fields: { [fieldKey]: saveValue === '' ? null : saveValue },
       })
       onSaved?.()
-      // Show undo toast
-      toast('Field updated', {
-        action: {
-          label: 'Undo',
-          onClick: async () => {
-            try {
-              await adminClient.patchEntity({
-                entity,
-                entityId,
-                projectId,
-                fields: { [fieldKey]: oldValue === '' ? null : oldValue ?? null },
-              })
-              onSaved?.()
-            } catch {
-              toast.error('Failed to undo')
-            }
+      if (result.outcome === 'submitted' || result.outcome === 'partial') {
+        // Change requires approval — no undo, different toast
+        toast('Change submitted for approval', {
+          description: result.pending_approval?.join(', '),
+          duration: 4000,
+        })
+      } else {
+        // Immediate save — show undo toast
+        toast('Field updated', {
+          action: {
+            label: 'Undo',
+            onClick: async () => {
+              try {
+                await adminClient.patchEntity({
+                  entity,
+                  entityId,
+                  projectId,
+                  fields: { [fieldKey]: oldValue === '' ? null : oldValue ?? null },
+                })
+                onSaved?.()
+              } catch {
+                toast.error('Failed to undo')
+              }
+            },
           },
-        },
-        duration: 5000,
-      })
+          duration: 5000,
+        })
+      }
     } catch {
       setError(true)
       setTimeout(() => setError(false), 2000)

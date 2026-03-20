@@ -1,0 +1,243 @@
+'use client'
+
+import { useState, useEffect, useCallback } from 'react'
+import { X, Check, XCircle, Clock, AlertTriangle, Loader2 } from 'lucide-react'
+import { Badge } from '@/app/components/ui/badge'
+import { Button } from '@/app/components/ui/button'
+import { adminClient, type ChangeRequest } from '@/lib/api/adminClient'
+import { toast } from 'sonner'
+
+interface PendingChangesPanelProps {
+  projectId: number
+  open: boolean
+  onClose: () => void
+  userRole: string
+  userId: string
+  onChanged?: () => void
+}
+
+const STATUS_BADGE: Record<string, { variant: 'default' | 'secondary' | 'destructive' | 'outline'; label: string }> = {
+  pending: { variant: 'default', label: 'Pending' },
+  conflicted: { variant: 'destructive', label: 'Conflicted' },
+  approved: { variant: 'secondary', label: 'Approved' },
+  rejected: { variant: 'outline', label: 'Rejected' },
+  cancelled: { variant: 'outline', label: 'Cancelled' },
+  superseded: { variant: 'outline', label: 'Superseded' },
+}
+
+function formatValue(val: unknown): string {
+  if (val === null || val === undefined) return '—'
+  if (typeof val === 'number') return val.toLocaleString('en-US', { maximumFractionDigits: 6 })
+  if (typeof val === 'boolean') return val ? 'Yes' : 'No'
+  return String(val)
+}
+
+export function PendingChangesPanel({ projectId, open, onClose, userRole, userId, onChanged }: PendingChangesPanelProps) {
+  const [requests, setRequests] = useState<ChangeRequest[]>([])
+  const [loading, setLoading] = useState(false)
+  const [actionLoading, setActionLoading] = useState<number | null>(null)
+  const [filter, setFilter] = useState<'pending' | 'all'>('pending')
+
+  const canApprove = userRole === 'admin' || userRole === 'approver'
+
+  const loadRequests = useCallback(async () => {
+    setLoading(true)
+    try {
+      const data = await adminClient.listChangeRequests(projectId, filter === 'pending' ? 'pending' : undefined)
+      setRequests(data)
+    } catch {
+      // silent
+    } finally {
+      setLoading(false)
+    }
+  }, [projectId, filter])
+
+  useEffect(() => {
+    if (open) loadRequests()
+  }, [open, loadRequests])
+
+  const handleApprove = async (id: number) => {
+    setActionLoading(id)
+    try {
+      const result = await adminClient.approveChangeRequest(id)
+      if (result.success) {
+        toast.success('Change approved and applied')
+        await loadRequests()
+        onChanged?.()
+      } else {
+        toast.error(result.status === 'conflicted' ? 'Data changed since submission — please re-submit' : 'Failed to approve')
+        await loadRequests()
+      }
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to approve')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleReject = async (id: number) => {
+    setActionLoading(id)
+    try {
+      await adminClient.rejectChangeRequest(id)
+      toast('Change rejected')
+      await loadRequests()
+      onChanged?.()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to reject')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  const handleCancel = async (id: number) => {
+    setActionLoading(id)
+    try {
+      await adminClient.cancelChangeRequest(id)
+      toast('Change request cancelled')
+      await loadRequests()
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : 'Failed to cancel')
+    } finally {
+      setActionLoading(null)
+    }
+  }
+
+  if (!open) return null
+
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end">
+      {/* Backdrop */}
+      <div className="absolute inset-0 bg-black/20" onClick={onClose} />
+
+      {/* Panel */}
+      <div className="relative w-full max-w-md bg-white shadow-xl border-l border-slate-200 flex flex-col">
+        {/* Header */}
+        <div className="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+          <h2 className="text-sm font-semibold text-slate-900">Pending Changes</h2>
+          <div className="flex items-center gap-2">
+            <select
+              value={filter}
+              onChange={(e) => setFilter(e.target.value as 'pending' | 'all')}
+              className="text-xs border border-slate-200 rounded px-2 py-1"
+            >
+              <option value="pending">Pending</option>
+              <option value="all">All</option>
+            </select>
+            <button onClick={onClose} className="p-1 rounded hover:bg-slate-100">
+              <X className="h-4 w-4 text-slate-500" />
+            </button>
+          </div>
+        </div>
+
+        {/* Content */}
+        <div className="flex-1 overflow-y-auto p-4 space-y-3">
+          {loading && (
+            <div className="flex justify-center py-8">
+              <Loader2 className="h-5 w-5 animate-spin text-slate-400" />
+            </div>
+          )}
+
+          {!loading && requests.length === 0 && (
+            <p className="text-sm text-slate-500 text-center py-8">No change requests found</p>
+          )}
+
+          {!loading && requests.map((cr) => {
+            const statusInfo = STATUS_BADGE[cr.change_request_status] || STATUS_BADGE.pending
+            const isOwn = cr.requested_by === userId
+            const isPending = cr.change_request_status === 'pending'
+
+            return (
+              <div key={cr.id} className="rounded-lg border border-slate-200 p-3 space-y-2">
+                {/* Header row */}
+                <div className="flex items-start justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-slate-900">
+                      {cr.display_label || cr.field_name}
+                    </p>
+                    <p className="text-xs text-slate-500">
+                      {cr.target_table}.{cr.field_name} (ID: {cr.target_id})
+                    </p>
+                  </div>
+                  <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
+                </div>
+
+                {/* Diff */}
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <div>
+                    <span className="text-slate-400">Current</span>
+                    <p className="font-mono text-slate-600">{formatValue(cr.old_value)}</p>
+                  </div>
+                  <div>
+                    <span className="text-slate-400">Proposed</span>
+                    <p className="font-mono text-amber-700 font-medium">{formatValue(cr.new_value)}</p>
+                  </div>
+                </div>
+
+                {/* Meta */}
+                <div className="flex items-center gap-3 text-xs text-slate-400">
+                  <span className="flex items-center gap-1">
+                    <Clock className="h-3 w-3" />
+                    {new Date(cr.requested_at).toLocaleDateString()}
+                  </span>
+                  <span>by {cr.requester_name || 'Unknown'}</span>
+                </div>
+
+                {/* Conflict warning */}
+                {cr.change_request_status === 'conflicted' && (
+                  <div className="flex items-center gap-1.5 text-xs text-red-600 bg-red-50 rounded p-2">
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    Data changed since submission. Please re-submit.
+                  </div>
+                )}
+
+                {/* Review note */}
+                {cr.review_note && (
+                  <p className="text-xs text-slate-500 italic">Note: {cr.review_note}</p>
+                )}
+
+                {/* Actions */}
+                {isPending && (
+                  <div className="flex items-center gap-2 pt-1">
+                    {canApprove && (
+                      <>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleApprove(cr.id)}
+                          disabled={actionLoading === cr.id}
+                          className="text-xs h-7 text-green-700 border-green-200 hover:bg-green-50"
+                        >
+                          <Check className="h-3 w-3 mr-1" />
+                          Approve
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => handleReject(cr.id)}
+                          disabled={actionLoading === cr.id}
+                          className="text-xs h-7 text-red-600 border-red-200 hover:bg-red-50"
+                        >
+                          <XCircle className="h-3 w-3 mr-1" />
+                          Reject
+                        </Button>
+                      </>
+                    )}
+                    {isOwn && (
+                      <button
+                        onClick={() => handleCancel(cr.id)}
+                        disabled={actionLoading === cr.id}
+                        className="text-xs text-slate-500 hover:text-slate-700"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    </div>
+  )
+}

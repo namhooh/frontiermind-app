@@ -208,6 +208,43 @@ export interface PatchEntityRequest {
   fields: Record<string, unknown>
 }
 
+export interface PatchEntityResponse {
+  success: boolean
+  id: number
+  outcome: 'applied' | 'submitted' | 'partial'
+  pending_approval?: string[]
+  change_request_ids?: number[]
+}
+
+export interface ChangeRequest {
+  id: number
+  organization_id: number
+  project_id: number
+  target_table: string
+  target_id: number
+  field_name: string
+  old_value: unknown
+  new_value: unknown
+  display_label: string | null
+  policy_key: string
+  change_request_status: 'pending' | 'conflicted' | 'approved' | 'rejected' | 'cancelled' | 'superseded'
+  auto_approved: boolean
+  requested_by: string
+  requested_at: string
+  request_note: string | null
+  assigned_approver_id: string | null
+  reviewed_by: string | null
+  reviewed_at: string | null
+  review_note: string | null
+  requester_name: string | null
+  reviewer_name: string | null
+}
+
+export interface ChangeRequestSummary {
+  pending: number
+  conflicted: number
+}
+
 // ============================================================================
 // MRP (Market Reference Price) Types
 // ============================================================================
@@ -801,7 +838,7 @@ export class AdminClient {
   // Inline Editing
   // =========================================================================
 
-  async patchEntity(request: PatchEntityRequest): Promise<{ success: boolean; id: number }> {
+  async patchEntity(request: PatchEntityRequest): Promise<PatchEntityResponse> {
     this.log('Patching entity', request)
     const { entity, entityId, projectId, fields } = request
     const scopeParam = projectId != null ? `?project_id=${projectId}` : ''
@@ -815,7 +852,7 @@ export class AdminClient {
         body: JSON.stringify(fields),
       }
     )
-    return this.handleResponse<{ success: boolean; id: number }>(response)
+    return this.handleResponse<PatchEntityResponse>(response)
   }
 
   async addBillingProduct(request: {
@@ -1358,6 +1395,60 @@ export class AdminClient {
       headers,
     })
     return this.handleResponse<TeamMember>(response)
+  }
+
+  // ==========================================================================
+  // Change Requests
+  // ==========================================================================
+
+  async getChangeRequestSummary(projectId: number): Promise<ChangeRequestSummary> {
+    this.log('Getting change request summary', { projectId })
+    const headers = await this.getAuthHeaders()
+    const response = await fetch(`${this.baseUrl}/api/change-requests/summary?project_id=${projectId}`, { headers })
+    return this.handleResponse<ChangeRequestSummary>(response)
+  }
+
+  async listChangeRequests(projectId: number, status?: string): Promise<ChangeRequest[]> {
+    this.log('Listing change requests', { projectId, status })
+    const headers = await this.getAuthHeaders()
+    const params = new URLSearchParams({ project_id: String(projectId) })
+    if (status) params.set('status', status)
+    const response = await fetch(`${this.baseUrl}/api/change-requests?${params}`, { headers })
+    return this.handleResponse<ChangeRequest[]>(response)
+  }
+
+  async approveChangeRequest(id: number, note?: string): Promise<{ success: boolean; status: string; id: number }> {
+    this.log('Approving change request', { id })
+    const headers = await this.getAuthHeaders()
+    headers['Content-Type'] = 'application/json'
+    const response = await fetch(`${this.baseUrl}/api/change-requests/${id}/approve`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ note }),
+    })
+    return this.handleResponse(response)
+  }
+
+  async rejectChangeRequest(id: number, note?: string): Promise<{ success: boolean; status: string; id: number }> {
+    this.log('Rejecting change request', { id })
+    const headers = await this.getAuthHeaders()
+    headers['Content-Type'] = 'application/json'
+    const response = await fetch(`${this.baseUrl}/api/change-requests/${id}/reject`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ note }),
+    })
+    return this.handleResponse(response)
+  }
+
+  async cancelChangeRequest(id: number): Promise<{ success: boolean; status: string; id: number }> {
+    this.log('Cancelling change request', { id })
+    const headers = await this.getAuthHeaders()
+    const response = await fetch(`${this.baseUrl}/api/change-requests/${id}/cancel`, {
+      method: 'POST',
+      headers,
+    })
+    return this.handleResponse(response)
   }
 }
 

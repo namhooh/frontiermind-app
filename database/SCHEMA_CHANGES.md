@@ -2692,12 +2692,16 @@ Source: PO Summary col E "Energy Sale Type" (offtake model)
 - Formula dependencies captured via `maps_to` on variables (e.g., `tariff_formula.DEEMED_ENERGY`)
 - No additional FKs beyond `clause_tariff_id` — variable-level `maps_to` captures relationships
 
-**New Pipeline Files:**
-- `python-backend/services/prompts/pricing_extraction_prompt.py` — Claude prompt for Phase 2
-- `python-backend/services/pricing/pricing_extractor.py` — Phase 2 Claude API wrapper
-- `python-backend/services/pricing/formula_decomposer.py` — Phase 3 decomposition + DB mapping
-- `python-backend/services/pricing/pricing_validator.py` — Phase 4 consistency checks
-- `python-backend/scripts/step11p_pricing_extraction.py` — Orchestrator script
+**Pipeline Files (Compiler Architecture):**
+- `python-backend/services/pricing/resolver_registry.py` — Semantic variable bindings (42 bindings)
+- `python-backend/services/pricing/formula_components.py` — Composable formula templates (16 components)
+- `python-backend/services/pricing/contract_classifier.py` — Contract type classification
+- `python-backend/services/pricing/template_resolver.py` — Symbol → binding matching
+- `python-backend/services/pricing/formula_compiler.py` — Compile to runtime + display + rates
+- `python-backend/services/pricing/strict_validator.py` — Hard-stop validation + quarantine
+- `python-backend/services/pricing/pricing_extractor.py` — Claude API raw extraction
+- `python-backend/services/prompts/pricing_extraction_prompt.py` — Claude prompt (no DB mapping)
+- `python-backend/scripts/step11p_pricing_extraction.py` — Orchestrator
 
 ---
 
@@ -2735,5 +2739,47 @@ Source: PO Summary col E "Energy Sale Type" (offtake model)
 - New page: `/settings/team` — team management UI
 - Browser `role` table queries replaced with `/api/team/me` endpoint (3 files)
 - `/settings` added to protected paths in middleware
+
+---
+
+### v12.2 - 2026-03-20 (Change Request Workflow)
+
+**Description:** Two-step edit/approval workflow for financially sensitive fields. Editors propose changes → approvers review and apply/reject. Non-designated fields continue with immediate save.
+
+**Migration:** `database/migrations/065_change_request.sql`
+
+**New enum: `change_request_status`**
+- `pending`, `conflicted`, `approved`, `rejected`, `cancelled`, `superseded`
+
+**New table: `change_request`**
+- Tracks proposed field changes with old/new values (JSONB), requester, assigned approver, reviewer, conflict detection via `base_updated_at`
+- Unique index prevents duplicate pending requests for same field
+- Immutability trigger on terminal states
+- `auto_approved` flag for admin/approver audit trail
+
+**Modified table: `project`**
+- Added `default_approver_id UUID` column
+
+**Extended enum: `audit_action_type`**
+- `CHANGE_REQUESTED`, `CHANGE_APPROVED`, `CHANGE_REJECTED`
+
+**New backend files:**
+- `python-backend/services/approval_config.py` — policy registry defining which fields require approval
+- `python-backend/api/change_requests.py` — CRUD + approve/reject/cancel/assign endpoints
+
+**Modified: `python-backend/api/entities.py`**
+- `_execute_patch()` gains `auth` parameter and approval-check branch
+- Editor edits on designated fields create `change_request` rows instead of applying
+- Admin/approver edits auto-approve with audit trail
+- All ~10 PATCH endpoints now pass `auth=auth`
+
+**Phase 1 designated fields:**
+- `exchange_rate.rate`
+- `production_guarantee.guaranteed_kwh`, `p50_annual_kwh`
+
+**Frontend:**
+- `EditableCell.tsx` handles `outcome: 'submitted'` with amber toast
+- New `PendingChangesPanel.tsx` slide-over for reviewing/approving changes
+- Dashboard header shows pending badge count, edit toggle hidden for viewers
 
 ---

@@ -9,13 +9,29 @@ import logging
 import json
 from datetime import date, datetime
 from decimal import Decimal
-from fastapi import APIRouter, HTTPException, Response, status, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, Response, status, Query, Path
 from pydantic import BaseModel, Field
 from typing import Any, List, Optional
 
 from psycopg2 import sql
 
 from db.database import get_db_connection, init_connection_pool
+from middleware.supabase_auth import require_supabase_auth
+from services.approval_config import find_policy
+from api.change_requests import create_change_request, _resolve_project_id, _get_default_approver
+from middleware.authorization import (
+    assert_project_in_org,
+    assert_contract_in_org,
+    assert_contact_in_org,
+    assert_clause_in_org,
+    assert_billing_product_in_org,
+    assert_tariff_in_org,
+    assert_rate_period_in_org,
+    assert_exchange_rate_in_org,
+    enforce_org,
+    require_write_access,
+    require_role,
+)
 from db.integration_repository import IntegrationRepository
 
 logger = logging.getLogger(__name__)
@@ -402,7 +418,7 @@ def _build_patch_query(
     summary="List all organizations",
     description="Retrieve all organizations for dropdown selection.",
 )
-def list_organizations() -> OrganizationsListResponse:
+def list_organizations(auth: dict = Depends(require_supabase_auth)) -> OrganizationsListResponse:
     """
     List all organizations.
 
@@ -429,8 +445,10 @@ def list_organizations() -> OrganizationsListResponse:
                     """
                     SELECT id, name, country, created_at
                     FROM organization
+                    WHERE id = %s
                     ORDER BY name
-                    """
+                    """,
+                    (auth["organization_id"],)
                 )
                 rows = cursor.fetchall()
                 logger.info(f"Organizations query returned {len(rows)} rows")
@@ -472,7 +490,8 @@ def list_projects(
     organization_id: Optional[int] = Query(
         None,
         description="Filter by organization ID"
-    )
+    ),
+    auth: dict = Depends(require_supabase_auth),
 ) -> ProjectsListResponse:
     """
     List projects, optionally filtered by organization.
@@ -497,29 +516,21 @@ def list_projects(
         )
 
     try:
+        org_id = auth["organization_id"]
         with get_db_connection() as conn:
             with conn.cursor() as cursor:
-                if organization_id is not None:
-                    cursor.execute(
-                        """
-                        SELECT id, name, organization_id
-                        FROM project
-                        WHERE organization_id = %s
-                        ORDER BY name
-                        """,
-                        (organization_id,)
-                    )
-                else:
-                    cursor.execute(
-                        """
-                        SELECT id, name, organization_id
-                        FROM project
-                        ORDER BY name
-                        """
-                    )
+                cursor.execute(
+                    """
+                    SELECT id, name, organization_id
+                    FROM project
+                    WHERE organization_id = %s
+                    ORDER BY name
+                    """,
+                    (org_id,)
+                )
 
                 rows = cursor.fetchall()
-                logger.info(f"Projects query returned {len(rows)} rows for org_id={organization_id}: {rows}")
+                logger.info(f"Projects query returned {len(rows)} rows for org_id={org_id}: {rows}")
 
                 projects = [
                     ProjectResponse(
@@ -553,7 +564,7 @@ def list_projects(
     summary="List projects grouped by organization",
     description="Returns all projects with organization names in a single query. Used by the sidebar.",
 )
-def list_projects_grouped() -> ProjectsGroupedResponse:
+def list_projects_grouped(auth: dict = Depends(require_supabase_auth)) -> ProjectsGroupedResponse:
     if not USE_DATABASE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -569,8 +580,10 @@ def list_projects_grouped() -> ProjectsGroupedResponse:
                            p.country, p.organization_id, o.name AS organization_name
                     FROM project p
                     JOIN organization o ON o.id = p.organization_id
+                    WHERE p.organization_id = %(org_id)s
                     ORDER BY o.name, p.name
-                    """
+                    """,
+                    {"org_id": auth["organization_id"]},
                 )
                 rows = cursor.fetchall()
                 projects = [
@@ -602,7 +615,9 @@ def list_projects_grouped() -> ProjectsGroupedResponse:
     summary="Create an organization",
     description="Create a new organization for client onboarding.",
 )
-async def create_organization(body: OrganizationCreate) -> OrganizationResponse:
+async def create_organization(body: OrganizationCreate, auth: dict = Depends(require_supabase_auth)) -> OrganizationResponse:
+    require_write_access(auth)
+    require_role(auth, {"admin"})
     if not USE_DATABASE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -644,7 +659,7 @@ async def create_organization(body: OrganizationCreate) -> OrganizationResponse:
     summary="List all data sources",
     description="Retrieve all data sources for dropdown selection.",
 )
-async def list_data_sources() -> DataSourcesListResponse:
+async def list_data_sources(auth: dict = Depends(require_supabase_auth)) -> DataSourcesListResponse:
     if not USE_DATABASE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -713,7 +728,9 @@ def _serialize_row(row: dict) -> dict:
 )
 def get_project_dashboard(
     project_id: int = Path(..., description="Project ID"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> ProjectDashboardResponse:
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1123,8 +1140,13 @@ def get_project_dashboard(
 # ============================================================================
 
 
-async def _execute_patch(table: str, entity_id: int, patch: BaseModel, scope_project_id: Optional[int] = None) -> dict:
-    """Shared logic for all PATCH endpoints."""
+async def _execute_patch(table: str, entity_id: int, patch: BaseModel, scope_project_id: Optional[int] = None, *, auth: Optional[dict] = None) -> dict:
+    """Shared logic for all PATCH endpoints.
+
+    If `auth` is provided and the user is an editor (not admin/approver),
+    fields that require approval are queued as change requests instead of
+    being applied immediately.
+    """
     if not USE_DATABASE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1132,19 +1154,125 @@ async def _execute_patch(table: str, entity_id: int, patch: BaseModel, scope_pro
         )
 
     try:
-        query, params = _build_patch_query(table, entity_id, patch, scope_project_id)
-        with get_db_connection() as conn:
-            with conn.cursor() as cursor:
-                cursor.execute(query, params)
-                row = cursor.fetchone()
-                if not row:
-                    conn.rollback()
-                    raise HTTPException(
-                        status_code=status.HTTP_404_NOT_FOUND,
-                        detail={"success": False, "error": "NotFound", "message": f"Row {entity_id} not found in {table}"},
-                    )
-                conn.commit()
-                return {"success": True, "id": row["id"]}
+        changes = patch.model_dump(exclude_none=True)
+        if not changes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"success": False, "error": "NoChanges", "message": "No fields to update"},
+            )
+
+        # Split changes into immediate vs approval-required
+        approval_changes: dict[str, Any] = {}
+        immediate_changes: dict[str, Any] = {}
+        is_privileged = not auth or auth.get("role") in ("admin", "approver")
+
+        for field, val in changes.items():
+            policy = find_policy(table, field)
+            if policy and not is_privileged:
+                approval_changes[field] = (val, policy)
+            else:
+                immediate_changes[field] = val
+
+        result: dict[str, Any] = {"success": True, "id": entity_id, "outcome": "applied"}
+
+        # Apply immediate changes (same as before)
+        if immediate_changes:
+            # Build a patch model with only immediate fields
+            immediate_patch = patch.model_copy(update={k: None for k in approval_changes})
+            if immediate_changes:
+                query, params = _build_patch_query(table, entity_id, patch.__class__(**immediate_changes), scope_project_id)
+                with get_db_connection() as conn:
+                    with conn.cursor() as cursor:
+                        cursor.execute(query, params)
+                        row = cursor.fetchone()
+                        if not row:
+                            conn.rollback()
+                            raise HTTPException(
+                                status_code=status.HTTP_404_NOT_FOUND,
+                                detail={"success": False, "error": "NotFound", "message": f"Row {entity_id} not found in {table}"},
+                            )
+                        conn.commit()
+                        result["id"] = row["id"]
+        elif not approval_changes:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail={"success": False, "error": "NoChanges", "message": "No fields to update"},
+            )
+
+        # Queue approval-required changes as change requests
+        if approval_changes and auth:
+            # Fetch current row for old values and conflict detection
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(f"SELECT * FROM {table} WHERE id = %s", (entity_id,))
+                    old_row = cur.fetchone()
+            if not old_row:
+                raise HTTPException(status_code=404, detail=f"Row {entity_id} not found in {table}")
+
+            project_id = scope_project_id or _resolve_project_id(table, entity_id)
+            approver_id = _get_default_approver(project_id, auth["organization_id"])
+            if not approver_id:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="No approver available. Ask an admin to assign one to this project.",
+                )
+
+            cr_ids = []
+            pending_fields = []
+            for field, (val, policy) in approval_changes.items():
+                cr_id = create_change_request(
+                    org_id=auth["organization_id"],
+                    project_id=project_id,
+                    table=table,
+                    target_id=entity_id,
+                    field_name=field,
+                    old_value=old_row.get(field),
+                    new_value=val,
+                    policy_key=policy.policy_key,
+                    display_label=policy.display_name,
+                    requested_by=auth["user_id"],
+                    base_updated_at=old_row.get("updated_at"),
+                    assigned_approver_id=approver_id,
+                )
+                cr_ids.append(cr_id)
+                pending_fields.append(field)
+
+            result["outcome"] = "submitted" if not immediate_changes else "partial"
+            result["pending_approval"] = pending_fields
+            result["change_request_ids"] = cr_ids
+
+        # Auto-approved audit trail for admin/approver on designated fields
+        if is_privileged and auth:
+            for field, val in changes.items():
+                policy = find_policy(table, field)
+                if policy:
+                    try:
+                        with get_db_connection() as conn:
+                            with conn.cursor() as cur:
+                                cur.execute(f"SELECT * FROM {table} WHERE id = %s", (entity_id,))
+                                current_row = cur.fetchone()
+                        project_id = scope_project_id or _resolve_project_id(table, entity_id)
+                        create_change_request(
+                            org_id=auth["organization_id"],
+                            project_id=project_id,
+                            table=table,
+                            target_id=entity_id,
+                            field_name=field,
+                            old_value=current_row.get(field) if current_row else None,
+                            new_value=val,
+                            policy_key=policy.policy_key,
+                            display_label=policy.display_name,
+                            requested_by=auth["user_id"],
+                            base_updated_at=current_row.get("updated_at") if current_row else None,
+                            assigned_approver_id=None,
+                            auto_approved=True,
+                            reviewed_by=auth["user_id"],
+                            cr_status="approved",
+                        )
+                    except Exception as e:
+                        logger.warning(f"Auto-approved audit record failed: {e}")
+
+        return result
     except HTTPException:
         raise
     except Exception as e:
@@ -1159,8 +1287,11 @@ async def _execute_patch(table: str, entity_id: int, patch: BaseModel, scope_pro
 async def patch_project(
     project_id: int = Path(..., description="Project ID"),
     body: ProjectPatch = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
-    return await _execute_patch("project", project_id, body)
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
+    return await _execute_patch("project", project_id, body, project_id, auth=auth)
 
 
 @router.patch("/contracts/{contract_id}", summary="Patch a contract")
@@ -1168,8 +1299,11 @@ async def patch_contract(
     contract_id: int = Path(..., description="Contract ID"),
     project_id: int = Query(..., description="Project ID for scope check"),
     body: ContractPatch = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
-    return await _execute_patch("contract", contract_id, body, project_id)
+    require_write_access(auth)
+    assert_contract_in_org(contract_id, auth["organization_id"])
+    return await _execute_patch("contract", contract_id, body, project_id, auth=auth)
 
 
 @router.patch("/clauses/{clause_id}", summary="Patch a clause")
@@ -1177,8 +1311,11 @@ async def patch_clause(
     clause_id: int = Path(..., description="Clause ID"),
     project_id: int = Query(..., description="Project ID for scope check"),
     body: ClausePatch = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
-    return await _execute_patch("clause", clause_id, body, project_id)
+    require_write_access(auth)
+    assert_clause_in_org(clause_id, auth["organization_id"])
+    return await _execute_patch("clause", clause_id, body, project_id, auth=auth)
 
 
 @router.patch("/tariffs/{tariff_id}", summary="Patch a tariff")
@@ -1186,8 +1323,11 @@ async def patch_tariff(
     tariff_id: int = Path(..., description="Tariff ID"),
     project_id: int = Query(..., description="Project ID for scope check"),
     body: TariffPatch = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
-    return await _execute_patch("clause_tariff", tariff_id, body, project_id)
+    require_write_access(auth)
+    assert_tariff_in_org(tariff_id, auth["organization_id"])
+    return await _execute_patch("clause_tariff", tariff_id, body, project_id, auth=auth)
 
 
 @router.patch("/assets/{asset_id}", summary="Patch an asset")
@@ -1195,8 +1335,11 @@ async def patch_asset(
     asset_id: int = Path(..., description="Asset ID"),
     project_id: int = Query(..., description="Project ID for scope check"),
     body: AssetPatch = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
-    return await _execute_patch("asset", asset_id, body, project_id)
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
+    return await _execute_patch("asset", asset_id, body, project_id, auth=auth)
 
 
 @router.patch("/meters/{meter_id}", summary="Patch a meter")
@@ -1204,8 +1347,11 @@ async def patch_meter(
     meter_id: int = Path(..., description="Meter ID"),
     project_id: int = Query(..., description="Project ID for scope check"),
     body: MeterPatch = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
-    return await _execute_patch("meter", meter_id, body, project_id)
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
+    return await _execute_patch("meter", meter_id, body, project_id, auth=auth)
 
 
 @router.patch("/forecasts/{forecast_id}", summary="Patch a forecast")
@@ -1213,8 +1359,11 @@ async def patch_forecast(
     forecast_id: int = Path(..., description="Forecast ID"),
     project_id: int = Query(..., description="Project ID for scope check"),
     body: ForecastPatch = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
-    return await _execute_patch("production_forecast", forecast_id, body, project_id)
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
+    return await _execute_patch("production_forecast", forecast_id, body, project_id, auth=auth)
 
 
 @router.patch("/guarantees/{guarantee_id}", summary="Patch a guarantee")
@@ -1222,24 +1371,33 @@ async def patch_guarantee(
     guarantee_id: int = Path(..., description="Guarantee ID"),
     project_id: int = Query(..., description="Project ID for scope check"),
     body: GuaranteePatch = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
-    return await _execute_patch("production_guarantee", guarantee_id, body, project_id)
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
+    return await _execute_patch("production_guarantee", guarantee_id, body, project_id, auth=auth)
 
 
 @router.patch("/contacts/{contact_id}", summary="Patch a contact")
 async def patch_contact(
     contact_id: int = Path(..., description="Contact ID"),
     body: ContactPatch = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
-    return await _execute_patch("customer_contact", contact_id, body)
+    require_write_access(auth)
+    assert_contact_in_org(contact_id, auth["organization_id"])
+    return await _execute_patch("customer_contact", contact_id, body, auth=auth)
 
 
 @router.patch("/billing-products/{billing_product_id}", summary="Patch a billing product junction")
 async def patch_billing_product(
     billing_product_id: int = Path(..., description="Contract billing product junction ID"),
     body: BillingProductJunctionPatch = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
-    return await _execute_patch("contract_billing_product", billing_product_id, body)
+    require_write_access(auth)
+    assert_billing_product_in_org(billing_product_id, auth["organization_id"])
+    return await _execute_patch("contract_billing_product", billing_product_id, body, auth=auth)
 
 
 class ContactCreate(BaseModel):
@@ -1254,7 +1412,9 @@ class ContactCreate(BaseModel):
 
 
 @router.post("/contacts", summary="Create a new contact", status_code=status.HTTP_201_CREATED)
-async def create_contact(body: ContactCreate) -> dict:
+async def create_contact(body: ContactCreate, auth: dict = Depends(require_supabase_auth)) -> dict:
+    require_write_access(auth)
+    enforce_org(body.organization_id, auth)
     if not USE_DATABASE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1289,7 +1449,10 @@ async def create_contact(body: ContactCreate) -> dict:
 @router.delete("/contacts/{contact_id}", summary="Deactivate a contact")
 async def deactivate_contact(
     contact_id: int = Path(..., description="Contact ID"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
+    require_write_access(auth)
+    assert_contact_in_org(contact_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1328,7 +1491,9 @@ class BillingProductJunctionCreate(BaseModel):
 
 
 @router.post("/billing-products", summary="Add a billing product to a contract", status_code=status.HTTP_201_CREATED)
-async def add_billing_product(body: BillingProductJunctionCreate) -> dict:
+async def add_billing_product(body: BillingProductJunctionCreate, auth: dict = Depends(require_supabase_auth)) -> dict:
+    require_write_access(auth)
+    assert_contract_in_org(body.contract_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1364,7 +1529,10 @@ async def add_billing_product(body: BillingProductJunctionCreate) -> dict:
 @router.delete("/billing-products/{billing_product_id}", summary="Remove a billing product from a contract")
 async def remove_billing_product(
     billing_product_id: int = Path(..., description="Contract billing product junction ID"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
+    require_write_access(auth)
+    assert_billing_product_in_org(billing_product_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1399,16 +1567,22 @@ async def remove_billing_product(
 async def patch_rate_period(
     rate_period_id: int = Path(..., description="Rate period ID"),
     body: RatePeriodPatch = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
-    return await _execute_patch("tariff_rate", rate_period_id, body)
+    require_write_access(auth)
+    assert_rate_period_in_org(rate_period_id, auth["organization_id"])
+    return await _execute_patch("tariff_rate", rate_period_id, body, auth=auth)
 
 
 @router.patch("/exchange-rates/{exchange_rate_id}", summary="Patch an exchange rate")
 async def patch_exchange_rate(
     exchange_rate_id: int = Path(..., description="Exchange rate ID"),
     body: ExchangeRatePatch = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
-    return await _execute_patch("exchange_rate", exchange_rate_id, body)
+    require_write_access(auth)
+    assert_exchange_rate_in_org(exchange_rate_id, auth["organization_id"])
+    return await _execute_patch("exchange_rate", exchange_rate_id, body, auth=auth)
 
 
 @router.post(
@@ -1422,7 +1596,10 @@ async def patch_exchange_rate(
 )
 async def generate_rate_periods(
     project_id: int = Path(..., description="Project ID"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1481,7 +1658,10 @@ class RebasedRateRequest(BaseModel):
 async def calculate_rebased_rate(
     project_id: int = Path(..., description="Project ID"),
     body: RebasedRateRequest = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
@@ -1555,7 +1735,10 @@ class ExchangeRateBulkResponse(BaseModel):
 async def bulk_store_exchange_rates(
     body: ExchangeRateBulkInput,
     response: Response,
+    auth: dict = Depends(require_supabase_auth),
 ) -> ExchangeRateBulkResponse:
+    require_write_access(auth)
+    enforce_org(body.organization_id, auth)
     # Deprecated: Use POST /api/ingest/fx-rates instead
     response.headers["Deprecation"] = "true"
     response.headers["Sunset"] = "2026-09-01"
@@ -1613,7 +1796,10 @@ async def bulk_store_exchange_rates(
 )
 async def apply_degradation(
     project_id: int = Path(..., description="Project ID"),
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
