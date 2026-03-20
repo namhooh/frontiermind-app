@@ -115,17 +115,19 @@ export function MemberTable({ members, currentUserId, onUpdate, onDeactivate, on
                         <option value="editor">Editor</option>
                         <option value="viewer">Viewer</option>
                       </select>
-                      <Button
-                        size="sm"
-                        variant="outline"
+                      <button
                         onClick={() => saveEdit(member.id)}
                         disabled={actionLoading === member.id}
+                        className="text-xs text-blue-600 hover:text-blue-800 font-medium disabled:opacity-50"
                       >
                         Save
-                      </Button>
-                      <Button size="sm" variant="ghost" onClick={() => setEditingId(null)}>
+                      </button>
+                      <button
+                        onClick={() => setEditingId(null)}
+                        className="text-xs text-red-500 hover:text-red-700 font-medium"
+                      >
                         Cancel
-                      </Button>
+                      </button>
                     </div>
                   ) : (
                     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-medium ${roleInfo.color}`}>
