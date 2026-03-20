@@ -50,22 +50,30 @@ ALTER TABLE role ENABLE ROW LEVEL SECURITY;
 CREATE POLICY role_self_read ON role FOR SELECT
   USING (user_id = auth.uid());
 
+-- Update is_org_admin function to include role_type check
+-- (SECURITY DEFINER bypasses RLS, avoiding infinite recursion)
+CREATE OR REPLACE FUNCTION is_org_admin(p_org_id BIGINT)
+RETURNS BOOLEAN
+LANGUAGE sql
+SECURITY DEFINER
+SET search_path = public
+STABLE
+AS $$
+  SELECT EXISTS (
+    SELECT 1 FROM role
+    WHERE user_id = auth.uid()
+      AND organization_id = p_org_id
+      AND role_type = 'admin'
+      AND is_active = true
+  );
+$$;
+
 -- Org admins can read all memberships in their org
 CREATE POLICY role_admin_read ON role FOR SELECT
-  USING (
-    organization_id IN (
-      SELECT organization_id FROM role
-      WHERE user_id = auth.uid() AND role_type = 'admin' AND is_active = true
-    )
-  );
+  USING (is_org_admin(organization_id));
 
 -- Org admins can insert/update/delete memberships in their org
 CREATE POLICY role_admin_write ON role FOR ALL
-  USING (
-    organization_id IN (
-      SELECT organization_id FROM role
-      WHERE user_id = auth.uid() AND role_type = 'admin' AND is_active = true
-    )
-  );
+  USING (is_org_admin(organization_id));
 
 COMMIT;
