@@ -215,6 +215,19 @@ function ProjectsPageContent() {
     })
   }, [])
 
+  // Pending change request count
+  const refreshPendingCount = useCallback(() => {
+    if (!selectedProjectId) return
+    adminClient.getChangeRequestSummary(selectedProjectId)
+      .then((s) => setPendingCount(s.pending + s.conflicted))
+      .catch(() => {})
+  }, [selectedProjectId])
+
+  useEffect(() => {
+    if (!selectedProjectId) { setPendingCount(0); return }
+    refreshPendingCount()
+  }, [selectedProjectId, refreshPendingCount])
+
   const refreshDashboard = useCallback(async (options?: { force?: boolean; includeMrp?: boolean }) => {
     if (!selectedProjectId) return
     try {
@@ -228,7 +241,9 @@ function ProjectsPageContent() {
     } catch {
       // Silently fail on refresh — data shown is just stale
     }
-  }, [selectedProjectId, loadProjectDashboard, fetchMrpData, applyMrpData])
+    // Also refresh pending change count
+    refreshPendingCount()
+  }, [selectedProjectId, loadProjectDashboard, fetchMrpData, applyMrpData, refreshPendingCount])
 
   // Load project from URL ?id= on mount
   useEffect(() => {
@@ -318,21 +333,6 @@ function ProjectsPageContent() {
       cancelled = true
     }
   }, [activeTab, selectedProjectId, dashboard, fetchMrpData, applyMrpData, clearMrpData])
-
-  // Fetch pending change request count for active project
-  useEffect(() => {
-    if (!selectedProjectId) { setPendingCount(0); return }
-    adminClient.getChangeRequestSummary(selectedProjectId)
-      .then((s) => setPendingCount(s.pending + s.conflicted))
-      .catch(() => setPendingCount(0))
-  }, [selectedProjectId])
-
-  const refreshPendingCount = useCallback(() => {
-    if (!selectedProjectId) return
-    adminClient.getChangeRequestSummary(selectedProjectId)
-      .then((s) => setPendingCount(s.pending + s.conflicted))
-      .catch(() => {})
-  }, [selectedProjectId])
 
   // Build lookup options from dashboard response
   const lookups = dashboard?.lookups ?? {}
