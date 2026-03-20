@@ -6,11 +6,12 @@ import { createClient } from '@/lib/supabase/client'
 /**
  * Accept Invite Page
  *
- * The auth callback route (/auth/callback) already exchanged the invite
- * code for a session and redirected here. This page just:
- * 1. Checks that a valid session exists
- * 2. Prompts the new user to set a password
- * 3. Updates member_status from 'invited' to 'active' via backend
+ * Supabase invite links redirect here with a hash fragment containing
+ * the access_token and refresh_token. This page:
+ * 1. Extracts tokens from the URL hash
+ * 2. Sets the Supabase session using those tokens
+ * 3. Prompts the new user to set a password
+ * 4. Updates member_status from 'invited' to 'active' via backend
  */
 export default function AcceptInvitePage() {
   const [password, setPassword] = useState('')
@@ -24,17 +25,59 @@ export default function AcceptInvitePage() {
   const supabase = createClient()
 
   useEffect(() => {
-    async function checkSession() {
+    async function processInvite() {
+      // Parse hash fragment: #access_token=...&refresh_token=...&type=invite
+      const hash = window.location.hash.substring(1)
+      const params = new URLSearchParams(hash)
+
+      const accessToken = params.get('access_token')
+      const refreshToken = params.get('refresh_token')
+      const errorParam = params.get('error')
+      const errorDesc = params.get('error_description')
+
+      // Check for error in hash (e.g. expired link on second click)
+      if (errorParam) {
+        setError(errorDesc?.replace(/\+/g, ' ') || 'Invite link is invalid or expired.')
+        setLoading(false)
+        return
+      }
+
+      // If we have tokens in the hash, set the session
+      if (accessToken && refreshToken) {
+        const { data, error: sessionError } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        })
+
+        if (sessionError) {
+          setError(sessionError.message)
+          setLoading(false)
+          return
+        }
+
+        if (data.user) {
+          setUserEmail(data.user.email ?? null)
+          // Clear the hash from the URL so tokens aren't exposed
+          window.history.replaceState(null, '', '/auth/accept-invite')
+          setLoading(false)
+          return
+        }
+      }
+
+      // No tokens in hash — check if there's an existing session
+      // (e.g. redirected from /auth/callback)
       const { data: { session } } = await supabase.auth.getSession()
       if (session?.user) {
         setUserEmail(session.user.email ?? null)
         setLoading(false)
-      } else {
-        setError('No active session. Please click the invite link from your email again.')
-        setLoading(false)
+        return
       }
+
+      setError('No invite token found. Please click the invite link from your email.')
+      setLoading(false)
     }
-    checkSession()
+
+    processInvite()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
