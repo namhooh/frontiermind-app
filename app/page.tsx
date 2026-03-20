@@ -1,10 +1,14 @@
 import Link from 'next/link'
+import { SignOutButton } from './components/SignOutButton'
 
 export default function LandingPage() {
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
       <div className="max-w-2xl w-full">
-        <div className="mb-10 text-center">
+        <div className="mb-10 text-center relative">
+          <div className="absolute right-0 top-0">
+            <SignOutButton />
+          </div>
           <h1
             className="text-3xl font-bold text-slate-900"
             style={{ fontFamily: "'Libre Baskerville', serif" }}
