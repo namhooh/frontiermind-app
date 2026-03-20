@@ -271,7 +271,7 @@ class JWTOnly:
             with get_db_connection() as conn:
                 with conn.cursor() as cur:
                     cur.execute(
-                        "SELECT organization_id, role_type FROM role WHERE user_id = %s AND is_active = true LIMIT 1",
+                        "SELECT organization_id, role_type FROM role WHERE user_id = %s AND member_status IN ('active', 'invited') LIMIT 1",
                         (user_id,),
                     )
                     row = cur.fetchone()
