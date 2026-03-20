@@ -138,7 +138,7 @@ export default function TeamPage() {
         )}
 
         {/* Members table */}
-        <div className="bg-white rounded-lg border border-slate-200">
+        <div className="bg-white rounded-lg border border-slate-200 overflow-visible">
           <div className="px-4 py-3 border-b border-slate-200">
             <h2 className="text-sm font-medium text-slate-900">
               {isAdmin ? 'All Members' : 'Your Membership'}

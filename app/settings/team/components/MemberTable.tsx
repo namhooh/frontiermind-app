@@ -74,7 +74,7 @@ export function MemberTable({ members, currentUserId, onUpdate, onDeactivate, on
   }
 
   return (
-    <div className="overflow-x-auto">
+    <div className="overflow-visible">
       <table className="min-w-full text-sm">
         <thead>
           <tr className="border-b border-slate-200 text-left text-xs font-medium uppercase tracking-wider text-slate-500">
@@ -151,7 +151,7 @@ export function MemberTable({ members, currentUserId, onUpdate, onDeactivate, on
                         <MoreHorizontal className="h-4 w-4 text-slate-500" />
                       </button>
                       {menuOpen === member.id && (
-                        <div className="absolute right-0 top-8 z-10 w-44 rounded-md border border-slate-200 bg-white py-1 shadow-lg">
+                        <div className="absolute right-0 top-8 z-50 w-44 rounded-md border border-slate-200 bg-white py-1 shadow-lg">
                           {member.status !== 'deactivated' && (
                             <>
                               <button
