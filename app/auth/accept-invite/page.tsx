@@ -1,14 +1,14 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { createClient } from '@/lib/supabase/client'
 
 /**
  * Accept Invite Page
  *
- * Handles the Supabase invite link flow:
- * 1. Supabase client auto-processes the invite token from the URL hash
- *    and establishes a session for the invited user (replacing any existing session)
+ * The auth callback route (/auth/callback) already exchanged the invite
+ * code for a session and redirected here. This page just:
+ * 1. Checks that a valid session exists
  * 2. Prompts the new user to set a password
  * 3. Updates member_status from 'invited' to 'active' via backend
  */
@@ -20,50 +20,21 @@ export default function AcceptInvitePage() {
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
   const [userEmail, setUserEmail] = useState<string | null>(null)
-  const readyRef = useRef(false)
 
   const supabase = createClient()
 
   useEffect(() => {
-    // Listen for auth state changes — Supabase client will auto-process
-    // the invite token from the URL hash (#access_token=...&type=invite)
-    // and fire a SIGNED_IN or TOKEN_REFRESHED event with the new session.
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        if (readyRef.current) return
-        if (session?.user) {
-          readyRef.current = true
-          setUserEmail(session.user.email ?? null)
-          setLoading(false)
-        }
-      }
-    )
-
-    // Also check if the token was already exchanged by the time this runs
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (readyRef.current) return
-      // Only accept if this looks like the invited user's session
-      // (i.e. there's a hash fragment in the URL indicating a fresh token exchange)
-      const hash = window.location.hash
-      if (session?.user && (hash.includes('access_token') || hash.includes('type=invite'))) {
-        readyRef.current = true
+    async function checkSession() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.user) {
         setUserEmail(session.user.email ?? null)
         setLoading(false)
-      }
-    })
-
-    // Timeout: if no session after 8 seconds, the link is bad
-    const timer = setTimeout(() => {
-      if (!readyRef.current) {
-        setError('Invite link is invalid or expired. Please ask your admin to send a new invite.')
+      } else {
+        setError('No active session. Please click the invite link from your email again.')
         setLoading(false)
       }
-    }, 8000)
-
-    return () => {
-      subscription.unsubscribe()
-      clearTimeout(timer)
     }
+    checkSession()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
@@ -82,7 +53,6 @@ export default function AcceptInvitePage() {
 
     setSaving(true)
     try {
-      // Set the password for the new user
       const { error: updateError } = await supabase.auth.updateUser({
         password,
       })
@@ -121,7 +91,7 @@ export default function AcceptInvitePage() {
       <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100 flex items-center justify-center p-4">
         <div className="bg-white rounded-xl shadow-lg border border-slate-200 p-8 max-w-md w-full text-center">
           <div className="animate-spin h-8 w-8 border-2 border-slate-300 border-t-blue-600 rounded-full mx-auto mb-4" />
-          <p className="text-slate-600 text-sm">Processing your invitation...</p>
+          <p className="text-slate-600 text-sm">Setting up your account...</p>
         </div>
       </div>
     )
