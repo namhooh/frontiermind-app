@@ -470,7 +470,7 @@ function ProjectsPageContent() {
                 {pendingCount} pending
               </button>
             )}
-            {!IS_DEMO && userRole === 'admin' && (
+            {!IS_DEMO && (
               <Link
                 href="/"
                 className="inline-flex items-center gap-1 text-sm text-slate-500 hover:text-slate-700"
