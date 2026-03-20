@@ -4,7 +4,6 @@ import { useEffect, useMemo, useState } from 'react'
 import { adminClient, type ProjectGroupedItem } from '@/lib/api/adminClient'
 import { BarChart3, Bell, ChevronDown, ChevronRight, Loader2, Search, X } from 'lucide-react'
 import Link from 'next/link'
-import { CURRENT_ORGANIZATION_ID } from '@/app/projects/utils/constants'
 
 type SortBy = 'name' | 'sage_id' | 'country'
 
@@ -12,9 +11,10 @@ interface ProjectSidebarProps {
   selectedProjectId: number | null
   onSelectProject: (id: number) => void
   onSelectHome?: () => void
+  orgId?: number
 }
 
-export function ProjectSidebar({ selectedProjectId, onSelectProject, onSelectHome }: ProjectSidebarProps) {
+export function ProjectSidebar({ selectedProjectId, onSelectProject, onSelectHome, orgId }: ProjectSidebarProps) {
   const [projects, setProjects] = useState<ProjectGroupedItem[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -23,10 +23,12 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject, onSelectHom
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set())
 
   useEffect(() => {
+    // Wait until orgId is available (resolveOrg in parent sets it on adminClient)
+    if (!orgId) return
     async function load() {
       try {
         const all = await adminClient.listProjectsGrouped()
-        setProjects(all.filter((p) => p.organization_id === CURRENT_ORGANIZATION_ID))
+        setProjects(all.filter((p) => p.organization_id === orgId))
       } catch (e) {
         setError(e instanceof Error ? e.message : 'Failed to load projects')
       } finally {
@@ -34,7 +36,7 @@ export function ProjectSidebar({ selectedProjectId, onSelectProject, onSelectHom
       }
     }
     load()
-  }, [])
+  }, [orgId])
 
   const badgeWidth = useMemo(() => {
     const maxLen = projects.reduce((max, p) => Math.max(max, p.sage_id?.length ?? 0), 0)

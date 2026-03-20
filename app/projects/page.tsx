@@ -107,12 +107,14 @@ function ProjectsPageContent() {
   const [userId, setUserId] = useState<string>('')
   const [pendingCount, setPendingCount] = useState(0)
   const [pendingPanelOpen, setPendingPanelOpen] = useState(false)
+  const [orgId, setOrgId] = useState<number | undefined>()
 
   // Resolve org and user role from Supabase session
   useEffect(() => {
     async function resolveOrg() {
       if (IS_DEMO) {
         adminClient.setOrganizationId(1)
+        setOrgId(1)
         return
       }
       try {
@@ -129,12 +131,13 @@ function ProjectsPageContent() {
             .single()
           if (data) {
             adminClient.setOrganizationId(data.organization_id)
+            setOrgId(data.organization_id)
             setUserRole(data.role_type)
           }
         }
       } catch {
         // Fallback: org 1 for dev
-        if (process.env.NODE_ENV === 'development') adminClient.setOrganizationId(1)
+        if (process.env.NODE_ENV === 'development') { adminClient.setOrganizationId(1); setOrgId(1) }
       }
     }
     resolveOrg()
@@ -502,6 +505,7 @@ function ProjectsPageContent() {
                   selectedProjectId={selectedProjectId}
                   onSelectProject={handleSelectProject}
                   onSelectHome={handleSelectHome}
+                  orgId={orgId}
                 />
               </div>
             ) : (
