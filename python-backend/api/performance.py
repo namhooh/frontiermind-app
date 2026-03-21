@@ -12,10 +12,12 @@ from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, HTTPException, UploadFile, File, Path, Query, status
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Path, Query, status
 from pydantic import BaseModel, Field
 
 from db.database import get_db_connection, init_connection_pool
+from middleware.supabase_auth import require_supabase_auth
+from middleware.authorization import assert_project_in_org, require_write_access
 from models.billing_cycle import ComputePerformanceRequest
 
 logger = logging.getLogger(__name__)
@@ -123,7 +125,9 @@ def _d2f(val: Any) -> Optional[float]:
 def get_plant_performance(
     project_id: int = Path(..., description="Project ID"),
     month_limit: Optional[int] = Query(12, alias="months", description="Number of recent months to return. Use 0 for all months."),
+    auth: dict = Depends(require_supabase_auth),
 ) -> PlantPerformanceResponse:
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(status_code=503, detail="Database not available")
 
@@ -429,7 +433,10 @@ def get_plant_performance(
 async def add_performance_manual(
     project_id: int = Path(..., description="Project ID"),
     body: ManualPerformanceEntry = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> ImportResponse:
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(status_code=503, detail="Database not available")
 
@@ -439,6 +446,41 @@ async def add_performance_manual(
     except Exception:
         raise HTTPException(status_code=400, detail="billing_month must be YYYY-MM or YYYY-MM-DD")
 
+    # Phase 3: Approval check for editors
+    from services.approval_service import check_approval_required, create_row_change_request, create_auto_approved_row_record
+    payload = body.model_dump(exclude_none=True)
+    org_id = auth["organization_id"]
+
+    if check_approval_required(auth, "performance_entry"):
+        cr_id = create_row_change_request(
+            auth, org_id, project_id, "performance_entry",
+            "meter_aggregate", payload,
+            f"Plant Performance Entry ({body.billing_month})",
+        )
+        return ImportResponse(success=True, imported_rows=0, message=f"Submitted for approval ({body.billing_month})")
+
+    result = await _apply_performance_entry(project_id, body, bm_date, auth)
+
+    # Auto-approved audit trail for admin/approver
+    try:
+        create_auto_approved_row_record(
+            auth, org_id, project_id, "performance_entry",
+            "meter_aggregate", payload,
+            f"Plant Performance Entry ({body.billing_month})",
+        )
+    except Exception as e:
+        logger.warning(f"Auto-approved audit record failed for performance_entry: {e}")
+
+    return result
+
+
+async def _apply_performance_entry(
+    project_id: int,
+    body: ManualPerformanceEntry,
+    bm_date: date,
+    auth: dict,
+) -> ImportResponse:
+    """Core performance entry logic, callable from endpoint and from approve handler."""
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
@@ -716,12 +758,15 @@ async def add_performance_manual(
 async def compute_plant_performance(
     project_id: int = Path(..., description="Project ID"),
     body: "ComputePerformanceRequest" = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
     """Compute plant_performance from meter_aggregate + production_forecast.
 
     Unlike the manual endpoint, this reads directly from existing meter_aggregate
     data — no manual input needed. Used by the billing cycle orchestrator.
     """
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(status_code=503, detail="Database not available")
 
@@ -756,7 +801,10 @@ async def compute_plant_performance(
 async def import_plant_performance(
     project_id: int = Path(..., description="Project ID"),
     file: UploadFile = File(...),
+    auth: dict = Depends(require_supabase_auth),
 ) -> ImportResponse:
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(status_code=503, detail="Database not available")
 

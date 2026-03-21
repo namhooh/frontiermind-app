@@ -102,6 +102,7 @@ database/
 │   ├── 062_tariff_formula.sql                       # Tariff formula + amendment versioning. Variables use semantic bindings (resolver_registry.py)
 │   ├── 063_role_expansion.sql                       # Role expansion (admin/approver/editor/viewer), member_status enum, invite lifecycle, RLS
 │   ├── 065_change_request.sql                       # Change request workflow: two-step edit/approval for sensitive fields
+│   ├── 066_swap_energy_column_mappings.sql          # Data migration: swap E_metered/Energy Output column mappings in tariff_formula
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -1191,7 +1192,7 @@ database/
 **v12.2 (Change Request Workflow)** - Complete
 - Migration: `065_change_request.sql`
 - New enum: `change_request_status` (pending, conflicted, approved, rejected, cancelled, superseded)
-- New table: `change_request` — two-step edit/approval workflow for financially sensitive fields
+- New table: `change_request` — two-step edit/approval workflow for financially sensitive fields and write operations
   - Polymorphic reference: `target_table` + `target_id` + `field_name` (same pattern as `audit_log`)
   - Old/new values stored as JSONB
   - Conflict detection via `base_updated_at` comparison
@@ -1199,11 +1200,15 @@ database/
   - `auto_approved` flag for admin/approver audit trail
   - `assigned_approver_id` set at submission from `project.default_approver_id` or org fallback
   - Unique index prevents duplicate pending requests for same field
+  - Phase 3 convention: `field_name = '*'` for full-row proposals, `target_id = 0` for new rows
 - Modified table: `project` — added `default_approver_id UUID`
 - Extended enum: `audit_action_type` with `CHANGE_REQUESTED`, `CHANGE_APPROVED`, `CHANGE_REJECTED`
 - Approval policy registry: `python-backend/services/approval_config.py`
 - Phase 1 designated fields: `exchange_rate.rate`, `production_guarantee.guaranteed_kwh`, `production_guarantee.p50_annual_kwh`
-- New API: `python-backend/api/change_requests.py` — summary, list, approve, reject, cancel, assign
+- Phase 2 designated fields: `clause_tariff.base_rate/lp_floor_rate/lp_ceiling_rate/lp_discount_pct`, `tariff_rate.effective_rate_contract_ccy`, `contract.effective_date/end_date/contract_term_years`
+- Phase 3 endpoint-level policies: `billing_entry`, `performance_entry`, `mrp_manual_entry`, `mrp_upload`
+- Endpoint-level approval service: `python-backend/services/approval_service.py`
+- New API: `python-backend/api/change_requests.py` — summary, list, approve, reject, cancel, assign + `_apply_row_change()` dispatcher
 
 ---
 

@@ -57,15 +57,31 @@ For local dev, set `DEV_AUTH_BYPASS=true` in `python-backend/.env` to skip JWT v
 
 ### Change Request Workflow (Two-Step Approval)
 
-Financially sensitive fields require a two-step edit/approval workflow. When an **editor** edits a designated field, the change is queued as a `change_request` instead of being applied directly. An **approver** or **admin** must then review and approve/reject.
+Financially sensitive fields and write operations require a two-step edit/approval workflow. When an **editor** edits a designated field or submits a designated write operation, the change is queued as a `change_request` instead of being applied directly. An **approver** or **admin** must then review and approve/reject.
 
-**Designated fields (Phase 1):**
+**Two types of approval:**
+
+| Type | Mechanism | `field_name` | `target_id` |
+|------|-----------|-------------|-------------|
+| **Field-level** (Phase 1-2) | Intercepts PATCH in `_execute_patch()` | actual field name | existing row ID |
+| **Endpoint-level** (Phase 3) | Checks at POST endpoint entry | `*` (full-row proposal) | `0` (row doesn't exist yet) |
+
+**Phase 1-2: Designated fields (inline edits)**
 - `exchange_rate.rate` — currency conversion rate
 - `production_guarantee.guaranteed_kwh` — annual guarantee target
 - `production_guarantee.p50_annual_kwh` — P50 baseline
+- `clause_tariff.base_rate`, `lp_floor_rate`, `lp_ceiling_rate`, `lp_discount_pct`
+- `tariff_rate.effective_rate_contract_ccy`
+- `contract.effective_date`, `end_date`, `contract_term_years`
+
+**Phase 3: Designated write operations (POST endpoints)**
+- `POST /projects/{pid}/monthly-billing/manual` — monthly billing entry (`billing_entry`)
+- `POST /projects/{pid}/plant-performance/manual` — plant performance entry (`performance_entry`)
+- `POST /projects/{pid}/mrp-manual` — manual MRP rates (`mrp_manual_entry`)
+- `POST /projects/{pid}/mrp-upload` — MRP invoice upload (`mrp_upload`); S3 upload is immediate, DB write deferred
 
 **Behavior by role:**
-| Role | Non-designated fields | Designated fields |
+| Role | Non-designated fields | Designated fields/operations |
 |------|----------------------|-------------------|
 | `admin` | Immediate save | Immediate save (auto-approved audit trail) |
 | `approver` | Immediate save | Immediate save (auto-approved audit trail) |
@@ -73,15 +89,19 @@ Financially sensitive fields require a two-step edit/approval workflow. When an 
 | `viewer` | Read-only | Read-only |
 
 **Key files:**
-- `python-backend/services/approval_config.py` — policy registry (add/remove fields here)
-- `python-backend/api/change_requests.py` — API endpoints (summary, list, approve, reject, cancel, assign)
-- `python-backend/api/entities.py` → `_execute_patch()` — intercepts designated fields for editors
-- `app/projects/components/PendingChangesPanel.tsx` — approval UI
+- `python-backend/services/approval_config.py` — policy registry (add/remove fields and endpoint policies here)
+- `python-backend/services/approval_service.py` — endpoint-level helpers (`check_approval_required`, `create_row_change_request`)
+- `python-backend/api/change_requests.py` — API endpoints + `_apply_row_change()` dispatcher for full-row approvals
+- `python-backend/api/entities.py` → `_execute_patch()` — intercepts designated fields for editors (Phase 1-2)
+- `python-backend/api/billing.py` → `_apply_billing_entry()` — extracted core logic for approve replay
+- `python-backend/api/performance.py` → `_apply_performance_entry()` — extracted core logic for approve replay
+- `python-backend/api/mrp.py` → `_apply_mrp_manual()`, `_apply_mrp_upload()` — extracted core logic for approve replay
+- `app/projects/components/PendingChangesPanel.tsx` — approval UI (renders full-row proposals as key-value list)
 - `database/migrations/065_change_request.sql` — schema
 
 **Four-eyes principle:** Requester cannot approve their own change request (`allow_self_approve = false` in policy).
 
-**Conflict detection:** `base_updated_at` is captured at submission. If the target row's `updated_at` changes before approval, the request moves to `conflicted` status.
+**Conflict detection:** `base_updated_at` is captured at submission. If the target row's `updated_at` changes before approval, the request moves to `conflicted` status. Full-row proposals (Phase 3) skip conflict check since there's no pre-existing row.
 
 **Approver assignment:** From `project.default_approver_id`, falling back to any active admin/approver in the org.
 

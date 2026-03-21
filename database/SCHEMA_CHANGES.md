@@ -2773,6 +2773,26 @@ Source: PO Summary col E "Energy Sale Type" (offtake model)
 - Admin/approver edits auto-approve with audit trail
 - All ~10 PATCH endpoints now pass `auth=auth`
 
+---
+
+### v12.3 - 2026-03-20 (Swap E_metered / Energy Output column mappings)
+
+**Description:** Data-only migration swapping `meter_aggregate` column mappings in `tariff_formula.variables` JSONB. E_metered (raw metered) now maps to `energy_kwh`; Energy Output (confirmed billing) now maps to `total_production`.
+
+**Migration:** `database/migrations/066_swap_energy_column_mappings.sql`
+
+**Changes to `tariff_formula.variables` (JSONB data only, no schema change):**
+- `monthly_metered_energy` binding: `maps_to` changed from `meter_aggregate.total_production` → `meter_aggregate.energy_kwh`
+- `annual_metered_energy` binding: same swap
+- `billing_energy_output` binding: `maps_to` changed from `meter_aggregate.energy_kwh` → `meter_aggregate.total_production`
+- `annual_billing_energy_output` binding: same swap (purely-annual ENERGY_OUTPUT formulas only)
+- PAYMENT_CALCULATION formulas: old `monthly_metered_energy` Energy Output inputs upgraded to `billing_energy_output` binding
+
+**Updated code files:**
+- `python-backend/services/pricing/resolver_registry.py` — swapped column in 4 bindings
+- `python-backend/services/pricing/formula_components.py` — updated binding_key references in payment and energy output templates
+- `contract-digitization/docs/IMPLEMENTATION_GUIDE_PRICING_TARIFF_EXTRACTION.md` — updated all column references and binding table
+
 **Phase 1 designated fields:**
 - `exchange_rate.rate`
 - `production_guarantee.guaranteed_kwh`, `p50_annual_kwh`
@@ -2781,5 +2801,53 @@ Source: PO Summary col E "Energy Sale Type" (offtake model)
 - `EditableCell.tsx` handles `outcome: 'submitted'` with amber toast
 - New `PendingChangesPanel.tsx` slide-over for reviewing/approving changes
 - Dashboard header shows pending badge count, edit toggle hidden for viewers
+
+---
+
+### v12.4 - 2026-03-21 (Approval Phase 3 — Endpoint-Level Approval for Write Paths)
+
+**Description:** Extends the two-step approval workflow from inline field edits (Phase 1-2) to POST endpoints that create/upsert rows. Editors submitting billing entries, performance data, or MRP rates now go through the same approval queue. No schema migration needed — uses existing `change_request` table with `field_name = '*'` convention for full-row proposals and `target_id = 0` for rows that don't exist yet.
+
+**No migration required.** Existing `change_request` table supports this via conventions:
+- `field_name = '*'` — full-row proposal (not a single field edit)
+- `target_id = 0` — row will be created on approve
+- `new_value` — full JSONB payload of the proposed entry
+- `old_value = null` — new row, no previous value
+
+**New policies in `approval_config.py`:**
+- `billing_entry` — Monthly Billing Entry (`POST /projects/{pid}/monthly-billing/manual`)
+- `performance_entry` — Plant Performance Entry (`POST /projects/{pid}/plant-performance/manual`)
+- `mrp_manual_entry` — Manual MRP Rate Entry (`POST /projects/{pid}/mrp-manual`)
+- `mrp_upload` — MRP Invoice Upload (`POST /projects/{pid}/mrp-upload`)
+
+**New file: `python-backend/services/approval_service.py`**
+- `check_approval_required(auth, policy_key)` — returns True if editor + policy exists
+- `create_row_change_request(...)` — creates full-row change_request
+- `create_auto_approved_row_record(...)` — audit trail for admin/approver
+
+**Modified: `python-backend/api/billing.py`**
+- Approval check at top of `add_manual_entry()`
+- Core logic extracted to `_apply_billing_entry()` for replay on approve
+
+**Modified: `python-backend/api/performance.py`**
+- Approval check at top of `add_performance_manual()`
+- Core logic extracted to `_apply_performance_entry()` for replay on approve
+
+**Modified: `python-backend/api/mrp.py`**
+- Approval check on both `admin_mrp_upload()` and `manual_mrp_entry()`
+- Core logic extracted to `_apply_mrp_upload()` and `_apply_mrp_manual()`
+- MRP upload: S3 storage is immediate (not sensitive), only DB write deferred
+
+**Modified: `python-backend/api/change_requests.py`**
+- Added `_apply_row_change()` dispatcher for `field_name = '*'` approvals
+- Approve endpoint branches: row proposals call dispatcher, single-field changes use existing UPDATE
+- Four-eyes check uses `find_policy_by_key()` for endpoint-level policies
+- MRP upload approve: downloads file from S3 and re-extracts
+
+**Frontend:**
+- `MonthlyBillingTab.tsx` — both inline edit and add-row handlers show amber toast on approval
+- `PlantPerformanceTab.tsx` — same pattern for both entry points
+- `MRPSection.tsx` — upload and manual entry handlers show amber toast on approval
+- `PendingChangesPanel.tsx` — full-row proposals (`field_name = '*'`) render as key-value list instead of old→new diff; subtitle shows "new entry" instead of "ID: 0"
 
 ---

@@ -824,7 +824,7 @@ async def admin_mrp_upload(
             detail={"success": False, "message": str(e)},
         )
 
-    # 5. Upload to S3
+    # 5. Upload to S3 (always — S3 storage is not the sensitive action)
     from api.submissions import _upload_to_s3
 
     year = billing_month_date.year
@@ -846,14 +846,82 @@ async def admin_mrp_upload(
             detail={"success": False, "message": "Billing month cannot precede project COD date"},
         )
 
+    # Phase 3: Approval check for editors — S3 is uploaded, defer only DB write
+    from services.approval_service import check_approval_required, create_row_change_request, create_auto_approved_row_record
+
+    if check_approval_required(auth, "mrp_upload"):
+        payload = {
+            "filename": file.filename,
+            "s3_key": s3_key,
+            "billing_month": billing_month_str,
+            "operating_year": operating_year,
+            "file_hash": file_hash,
+            "content_type": file.content_type,
+        }
+        cr_id = create_row_change_request(
+            auth, org_id, project_id, "mrp_upload",
+            "reference_price", payload,
+            f"MRP Invoice Upload ({billing_month_str[:7]})",
+        )
+        return AdminUploadResponse(
+            observation_id=0,
+            mrp_per_kwh=0,
+            total_variable_charges=0,
+            total_kwh_invoiced=0,
+            line_items_count=0,
+            extraction_confidence="pending_approval",
+            message=f"Uploaded to S3, extraction submitted for approval ({billing_month_str[:7]})",
+            billing_month_stored=billing_month_str,
+        )
+
     # 8. Extract and store MRP
+    result = await _apply_mrp_upload(
+        file_bytes=file_bytes,
+        filename=file.filename,
+        project_id=project_id,
+        org_id=org_id,
+        billing_month_str=billing_month_str,
+        operating_year=operating_year,
+        s3_key=s3_key,
+        file_hash=file_hash,
+    )
+
+    # Auto-approved audit trail for admin/approver
+    try:
+        create_auto_approved_row_record(
+            auth, org_id, project_id, "mrp_upload",
+            "reference_price", {
+                "filename": file.filename,
+                "s3_key": s3_key,
+                "billing_month": billing_month_str,
+                "observation_id": result.observation_id,
+            },
+            f"MRP Invoice Upload ({billing_month_str[:7]})",
+        )
+    except Exception as e:
+        logger.warning(f"Auto-approved audit record failed for mrp_upload: {e}")
+
+    return result
+
+
+async def _apply_mrp_upload(
+    file_bytes: bytes,
+    filename: str,
+    project_id: int,
+    org_id: int,
+    billing_month_str: str,
+    operating_year: int,
+    s3_key: str,
+    file_hash: str,
+) -> AdminUploadResponse:
+    """Core MRP upload extraction logic, callable from endpoint and from approve handler."""
     try:
         from services.mrp.extraction_service import MRPExtractionService
 
         extraction_service = MRPExtractionService()
         result = extraction_service.extract_and_store(
             file_bytes=file_bytes,
-            filename=file.filename,
+            filename=filename,
             project_id=project_id,
             org_id=org_id,
             billing_month=billing_month_str,
@@ -904,10 +972,52 @@ async def manual_mrp_entry(
     when is_baseline=True (sets operating_year=0).
     """
     require_write_access(auth)
-    from calendar import monthrange
-
     org_id = auth["organization_id"]
     _validate_project_ownership(project_id, org_id)
+
+    # Phase 3: Approval check for editors
+    from services.approval_service import check_approval_required, create_row_change_request, create_auto_approved_row_record
+
+    if check_approval_required(auth, "mrp_manual_entry"):
+        # Serialize the full payload for approval
+        entries_label = ", ".join(e.billing_month for e in body.entries[:3])
+        if len(body.entries) > 3:
+            entries_label += f" (+{len(body.entries) - 3} more)"
+        payload = body.model_dump()
+        cr_id = create_row_change_request(
+            auth, org_id, project_id, "mrp_manual_entry",
+            "reference_price", payload,
+            f"Manual MRP Rate Entry ({entries_label})",
+        )
+        return ManualMRPBatchResponse(
+            inserted_count=0,
+            observation_ids=[],
+            message=f"Submitted for approval ({entries_label})",
+        )
+
+    result = await _apply_mrp_manual(project_id, body, org_id)
+
+    # Auto-approved audit trail for admin/approver
+    try:
+        entries_label = ", ".join(e.billing_month for e in body.entries[:3])
+        create_auto_approved_row_record(
+            auth, org_id, project_id, "mrp_manual_entry",
+            "reference_price", body.model_dump(),
+            f"Manual MRP Rate Entry ({entries_label})",
+        )
+    except Exception as e:
+        logger.warning(f"Auto-approved audit record failed for mrp_manual_entry: {e}")
+
+    return result
+
+
+async def _apply_mrp_manual(
+    project_id: int,
+    body: ManualMRPBatchRequest,
+    org_id: int,
+) -> ManualMRPBatchResponse:
+    """Core MRP manual entry logic, callable from endpoint and from approve handler."""
+    from calendar import monthrange
 
     # Resolve currency_id
     currency_id = None

@@ -32,6 +32,20 @@ function formatValue(val: unknown): string {
   return String(val)
 }
 
+/** Pretty-print a JSONB payload for full-row proposals (field_name = '*'). */
+function formatPayload(val: unknown): { key: string; value: string }[] {
+  if (val === null || val === undefined) return []
+  if (typeof val === 'object' && !Array.isArray(val)) {
+    return Object.entries(val as Record<string, unknown>)
+      .filter(([, v]) => v !== null && v !== undefined)
+      .map(([k, v]) => ({
+        key: k.replace(/_/g, ' '),
+        value: typeof v === 'object' ? JSON.stringify(v) : String(v),
+      }))
+  }
+  return [{ key: 'value', value: formatValue(val) }]
+}
+
 export function PendingChangesPanel({ projectId, open, onClose, userRole, userId, onChanged }: PendingChangesPanelProps) {
   const [requests, setRequests] = useState<ChangeRequest[]>([])
   const [loading, setLoading] = useState(false)
@@ -193,23 +207,40 @@ export function PendingChangesPanel({ projectId, open, onClose, userRole, userId
                       {cr.display_label || cr.field_name}
                     </p>
                     <p className="text-xs text-slate-500">
-                      {cr.target_table}.{cr.field_name} (ID: {cr.target_id})
+                      {cr.field_name === '*'
+                        ? `${cr.target_table} — new entry`
+                        : `${cr.target_table}.${cr.field_name} (ID: ${cr.target_id})`}
                     </p>
                   </div>
                   <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
                 </div>
 
                 {/* Diff */}
-                <div className="grid grid-cols-2 gap-2 text-xs">
-                  <div>
-                    <span className="text-slate-400">Current</span>
-                    <p className="font-mono text-slate-600">{formatValue(cr.old_value)}</p>
+                {cr.field_name === '*' ? (
+                  /* Full-row proposal: show payload as key-value list */
+                  <div className="text-xs space-y-1">
+                    <span className="text-slate-400">Proposed entry</span>
+                    <div className="bg-amber-50/50 rounded p-2 space-y-0.5">
+                      {formatPayload(cr.new_value).map(({ key, value }) => (
+                        <div key={key} className="flex justify-between gap-2">
+                          <span className="text-slate-500 capitalize">{key}</span>
+                          <span className="font-mono text-amber-700 font-medium text-right truncate max-w-[200px]">{value}</span>
+                        </div>
+                      ))}
+                    </div>
                   </div>
-                  <div>
-                    <span className="text-slate-400">Proposed</span>
-                    <p className="font-mono text-amber-700 font-medium">{formatValue(cr.new_value)}</p>
+                ) : (
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div>
+                      <span className="text-slate-400">Current</span>
+                      <p className="font-mono text-slate-600">{formatValue(cr.old_value)}</p>
+                    </div>
+                    <div>
+                      <span className="text-slate-400">Proposed</span>
+                      <p className="font-mono text-amber-700 font-medium">{formatValue(cr.new_value)}</p>
+                    </div>
                   </div>
-                </div>
+                )}
 
                 {/* Meta */}
                 <div className="flex items-center gap-3 text-xs text-slate-400">

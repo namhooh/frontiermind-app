@@ -63,6 +63,27 @@ POLICIES: dict[str, ApprovalPolicy] = {
         },
         display_name="Contract Terms Change",
     ),
+    # Phase 3: endpoint-level policies (full-row proposals, not field-level)
+    "billing_entry": ApprovalPolicy(
+        policy_key="billing_entry",
+        fields=set(),
+        display_name="Monthly Billing Entry",
+    ),
+    "performance_entry": ApprovalPolicy(
+        policy_key="performance_entry",
+        fields=set(),
+        display_name="Plant Performance Entry",
+    ),
+    "mrp_manual_entry": ApprovalPolicy(
+        policy_key="mrp_manual_entry",
+        fields=set(),
+        display_name="Manual MRP Rate Entry",
+    ),
+    "mrp_upload": ApprovalPolicy(
+        policy_key="mrp_upload",
+        fields=set(),
+        display_name="MRP Invoice Upload",
+    ),
 }
 
 # Pre-compute lookup set for fast checks
@@ -75,6 +96,11 @@ for _policy in POLICIES.values():
 def find_policy(table: str, field: str) -> Optional[ApprovalPolicy]:
     """Return the ApprovalPolicy for a (table, field) pair, or None."""
     return _APPROVAL_LOOKUP.get((table, field))
+
+
+def find_policy_by_key(policy_key: str) -> Optional[ApprovalPolicy]:
+    """Return the ApprovalPolicy for a given policy_key, or None."""
+    return POLICIES.get(policy_key)
 
 
 def requires_approval(table: str, field: str) -> bool:

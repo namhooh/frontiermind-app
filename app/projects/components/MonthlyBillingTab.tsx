@@ -75,11 +75,15 @@ function InlineNumberEdit({
     setSaving(true)
     setEditing(false)
     try {
-      await adminClient.addManualBillingEntry(projectId, {
+      const res = await adminClient.addManualBillingEntry(projectId, {
         billing_month: billingMonth,
         [field]: num,
       })
-      toast('Field updated', { duration: 3000 })
+      if (res.message?.includes('approval')) {
+        toast(res.message, { duration: 4000, className: 'bg-amber-50 text-amber-900 border-amber-200' })
+      } else {
+        toast('Field updated', { duration: 3000 })
+      }
       onSaved()
     } catch {
       toast.error('Save failed')
@@ -339,12 +343,16 @@ export function MonthlyBillingTab({ projectId, editMode }: MonthlyBillingTabProp
     }
     setSaving(true)
     try {
-      await adminClient.addManualBillingEntry(projectId, {
+      const res = await adminClient.addManualBillingEntry(projectId, {
         billing_month: draft.billing_month,
         actual_kwh: draft.actual_kwh ? parseFloat(draft.actual_kwh) : undefined,
         forecast_kwh: draft.forecast_kwh ? parseFloat(draft.forecast_kwh) : undefined,
       })
-      toast.success(`Saved ${draft.billing_month}`)
+      if (res.message?.includes('approval')) {
+        toast(res.message, { duration: 4000, className: 'bg-amber-50 text-amber-900 border-amber-200' })
+      } else {
+        toast.success(`Saved ${draft.billing_month}`)
+      }
       setShowAddRow(false)
       setDraft({ billing_month: '', actual_kwh: '', forecast_kwh: '' })
       await fetchData({ force: true })

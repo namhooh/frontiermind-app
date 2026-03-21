@@ -9,6 +9,7 @@ Endpoints for the two-step edit/approval workflow:
 
 import json
 import logging
+import os
 from datetime import datetime, timezone, date
 from decimal import Decimal
 from typing import Optional
@@ -213,6 +214,64 @@ def create_change_request(
 
 
 # ---------------------------------------------------------------------------
+# Full-row proposal dispatcher (Phase 3)
+# ---------------------------------------------------------------------------
+
+async def _apply_row_change(policy_key: str, payload: dict, project_id: int, org_id: int) -> None:
+    """Replay the original endpoint logic for a full-row change_request approval.
+
+    Each policy_key maps to the extracted core function from the original endpoint.
+    """
+    if policy_key == "billing_entry":
+        from api.billing import _apply_billing_entry, ManualEntryRequest
+        body = ManualEntryRequest(**payload)
+        parts = body.billing_month.split("-")
+        bm_date = date(int(parts[0]), int(parts[1]), 1)
+        # auth not needed for core logic — pass a minimal dict
+        await _apply_billing_entry(project_id, body, bm_date, {"organization_id": org_id, "role": "admin"})
+
+    elif policy_key == "performance_entry":
+        from api.performance import _apply_performance_entry, ManualPerformanceEntry
+        body = ManualPerformanceEntry(**payload)
+        parts = body.billing_month.split("-")
+        bm_date = date(int(parts[0]), int(parts[1]), 1)
+        await _apply_performance_entry(project_id, body, bm_date, {"organization_id": org_id, "role": "admin"})
+
+    elif policy_key == "mrp_manual_entry":
+        from api.mrp import _apply_mrp_manual
+        from models.mrp import ManualMRPBatchRequest
+        body = ManualMRPBatchRequest(**payload)
+        await _apply_mrp_manual(project_id, body, org_id)
+
+    elif policy_key == "mrp_upload":
+        from api.mrp import _apply_mrp_upload
+        # For MRP upload, the file is already in S3. Download and re-extract.
+        import boto3
+        s3_key = payload["s3_key"]
+        try:
+            s3 = boto3.client("s3")
+            bucket = os.environ.get("MRP_S3_BUCKET", "frontiermind-mrp")
+            obj = s3.get_object(Bucket=bucket, Key=s3_key)
+            file_bytes = obj["Body"].read()
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Failed to retrieve file from S3: {e}")
+
+        await _apply_mrp_upload(
+            file_bytes=file_bytes,
+            filename=payload.get("filename", "uploaded.pdf"),
+            project_id=project_id,
+            org_id=org_id,
+            billing_month_str=payload["billing_month"],
+            operating_year=payload.get("operating_year", 1),
+            s3_key=s3_key,
+            file_hash=payload.get("file_hash", ""),
+        )
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown policy_key for row change: {policy_key}")
+
+
+# ---------------------------------------------------------------------------
 # Endpoints
 # ---------------------------------------------------------------------------
 
@@ -311,39 +370,44 @@ async def approve_change_request(
         raise HTTPException(status_code=400, detail=f"Cannot approve a {cr['change_request_status']} request")
 
     # Four-eyes check
-    policy = find_policy(cr["target_table"], cr["field_name"])
+    from services.approval_config import find_policy_by_key
+    policy = find_policy(cr["target_table"], cr["field_name"]) or find_policy_by_key(cr["policy_key"])
     if policy and not policy.allow_self_approve and str(cr["requested_by"]) == user_id:
         raise HTTPException(status_code=403, detail="Cannot approve your own change request (four-eyes principle)")
 
-    # Conflict check: compare base_updated_at with current row
-    with get_db_connection() as conn:
-        with conn.cursor() as cur:
-            cur.execute(
-                f"SELECT updated_at FROM {cr['target_table']} WHERE id = %s",
-                (cr["target_id"],),
-            )
-            target_row = cur.fetchone()
+    # Full-row proposal (Phase 3) vs single-field change (Phase 1-2)
+    is_row_proposal = cr["field_name"] == "*"
 
-    if not target_row:
-        raise HTTPException(status_code=404, detail="Target row no longer exists")
+    if not is_row_proposal:
+        # Conflict check: compare base_updated_at with current row
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    f"SELECT updated_at FROM {cr['target_table']} WHERE id = %s",
+                    (cr["target_id"],),
+                )
+                target_row = cur.fetchone()
 
-    if cr["base_updated_at"] and target_row.get("updated_at"):
-        if target_row["updated_at"] != cr["base_updated_at"]:
-            # Move to conflicted
-            now = datetime.now(timezone.utc)
-            with get_db_connection() as conn:
-                with conn.cursor() as cur:
-                    cur.execute(
-                        """
-                        UPDATE change_request
-                        SET change_request_status = 'conflicted', reviewed_by = %s, reviewed_at = %s,
-                            review_note = 'Underlying data changed since submission'
-                        WHERE id = %s
-                        """,
-                        (user_id, now, cr_id),
-                    )
-                    conn.commit()
-            return {"success": False, "status": "conflicted", "message": "Underlying data changed since submission. Please re-submit."}
+        if not target_row:
+            raise HTTPException(status_code=404, detail="Target row no longer exists")
+
+        if cr["base_updated_at"] and target_row.get("updated_at"):
+            if target_row["updated_at"] != cr["base_updated_at"]:
+                # Move to conflicted
+                now = datetime.now(timezone.utc)
+                with get_db_connection() as conn:
+                    with conn.cursor() as cur:
+                        cur.execute(
+                            """
+                            UPDATE change_request
+                            SET change_request_status = 'conflicted', reviewed_by = %s, reviewed_at = %s,
+                                review_note = 'Underlying data changed since submission'
+                            WHERE id = %s
+                            """,
+                            (user_id, now, cr_id),
+                        )
+                        conn.commit()
+                return {"success": False, "status": "conflicted", "message": "Underlying data changed since submission. Please re-submit."}
 
     # Apply the change
     new_value = cr["new_value"]
@@ -352,18 +416,26 @@ async def approve_change_request(
         new_value = json.loads(new_value)
 
     now = datetime.now(timezone.utc)
+
+    if is_row_proposal:
+        # Full-row proposal — dispatch to the original endpoint logic
+        await _apply_row_change(cr["policy_key"], new_value, cr["project_id"], cr["organization_id"])
+    else:
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                # Apply the UPDATE
+                cur.execute(
+                    f"UPDATE {cr['target_table']} SET {cr['field_name']} = %s, updated_at = NOW() WHERE id = %s RETURNING id",
+                    (new_value, cr["target_id"]),
+                )
+                if not cur.fetchone():
+                    conn.rollback()
+                    raise HTTPException(status_code=404, detail="Target row not found during apply")
+                conn.commit()
+
+    # Mark approved
     with get_db_connection() as conn:
         with conn.cursor() as cur:
-            # Apply the UPDATE
-            cur.execute(
-                f"UPDATE {cr['target_table']} SET {cr['field_name']} = %s, updated_at = NOW() WHERE id = %s RETURNING id",
-                (new_value, cr["target_id"]),
-            )
-            if not cur.fetchone():
-                conn.rollback()
-                raise HTTPException(status_code=404, detail="Target row not found during apply")
-
-            # Mark approved
             cur.execute(
                 """
                 UPDATE change_request

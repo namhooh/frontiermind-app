@@ -16,11 +16,13 @@ from datetime import date, datetime
 from decimal import Decimal, ROUND_HALF_UP, ROUND_HALF_EVEN, ROUND_FLOOR, ROUND_CEILING, InvalidOperation
 from typing import Any, List, Optional
 
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Request, UploadFile, File, Path, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, UploadFile, File, Path, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from db.database import get_db_connection, init_connection_pool
+from middleware.supabase_auth import require_supabase_auth
+from middleware.authorization import assert_project_in_org, require_write_access
 from services.audit_service import log_business_event
 from models.billing_cycle import GenerateTariffRatesRequest, RunCycleRequest
 
@@ -392,6 +394,7 @@ async def generate_expected_invoice(
     background_tasks: BackgroundTasks,
     project_id: int = Path(..., description="Project ID"),
     body: GenerateInvoiceRequest = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
     """Generate expected invoice from meter_aggregate + tariff_rate + tax config.
 
@@ -399,6 +402,8 @@ async def generate_expected_invoice(
     Writes atomically to expected_invoice_header and expected_invoice_line_item.
     Supports versioning: if a current invoice exists, it's superseded.
     """
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(status_code=503, detail="Database not available")
 
@@ -479,6 +484,7 @@ def _resolve_basis(
 async def generate_tariff_rates(
     project_id: int = Path(..., description="Project ID"),
     body: "GenerateTariffRatesRequest" = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
     """Generate tariff rates from clause_tariff + FX + MRP.
 
@@ -486,6 +492,8 @@ async def generate_tariff_rates(
     - Deterministic → RatePeriodGenerator
     - Floating → RebasedMarketPriceEngine (requires FX + MRP)
     """
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(status_code=503, detail="Database not available")
 
@@ -525,6 +533,7 @@ async def generate_tariff_rates(
 async def run_billing_cycle(
     project_id: int = Path(..., description="Project ID"),
     body: "RunCycleRequest" = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> dict:
     """Run the full monthly billing cycle as a dependency graph.
 
@@ -532,6 +541,8 @@ async def run_billing_cycle(
     Layer 2: Compute (tariff rates + plant performance in parallel branches)
     Layer 3: Generate expected invoice
     """
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(status_code=503, detail="Database not available")
 
@@ -582,7 +593,9 @@ _METER_AGG_DEDUP = """
 def get_monthly_billing(
     project_id: int = Path(..., description="Project ID"),
     month_limit: Optional[int] = Query(12, alias="months", description="Number of recent months to return. Use 0 for all months."),
+    auth: dict = Depends(require_supabase_auth),
 ) -> MonthlyBillingResponse:
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(status_code=503, detail="Database not available")
 
@@ -917,7 +930,10 @@ def get_monthly_billing(
 async def add_manual_entry(
     project_id: int = Path(..., description="Project ID"),
     body: ManualEntryRequest = ...,
+    auth: dict = Depends(require_supabase_auth),
 ) -> ImportResponse:
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(status_code=503, detail="Database not available")
 
@@ -930,6 +946,41 @@ async def add_manual_entry(
     if body.actual_kwh is None and body.forecast_kwh is None:
         raise HTTPException(status_code=400, detail="At least one of actual_kwh or forecast_kwh required")
 
+    # Phase 3: Approval check for editors
+    from services.approval_service import check_approval_required, create_row_change_request, create_auto_approved_row_record
+    payload = body.model_dump(exclude_none=True)
+    org_id = auth["organization_id"]
+
+    if check_approval_required(auth, "billing_entry"):
+        cr_id = create_row_change_request(
+            auth, org_id, project_id, "billing_entry",
+            "meter_aggregate", payload,
+            f"Monthly Billing Entry ({body.billing_month})",
+        )
+        return ImportResponse(success=True, imported_rows=0, message=f"Submitted for approval ({body.billing_month})")
+
+    result = await _apply_billing_entry(project_id, body, bm_date, auth)
+
+    # Auto-approved audit trail for admin/approver
+    try:
+        create_auto_approved_row_record(
+            auth, org_id, project_id, "billing_entry",
+            "meter_aggregate", payload,
+            f"Monthly Billing Entry ({body.billing_month})",
+        )
+    except Exception as e:
+        logger.warning(f"Auto-approved audit record failed for billing_entry: {e}")
+
+    return result
+
+
+async def _apply_billing_entry(
+    project_id: int,
+    body: ManualEntryRequest,
+    bm_date: date,
+    auth: dict,
+) -> ImportResponse:
+    """Core billing entry logic, callable from endpoint and from approve handler."""
     try:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
@@ -1033,7 +1084,10 @@ async def add_manual_entry(
 async def import_monthly_billing(
     project_id: int = Path(..., description="Project ID"),
     file: UploadFile = File(...),
+    auth: dict = Depends(require_supabase_auth),
 ) -> ImportResponse:
+    require_write_access(auth)
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(status_code=503, detail="Database not available")
 
@@ -1112,7 +1166,9 @@ async def import_monthly_billing(
 )
 async def export_monthly_billing(
     project_id: int = Path(..., description="Project ID"),
+    auth: dict = Depends(require_supabase_auth),
 ):
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(status_code=503, detail="Database not available")
 
@@ -1296,9 +1352,11 @@ def get_meter_billing(
     project_id: int = Path(..., description="Project ID"),
     invoice_direction: str = Query("payable", description="Invoice direction: 'payable' or 'receivable'"),
     month_limit: Optional[int] = Query(12, alias="months", description="Number of recent months to return. Use 0 for all months."),
+    auth: dict = Depends(require_supabase_auth),
 ) -> MeterBillingResponse:
     """Per-meter billing breakdown with metered + available energy per meter.
     Includes expected_invoice data when available."""
+    assert_project_in_org(project_id, auth["organization_id"])
     if not USE_DATABASE:
         raise HTTPException(status_code=503, detail="Database not available")
 

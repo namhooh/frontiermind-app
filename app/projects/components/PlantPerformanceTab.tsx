@@ -150,13 +150,17 @@ export function PlantPerformanceTab({ projectId, editMode }: PlantPerformanceTab
     if (!draft.billing_month) { toast.error('Billing month is required'); return }
     setSaving(true)
     try {
-      await adminClient.addPlantPerformanceEntry(projectId, {
+      const res = await adminClient.addPlantPerformanceEntry(projectId, {
         billing_month: draft.billing_month,
         ghi_irradiance_wm2: draft.ghi ? parseFloat(draft.ghi) : undefined,
         actual_availability_pct: draft.availability ? parseFloat(draft.availability) : undefined,
         comments: draft.comments || undefined,
       })
-      toast.success(`Saved ${draft.billing_month}`)
+      if (res.message?.includes('approval')) {
+        toast(res.message, { duration: 4000, className: 'bg-amber-50 text-amber-900 border-amber-200' })
+      } else {
+        toast.success(`Saved ${draft.billing_month}`)
+      }
       setShowAddRow(false)
       setDraft({ billing_month: '', ghi: '', availability: '', comments: '' })
       await fetchData({ force: true })
@@ -732,11 +736,15 @@ function InlinePerfEdit({
     setSaving(true)
     setEditing(false)
     try {
-      await adminClient.addPlantPerformanceEntry(projectId, {
+      const res = await adminClient.addPlantPerformanceEntry(projectId, {
         billing_month: billingMonth,
         [field]: num,
       })
-      toast('Field updated', { duration: 3000 })
+      if (res.message?.includes('approval')) {
+        toast(res.message, { duration: 4000, className: 'bg-amber-50 text-amber-900 border-amber-200' })
+      } else {
+        toast('Field updated', { duration: 3000 })
+      }
       onSaved()
     } catch {
       toast.error('Save failed')

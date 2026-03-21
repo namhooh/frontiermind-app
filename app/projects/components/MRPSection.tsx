@@ -199,12 +199,16 @@ export function MRPSection({
       formData.append('file', uploadFile)
       formData.append('billing_month', uploadMonth)
       const res = await adminClient.uploadMRPInvoice(pid, orgId, formData)
-      const storedLabel = res.billing_month_stored ? formatBillingMonth(res.billing_month_stored) : ''
-      toast.success(`MRP extracted: ${mrpFormatMRP(res.mrp_per_kwh)} /kWh (${res.extraction_confidence} confidence)${storedLabel ? ` — ${storedLabel}` : ''}`)
-      if (res.period_mismatch) {
-        const extracted = formatBillingMonth(res.period_mismatch.extracted)
-        const userProvided = formatBillingMonth(res.period_mismatch.user_provided)
-        toast.warning(`Billing period corrected: invoice shows ${extracted}, you entered ${userProvided}.`)
+      if (res.extraction_confidence === 'pending_approval') {
+        toast(res.message, { duration: 4000, className: 'bg-amber-50 text-amber-900 border-amber-200' })
+      } else {
+        const storedLabel = res.billing_month_stored ? formatBillingMonth(res.billing_month_stored) : ''
+        toast.success(`MRP extracted: ${mrpFormatMRP(res.mrp_per_kwh)} /kWh (${res.extraction_confidence} confidence)${storedLabel ? ` — ${storedLabel}` : ''}`)
+        if (res.period_mismatch) {
+          const extracted = formatBillingMonth(res.period_mismatch.extracted)
+          const userProvided = formatBillingMonth(res.period_mismatch.user_provided)
+          toast.warning(`Billing period corrected: invoice shows ${extracted}, you entered ${userProvided}.`)
+        }
       }
       setShowUploadDialog(false)
       setUploadFile(null)
@@ -290,7 +294,11 @@ export function MRPSection({
         entries: [{ billing_month: manualEntryPeriod, mrp_per_kwh: parseFloat(manualEntryMrp) }],
         is_baseline: manualEntryIsBaseline,
       })
-      toast.success(res.message)
+      if (res.message?.includes('approval')) {
+        toast(res.message, { duration: 4000, className: 'bg-amber-50 text-amber-900 border-amber-200' })
+      } else {
+        toast.success(res.message)
+      }
       setShowManualEntryDialog(false)
       onSaved?.()
     } catch (e) {
