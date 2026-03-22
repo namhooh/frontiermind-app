@@ -238,7 +238,7 @@ STAGE D: Pricing & Enrichment (Steps 9-11)
   [D3] billing_tax_rule (invoice tax lines, project-scoped)
   [D4] PPA PDF parsing — clause extraction, amendment reconciliation (final)
   [D5] price_index (US CPI data from Revenue Masterfile) — BLOCKED: migration pending
-  [D6] loan_schedule + loan_payment — BLOCKED: migration pending
+  [D6] loan_repayment + rental_ancillary_charge — DONE (migration 066, Step 7h)
 ```
 
 ### FK Dependency Order (full)
@@ -269,7 +269,7 @@ STAGE D: Pricing & Enrichment (Steps 9-11)
 | D3 | `billing_tax_rule` | `organization` | Invoice tax lines |
 | D4 | `clause` + `clause_relationship` | `contract` | PPA PDF parsing |
 | D5 | `price_index` | -- | **PENDING MIGRATION** |
-| D6 | `loan_schedule` + `loan_payment` | `contract` | **PENDING MIGRATION** |
+| D6 | `loan_repayment` + `rental_ancillary_charge` | `clause_tariff`, `contract_line` | Migration 066 + Step 7h |
 
 ---
 
@@ -596,8 +596,10 @@ Loan repayment schedules with columns: Month, Principal, Interest, Payment, Clos
 | `source_doc_ref` | VARCHAR | Tab name + row reference |
 | `invoice_line_linkage` | VARCHAR | Link to matching invoice line item (from Step 8 calibration) |
 
-→ `loan_schedule` + `loan_payment` tables (**PENDING MIGRATION** — use this minimum schema as design input)
-→ Interim: Store in `project.technical_specs.loan_schedule` JSONB with above fields
+→ **DONE:** Normalized into `loan_repayment` table (migration 066) linked to `clause_tariff` rows with `energy_sale_type = LOAN`
+→ Loan terms stored in `clause_tariff.logic_parameters` JSONB (loan_variant, opening_balance, etc.)
+→ Population: `python-backend/scripts/step7h_loan_rental_normalize.py`
+→ Legacy JSONB in `project.technical_specs.loan_schedule` retained for backward compat
 
 #### 7f. "Rental and Ancillary" tab
 
@@ -612,8 +614,10 @@ Monthly charges per project, per operating year:
 | Ampersand | BESS Charge | 18 |
 | Zoodlabs | Rental Fee | 21 |
 
-→ Interim: Store in `project.technical_specs.rental_schedule` JSONB using minimum schema: amount, due_date, period, currency, status, source_doc_ref, invoice_line_linkage
-→ Link rental line items to matching invoice lines during Step 8 calibration
+→ **DONE:** Normalized into `rental_ancillary_charge` table (migration 066) linked to `clause_tariff` + `contract_line`
+→ Population: `python-backend/scripts/step7h_loan_rental_normalize.py`
+→ Quarantine: AMP01 skipped (placeholder data), AR01 tail rows flagged
+→ Legacy JSONB in `project.technical_specs.rental_schedule` retained for backward compat
 
 #### 7g. "US CPI" tab
 
@@ -931,11 +935,11 @@ DO $$ ... RAISE EXCEPTION IF count < expected ... $$;
 
 ### 9.1 Pending Migrations (Blockers)
 
-| Table | Blocks | Data Source | Interim Storage |
-|-------|--------|-------------|-----------------|
-| `price_index` | CPI/indexation (US CPI tab, LOI01/GC01 CPI-linked escalation) | Revenue Masterfile "US CPI" tab (BLS CUUR0000SA0) | Staging JSON file |
-| `loan_schedule` | Loan amortization persistence | Revenue Masterfile "Loans" tab + Loans and Rentals schedule.xlsx | `project.technical_specs.loan_schedule` JSONB |
-| `loan_payment` | Loan repayment tracking | Repayment notices (GC01, ZL01, ZL02, iSAT) | `project.technical_specs` JSONB |
+| Table | Blocks | Data Source | Interim Storage | Status |
+|-------|--------|-------------|-----------------|--------|
+| `price_index` | CPI/indexation (US CPI tab, LOI01/GC01 CPI-linked escalation) | Revenue Masterfile "US CPI" tab (BLS CUUR0000SA0) | Staging JSON file | **PENDING** |
+| `loan_repayment` | Loan amortization persistence | Revenue Masterfile "Loans" tab | `clause_tariff` + `loan_repayment` | **DONE** (migration 066) |
+| `rental_ancillary_charge` | Rental/BESS/O&M charge persistence | Revenue Masterfile "Rental and Ancillary" tab | `clause_tariff` + `rental_ancillary_charge` | **DONE** (migration 066) |
 
 ### 9.2 Schema Gaps for Revenue Masterfile Fields
 
@@ -949,11 +953,11 @@ The following PO Summary fields have **no dedicated DB column** — currently st
 | BESS kWh | M (13) | `project.technical_specs.bess_kwh` | TBD |
 | Thermal kWe | N (14) | `project.technical_specs.thermal_kwe` | TBD |
 | Wind MW | O (15) | `project.technical_specs.wind_mw` | TBD |
-| Loan Fixed Payment | AG (33) | `project.technical_specs.loan_fixed_payment` | Blocked by `loan_schedule` migration |
-| Lease Rental | AH (34) | `project.technical_specs.lease_rental` | TBD |
+| Loan Fixed Payment | AG (33) | `project.technical_specs.loan_fixed_payment` + `clause_tariff.base_rate` (LOAN rows) | Kept in JSONB; also on loan clause_tariff |
+| Lease Rental | AH (34) | `project.technical_specs.lease_rental` + `clause_tariff.base_rate` (backfilled) | Kept in JSONB; also on clause_tariff |
 | Energy Fee | AI (35) | `project.technical_specs.energy_fee` | TBD |
-| BESS Charge | AJ (36) | `project.technical_specs.bess_charge` | TBD |
-| O&M Fee | AK (37) | `project.technical_specs.om_fee` | TBD |
+| BESS Charge | AJ (36) | `project.technical_specs.bess_charge` + `clause_tariff.base_rate` (backfilled) | Kept in JSONB; also on clause_tariff |
+| O&M Fee | AK (37) | `project.technical_specs.om_fee` + `clause_tariff.base_rate` (backfilled) | Kept in JSONB; also on clause_tariff |
 | OY Definition | AN (40) | `project.technical_specs.oy_definition` | TBD |
 
 Decision needed: Keep in JSONB or promote to first-class columns?

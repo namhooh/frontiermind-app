@@ -46,11 +46,11 @@ def main():
 
             # 2. Check existing tariff_rate rows
             cur.execute("""
-                SELECT contract_year FROM tariff_rate
+                SELECT operating_year FROM tariff_rate
                 WHERE clause_tariff_id = %s
-                ORDER BY contract_year
+                ORDER BY operating_year
             """, (CLAUSE_TARIFF_ID,))
-            existing_years = {r['contract_year'] for r in cur.fetchall()}
+            existing_years = {r['operating_year'] for r in cur.fetchall()}
             print(f"\nExisting tariff_rate years: {sorted(existing_years)}")
 
             # 3. Generate missing years (4-20)
@@ -68,7 +68,7 @@ def main():
 
                 cur.execute("""
                     INSERT INTO tariff_rate (
-                        clause_tariff_id, contract_year, rate_granularity,
+                        clause_tariff_id, operating_year, rate_granularity,
                         period_start, period_end,
                         hard_currency_id, local_currency_id, billing_currency_id,
                         effective_rate_contract_ccy, effective_rate_hard_ccy,
@@ -83,7 +83,7 @@ def main():
                         'hard',
                         %s, 'computed', false
                     )
-                    RETURNING id, contract_year
+                    RETURNING id, operating_year
                 """, (
                     CLAUSE_TARIFF_ID, year,
                     period_start, period_end,
@@ -93,7 +93,7 @@ def main():
                 r = cur.fetchone()
                 inserted += 1
                 if year <= 5 or year >= 19:
-                    print(f"  Year {r['contract_year']}: {rate} USD/kWh")
+                    print(f"  Year {r['operating_year']}: {rate} USD/kWh")
                 elif year == 6:
                     print(f"  ... (years 6-18)")
 

@@ -169,7 +169,7 @@ class RatePeriodGenerator:
                 effective_rate_billing_ccy = %s,
                 calc_status = 'computed',
                 updated_at = NOW()
-            WHERE clause_tariff_id = %s AND contract_year = 1 AND rate_granularity = 'annual'
+            WHERE clause_tariff_id = %s AND operating_year = 1 AND rate_granularity = 'annual'
             """,
             (year1_end, year1_is_current,
              year1_rate, year1_rate, year1_rate, year1_rate,
@@ -189,7 +189,7 @@ class RatePeriodGenerator:
             cur.execute(
                 """
                 INSERT INTO tariff_rate (
-                    clause_tariff_id, contract_year, rate_granularity,
+                    clause_tariff_id, operating_year, rate_granularity,
                     period_start, period_end,
                     hard_currency_id, local_currency_id, billing_currency_id,
                     effective_rate_contract_ccy, effective_rate_hard_ccy,
@@ -208,7 +208,7 @@ class RatePeriodGenerator:
                     'fixed', 'deterministic_v1',
                     'computed', %s, %s
                 )
-                ON CONFLICT (clause_tariff_id, contract_year)
+                ON CONFLICT (clause_tariff_id, operating_year)
                     WHERE rate_granularity = 'annual'
                 DO NOTHING
                 """,
@@ -229,7 +229,7 @@ class RatePeriodGenerator:
                 """
                 UPDATE tariff_rate
                 SET is_current = true
-                WHERE clause_tariff_id = %s AND contract_year = %s AND rate_granularity = 'annual'
+                WHERE clause_tariff_id = %s AND operating_year = %s AND rate_granularity = 'annual'
                 """,
                 (ct_id, current_year),
             )

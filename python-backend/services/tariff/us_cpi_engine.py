@@ -299,7 +299,7 @@ class USCPIEngine:
             cur.execute(
                 """
                 INSERT INTO tariff_rate (
-                    clause_tariff_id, contract_year, rate_granularity,
+                    clause_tariff_id, operating_year, rate_granularity,
                     period_start, period_end,
                     hard_currency_id, local_currency_id, billing_currency_id,
                     effective_rate_contract_ccy, effective_rate_hard_ccy,
@@ -318,7 +318,7 @@ class USCPIEngine:
                     'fixed', 'us_cpi_v1',
                     %s, %s, %s
                 )
-                ON CONFLICT (clause_tariff_id, contract_year)
+                ON CONFLICT (clause_tariff_id, operating_year)
                     WHERE rate_granularity = 'annual'
                 DO UPDATE SET
                     effective_rate_contract_ccy = EXCLUDED.effective_rate_contract_ccy,
@@ -477,7 +477,7 @@ class USCPIEngine:
             cur.execute(
                 """
                 INSERT INTO tariff_rate (
-                    clause_tariff_id, contract_year, rate_granularity,
+                    clause_tariff_id, operating_year, rate_granularity,
                     period_start, period_end,
                     hard_currency_id, local_currency_id, billing_currency_id,
                     effective_rate_contract_ccy, effective_rate_hard_ccy,
@@ -496,7 +496,7 @@ class USCPIEngine:
                     'fixed', 'us_cpi_v1',
                     %s, %s, %s
                 )
-                ON CONFLICT (clause_tariff_id, contract_year)
+                ON CONFLICT (clause_tariff_id, operating_year)
                     WHERE rate_granularity = 'annual'
                 DO UPDATE SET
                     effective_rate_contract_ccy = EXCLUDED.effective_rate_contract_ccy,

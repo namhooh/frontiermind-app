@@ -785,7 +785,7 @@ def _check_tariff_box(ext: InvoiceExtraction, sage_id: str, db: Dict) -> List[Di
 
 
 def _check_loan_rental(ext: InvoiceExtraction, sage_id: str, db: Dict) -> List[Dict]:
-    """Check 7: Loan/rental lines vs technical_specs schedules."""
+    """Check 7: Loan/rental lines vs normalized tables (fallback to technical_specs)."""
     results = []
     loan_lines = [li for li in ext.line_items if li.line_type in ('loan', 'rental')]
     if not loan_lines:
@@ -795,20 +795,24 @@ def _check_loan_rental(ext: InvoiceExtraction, sage_id: str, db: Dict) -> List[D
     if not proj:
         return results
 
-    specs = proj.get('technical_specs') or {}
-    has_loan = 'loan_schedule' in specs
-    has_rental = 'rental_schedule' in specs
+    # Try normalized tables first, fallback to technical_specs
+    has_loan = sage_id in db.get('loan_repayments', {})
+    has_rental = sage_id in db.get('rental_charges', {})
+    if not has_loan and not has_rental:
+        specs = proj.get('technical_specs') or {}
+        has_loan = 'loan_schedule' in specs
+        has_rental = 'rental_schedule' in specs
 
     for li in loan_lines:
         if li.line_type == 'loan' and not has_loan:
             results.append({
-                'check': 7, 'severity': 'warning', 'field': 'technical_specs.loan_schedule',
-                'message': f'{sage_id}: Invoice has loan line ({li.description}) but no loan_schedule in technical_specs',
+                'check': 7, 'severity': 'warning', 'field': 'loan_repayment',
+                'message': f'{sage_id}: Invoice has loan line ({li.description}) but no loan data found',
             })
         if li.line_type == 'rental' and not has_rental:
             results.append({
-                'check': 7, 'severity': 'warning', 'field': 'technical_specs.rental_schedule',
-                'message': f'{sage_id}: Invoice has rental line ({li.description}) but no rental_schedule in technical_specs',
+                'check': 7, 'severity': 'warning', 'field': 'rental_ancillary_charge',
+                'message': f'{sage_id}: Invoice has rental line ({li.description}) but no rental data found',
             })
     return results
 
@@ -959,6 +963,38 @@ def load_db_state() -> Dict[str, Any]:
         """, (ORG_ID,))
         for row in cur.fetchall():
             state['exchange_rates'][(row['currency_id'], row['rate_date'])] = row['rate']
+
+        # Loan repayments (normalized tables — for dual-read in check 7)
+        state['loan_repayments'] = {}
+        try:
+            cur.execute("""
+                SELECT p.sage_id, COUNT(lr.id) AS cnt
+                FROM loan_repayment lr
+                JOIN clause_tariff ct ON lr.clause_tariff_id = ct.id
+                JOIN project p ON ct.project_id = p.id
+                WHERE p.organization_id = %s
+                GROUP BY p.sage_id
+            """, (ORG_ID,))
+            for row in cur.fetchall():
+                state['loan_repayments'][row['sage_id']] = row['cnt']
+        except Exception:
+            pass  # Table may not exist yet during migration transition
+
+        # Rental/ancillary charges (normalized tables — for dual-read in check 7)
+        state['rental_charges'] = {}
+        try:
+            cur.execute("""
+                SELECT p.sage_id, COUNT(rac.id) AS cnt
+                FROM rental_ancillary_charge rac
+                JOIN clause_tariff ct ON rac.clause_tariff_id = ct.id
+                JOIN project p ON ct.project_id = p.id
+                WHERE p.organization_id = %s
+                GROUP BY p.sage_id
+            """, (ORG_ID,))
+            for row in cur.fetchall():
+                state['rental_charges'][row['sage_id']] = row['cnt']
+        except Exception:
+            pass  # Table may not exist yet during migration transition
 
         # Reference prices
         cur.execute("""

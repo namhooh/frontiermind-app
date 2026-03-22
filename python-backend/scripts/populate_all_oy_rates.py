@@ -82,10 +82,10 @@ def _get_floating_oy_data(project_id: int, clause_tariff_id: int, valid_from: da
 
             # Get existing annual tariff_rate rows
             cur.execute("""
-                SELECT contract_year FROM tariff_rate
+                SELECT operating_year FROM tariff_rate
                 WHERE clause_tariff_id = %s AND rate_granularity = 'annual'
             """, (clause_tariff_id,))
-            existing_oys = {row["contract_year"] for row in cur.fetchall()}
+            existing_oys = {row["operating_year"] for row in cur.fetchall()}
 
             # Get FX rate coverage (monthly rates for the local currency)
             cur.execute("""
@@ -128,13 +128,13 @@ def _get_floating_oy_data(project_id: int, clause_tariff_id: int, valid_from: da
             return results
 
 
-def _insert_placeholder_row(clause_tariff_id: int, contract_year: int, period_start: date, period_end: date | None, currency_id: int):
+def _insert_placeholder_row(clause_tariff_id: int, operating_year: int, period_start: date, period_end: date | None, currency_id: int):
     """Insert a placeholder annual tariff_rate row with calc_status='pending'."""
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute("""
                 INSERT INTO tariff_rate (
-                    clause_tariff_id, contract_year, rate_granularity,
+                    clause_tariff_id, operating_year, rate_granularity,
                     period_start, period_end,
                     hard_currency_id, local_currency_id, billing_currency_id,
                     calc_status, calculation_basis, is_current
@@ -144,10 +144,10 @@ def _insert_placeholder_row(clause_tariff_id: int, contract_year: int, period_st
                     %s, %s, %s,
                     'pending', 'Awaiting MRP/FX data', false
                 )
-                ON CONFLICT (clause_tariff_id, contract_year)
+                ON CONFLICT (clause_tariff_id, operating_year)
                     WHERE rate_granularity = 'annual'
                 DO NOTHING
-            """, (clause_tariff_id, contract_year, period_start, period_end, currency_id, currency_id, currency_id))
+            """, (clause_tariff_id, operating_year, period_start, period_end, currency_id, currency_id, currency_id))
             conn.commit()
             return cur.rowcount
 

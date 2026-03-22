@@ -322,7 +322,7 @@ def fm_tariff_rates(db_conn) -> List[Dict[str, Any]]:
     """Load FM tariff rates for lean gate tests."""
     with db_conn.cursor() as cur:
         cur.execute("""
-            SELECT id, clause_tariff_id, contract_year,
+            SELECT id, clause_tariff_id, operating_year,
                    rate_granularity::text AS rate_granularity,
                    effective_rate_contract_ccy,
                    period_start, period_end,
@@ -331,7 +331,7 @@ def fm_tariff_rates(db_conn) -> List[Dict[str, Any]]:
             WHERE clause_tariff_id IN (
                 SELECT id FROM clause_tariff WHERE organization_id = 1
             )
-            ORDER BY clause_tariff_id, contract_year, period_start
+            ORDER BY clause_tariff_id, operating_year, period_start
         """)
         return [dict(row) for row in cur.fetchall()]
 

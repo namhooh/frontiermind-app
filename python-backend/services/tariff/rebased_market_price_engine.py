@@ -483,7 +483,7 @@ class RebasedMarketPriceEngine:
                     cur.execute(
                         """
                         INSERT INTO tariff_rate (
-                            clause_tariff_id, contract_year, rate_granularity,
+                            clause_tariff_id, operating_year, rate_granularity,
                             period_start, period_end,
                             hard_currency_id, local_currency_id, billing_currency_id,
                             exchange_rate_id,
@@ -506,7 +506,7 @@ class RebasedMarketPriceEngine:
                             %s, %s, 'rebased_v1',
                             'computed', %s, true
                         )
-                        ON CONFLICT (clause_tariff_id, contract_year)
+                        ON CONFLICT (clause_tariff_id, operating_year)
                             WHERE rate_granularity = 'annual'
                         DO UPDATE SET
                             effective_rate_contract_ccy = EXCLUDED.effective_rate_contract_ccy,
@@ -540,7 +540,7 @@ class RebasedMarketPriceEngine:
                         """
                         UPDATE tariff_rate SET is_current = false
                         WHERE clause_tariff_id = %s AND rate_granularity = 'annual'
-                          AND contract_year != %s AND is_current = true
+                          AND operating_year != %s AND is_current = true
                         """,
                         (ct_id, operating_year),
                     )
@@ -633,7 +633,7 @@ class RebasedMarketPriceEngine:
                         cur.execute(
                             """
                             INSERT INTO tariff_rate (
-                                clause_tariff_id, contract_year, rate_granularity,
+                                clause_tariff_id, operating_year, rate_granularity,
                                 billing_month, billing_period_id, period_start, period_end,
                                 hard_currency_id, local_currency_id, billing_currency_id,
                                 exchange_rate_id,

@@ -126,7 +126,7 @@ WHERE p.sage_id = 'KAS01'
 
 INSERT INTO tariff_rate (
   clause_tariff_id,
-  contract_year, rate_granularity,
+  operating_year, rate_granularity,
   billing_month,
   hard_currency_id, local_currency_id, billing_currency_id,
   effective_rate_contract_ccy,

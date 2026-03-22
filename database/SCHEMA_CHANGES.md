@@ -2693,9 +2693,9 @@ Source: PO Summary col E "Energy Sale Type" (offtake model)
 - No additional FKs beyond `clause_tariff_id` — variable-level `maps_to` captures relationships
 
 **Pipeline Files (Compiler Architecture):**
-- `python-backend/services/pricing/resolver_registry.py` — Semantic variable bindings (42 bindings)
-- `python-backend/services/pricing/formula_components.py` — Composable formula templates (16 components)
-- `python-backend/services/pricing/contract_classifier.py` — Contract type classification
+- `python-backend/services/pricing/resolver_registry.py` — Semantic variable bindings (56 bindings; 12 added for Rwanda wheeling)
+- `python-backend/services/pricing/formula_components.py` — Composable formula templates (23 components, 9 compositions; 7 added for RWANDA_WHEELING)
+- `python-backend/services/pricing/contract_classifier.py` — Contract type classification (Rwanda wheeling detection added)
 - `python-backend/services/pricing/template_resolver.py` — Symbol → binding matching
 - `python-backend/services/pricing/formula_compiler.py` — Compile to runtime + display + rates
 - `python-backend/services/pricing/strict_validator.py` — Hard-stop validation + quarantine
@@ -2849,5 +2849,47 @@ Source: PO Summary col E "Energy Sale Type" (offtake model)
 - `PlantPerformanceTab.tsx` — same pattern for both entry points
 - `MRPSection.tsx` — upload and manual entry handlers show amber toast on approval
 - `PendingChangesPanel.tsx` — full-row proposals (`field_name = '*'`) render as key-value list instead of old→new diff; subtitle shows "new entry" instead of "ID: 0"
+
+---
+
+### v0.66 - 2026-03-22 (Loan Repayment & Rental/Ancillary Charge Tables)
+
+**Description:** Normalizes loan amortization schedules and rental/BESS/O&M charge data from `project.technical_specs` JSONB into proper relational tables. Parallels the existing `tariff_rate` pattern — new tables record period-level data linked to `clause_tariff` rows. Also renames `tariff_rate.contract_year` → `operating_year` for consistency.
+
+**Migration:** `database/migrations/066_loan_and_recurring_charge.sql`
+
+**Renamed Column: `tariff_rate.contract_year` → `operating_year`**
+- Aligns with `operating_year` convention used on `loan_repayment`, `rental_ancillary_charge`, and throughout `logic_parameters` (oy_definition, oy_start_date)
+- PostgreSQL RENAME COLUMN auto-updates indexes and constraints
+- All backend services, scripts, frontend, and database scripts updated
+
+**New Table: `loan_repayment`**
+- Amortization schedule rows per loan `clause_tariff`
+- Unified columns: `scheduled_amount` (total repayment), `principal_amount`, `interest_amount`, `closing_balance`
+- Unique on `(clause_tariff_id, billing_month)` — follows `tariff_rate` pattern
+- Data quality tracking: `data_quality` column (`ok`, `quarantined`, `needs_review`)
+- Provenance: `source`, `source_row_ref`, `source_metadata` JSONB
+
+**New Table: `rental_ancillary_charge`**
+- Monthly charge rows per non-energy `clause_tariff` (BESS, rental, O&M, lease)
+- Primary parent: `clause_tariff_id` (terms), reconciliation parent: `contract_line_id` (billing grain)
+- Charge type derived from parent `clause_tariff.energy_sale_type_id` (no separate ENUM — BESS_LEASE, EQUIPMENT_RENTAL_LEASE, OTHER_SERVICE, etc.)
+- Unique on `(clause_tariff_id, contract_line_id, billing_month)` — handles projects with multiple same-type charge lines
+- `scheduled_amount` records contractual obligation; reconciliation with invoices via `invoice_line_item_id` FK and existing `expected_invoice_line_item.clause_tariff_id` joins
+
+**Loan terms stored as clause_tariff rows:**
+- No separate `loan_schedule` table — loan terms (opening_balance, interest_rate, loan_variant) stored in `clause_tariff.logic_parameters` JSONB with `energy_sale_type = LOAN`, `tariff_type = FINANCE_LEASE`
+- Population script creates new clause_tariff rows for ZL02, GC001, iSAT01
+
+**clause_tariff backfills:**
+- Empty non-energy clause_tariff rows (AMP01 ct#65, LOI01 ct#14, TWG01 ct#31) backfilled with `base_rate` and `logic_parameters` from `technical_specs` values
+
+**Population script:** `python-backend/scripts/step7h_loan_rental_normalize.py`
+- Data quality quarantine: ZL02 corrupt date_paid → needs_review, AMP01 placeholder amounts → skipped, AR01 outlier amounts → quarantined
+- Report: `python-backend/reports/cbe-population/step7h_YYYY-MM-DD.json`
+
+**Step 8 dual-read transition:** `python-backend/scripts/step8_invoice_calibration.py`
+- `_check_loan_rental()` reads normalized tables first, falls back to `technical_specs` JSONB
+- `technical_specs` JSONB left intact for backward compatibility
 
 ---

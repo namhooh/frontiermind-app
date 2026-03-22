@@ -311,7 +311,7 @@ class BillingProductJunctionPatch(BaseModel):
 
 
 class RatePeriodPatch(BaseModel):
-    contract_year: Optional[int] = None
+    operating_year: Optional[int] = None
     period_start: Optional[str] = None
     period_end: Optional[str] = None
     effective_rate_contract_ccy: Optional[float] = None
@@ -865,7 +865,7 @@ def get_project_dashboard(
                         ORDER BY cl.contract_line_number
                     ),
                     rate_periods_data AS (
-                        SELECT tr.id, tr.clause_tariff_id, tr.contract_year,
+                        SELECT tr.id, tr.clause_tariff_id, tr.operating_year,
                                tr.period_start, tr.period_end,
                                tr.effective_rate_contract_ccy,
                                tr.calculation_basis, tr.is_current,
@@ -881,10 +881,10 @@ def get_project_dashboard(
                         LEFT JOIN currency lc ON lc.id = tr.local_currency_id
                         LEFT JOIN currency bc ON bc.id = tr.billing_currency_id
                         WHERE ct.project_id = %(pid)s AND tr.rate_granularity = 'annual'
-                        ORDER BY ct.name, tr.contract_year
+                        ORDER BY ct.name, tr.operating_year
                     ),
                     monthly_rates_data AS (
-                        SELECT tr.id, tr.clause_tariff_id, tr.contract_year,
+                        SELECT tr.id, tr.clause_tariff_id, tr.operating_year,
                                tr.billing_month,
                                tr.effective_rate_local_ccy AS effective_tariff_local,
                                tr.rate_binding, tr.calculation_basis, tr.is_current,
@@ -899,7 +899,7 @@ def get_project_dashboard(
                         ORDER BY tr.billing_month DESC
                     ),
                     tariff_rates_data AS (
-                        SELECT tr.id, tr.clause_tariff_id, tr.contract_year,
+                        SELECT tr.id, tr.clause_tariff_id, tr.operating_year,
                                tr.rate_granularity::text AS rate_granularity,
                                tr.billing_month, tr.period_start, tr.period_end,
                                tr.effective_rate_contract_ccy, tr.effective_rate_hard_ccy,
@@ -921,7 +921,7 @@ def get_project_dashboard(
                         LEFT JOIN currency lc ON lc.id = tr.local_currency_id
                         LEFT JOIN currency bc ON bc.id = tr.billing_currency_id
                         WHERE ct.project_id = %(pid)s
-                        ORDER BY tr.rate_granularity, tr.contract_year, tr.billing_month DESC NULLS FIRST
+                        ORDER BY tr.rate_granularity, tr.operating_year, tr.billing_month DESC NULLS FIRST
                     ),
                     tariff_formulas_data AS (
                         SELECT tf.id, tf.clause_tariff_id, tf.formula_name,

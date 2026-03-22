@@ -372,7 +372,7 @@ def _insert_annual_rows(cur, t):
         cur.execute(
             """
             INSERT INTO tariff_rate (
-                clause_tariff_id, contract_year, rate_granularity,
+                clause_tariff_id, operating_year, rate_granularity,
                 period_start, period_end,
                 hard_currency_id, local_currency_id, billing_currency_id,
                 effective_rate_contract_ccy, effective_rate_hard_ccy,
@@ -391,7 +391,7 @@ def _insert_annual_rows(cur, t):
                 'fixed', 'population_v1', 'computed',
                 %s, %s
             )
-            ON CONFLICT (clause_tariff_id, contract_year)
+            ON CONFLICT (clause_tariff_id, operating_year)
                 WHERE rate_granularity = 'annual'
             DO NOTHING
             """,
@@ -505,7 +505,7 @@ def _insert_monthly_rows(cur, t, conn):
         cur.execute(
             """
             INSERT INTO tariff_rate (
-                clause_tariff_id, contract_year, rate_granularity, billing_month,
+                clause_tariff_id, operating_year, rate_granularity, billing_month,
                 billing_period_id,
                 period_start, period_end,
                 hard_currency_id, local_currency_id, billing_currency_id,

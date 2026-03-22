@@ -234,7 +234,7 @@ class TestBillingReadiness:
 
         tariffs_with_year1 = {
             tr["clause_tariff_id"] for tr in fm_tariff_rates
-            if tr.get("contract_year") == 1
+            if tr.get("operating_year") == 1
             and tr.get("clause_tariff_id") in tariffs_with_rate
         }
 

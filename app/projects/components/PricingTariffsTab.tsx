@@ -24,11 +24,13 @@ function formatBillingMonth(v: unknown): string {
   return formatMonth(String(v)).replace('—', '')
 }
 
-/** Format a per-kWh rate to consistent 4 decimal places. */
+/** Format a rate value: per-kWh rates get 4 decimals, large fixed amounts get comma formatting. */
 function fmtRate(v: unknown): string {
   if (v == null || v === '') return '—'
   const n = Number(v)
   if (isNaN(n)) return '—'
+  // Fixed monthly/annual amounts (non per-kWh): use locale comma formatting
+  if (Math.abs(n) >= 100) return n.toLocaleString('en-US', { maximumFractionDigits: 2 })
   return n.toFixed(4)
 }
 
@@ -150,7 +152,7 @@ function TariffDetailPanel({ t, pid, rate_periods, monthly_rates, onSaved, editM
         ] : [
           [`Base Rate${baseCurrency}`, t.base_rate, { fieldKey: 'base_rate', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const }] as FieldDef,
         ]),
-        ...(currentPeriod ? [['Contract Year', currentPeriod.contract_year, { fieldKey: 'contract_year', entity: 'rate-periods' as const, entityId: currentPeriod.id as number, type: 'number' as const }] as FieldDef] : []),
+        ...(currentPeriod ? [['Operating Year', currentPeriod.operating_year, { fieldKey: 'operating_year', entity: 'rate-periods' as const, entityId: currentPeriod.id as number, type: 'number' as const }] as FieldDef] : []),
         ['Market Ref Currency', t.market_ref_currency_code, { fieldKey: 'market_ref_currency_id', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'select' as const, options: currencyOpts, selectValue: t.market_ref_currency_id }],
         ['Solar Discount (%)', lp.discount_pct != null ? Number((Number(lp.discount_pct) * 100).toFixed(4)) : null, { fieldKey: 'lp_discount_pct', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const, scaleOnSave: 0.01 }],
         [`Floor Rate${hardCcy}`, lp.floor_rate, { fieldKey: 'lp_floor_rate', entity: 'tariffs' as const, entityId: t.id as number, projectId: pid, type: 'number' as const }],
@@ -410,7 +412,7 @@ function CPIEscalationSchedule({ tariffRates, clauseTariffId, logicParameters, c
     tr.clause_tariff_id === clauseTariffId &&
     tr.rate_granularity === 'annual' &&
     tr.formula_version === 'us_cpi_v1'
-  ).sort((a, b) => Number(a.contract_year) - Number(b.contract_year))
+  ).sort((a, b) => Number(a.operating_year) - Number(b.operating_year))
 
   if (cpiRates.length === 0) return null
 
@@ -459,8 +461,8 @@ function CPIEscalationSchedule({ tariffRates, clauseTariffId, logicParameters, c
                   : '—'
 
                 return (
-                  <tr key={tr.contract_year as number} className={`hover:bg-slate-50 ${tr.is_current ? 'bg-blue-50/40' : ''}`}>
-                    <td className="px-4 py-2.5 text-center font-mono tabular-nums">{String(tr.contract_year)}</td>
+                  <tr key={tr.operating_year as number} className={`hover:bg-slate-50 ${tr.is_current ? 'bg-blue-50/40' : ''}`}>
+                    <td className="px-4 py-2.5 text-center font-mono tabular-nums">{String(tr.operating_year)}</td>
                     <td className="px-4 py-2.5 text-right text-xs text-slate-500 tabular-nums">{periodStr}</td>
                     <td className="px-4 py-2.5 text-right font-mono tabular-nums">{currentCpi != null ? currentCpi.toFixed(3) : '—'}</td>
                     <td className="px-4 py-2.5 text-right font-mono tabular-nums">{cpiFactor != null ? cpiFactor.toFixed(4) : '—'}</td>
@@ -578,8 +580,10 @@ function AddProductRow({ contractId, existingProductIds, billingProductOpts, onA
 // BillingProductCard — expandable card for a product + its tariffs
 // ---------------------------------------------------------------------------
 
-/** Formula types relevant to each product category — show only directly relevant formulas. */
-const ENERGY_PRODUCT_FORMULA_TYPES = new Set(['MRP_CALCULATION', 'MRP_BOUNDED', 'ENERGY_OUTPUT'])
+/** Formula types relevant to each product category — show only directly relevant formulas.
+ * MRP_CALCULATION (Grid/Generator Reference Price computation) is excluded from product cards
+ * — shown only in the Contract Formulas full reference section at the bottom. */
+const ENERGY_PRODUCT_FORMULA_TYPES = new Set(['MRP_BOUNDED', 'PAYMENT_CALCULATION', 'ENERGY_OUTPUT'])
 const AVAILABLE_ENERGY_FORMULA_TYPES = new Set(['DEEMED_ENERGY'])
 const MINIMUM_OFFTAKE_FORMULA_TYPES = new Set(['TAKE_OR_PAY'])
 
@@ -799,7 +803,8 @@ function BillingProductCard({ pw, pid, rate_periods, monthly_rates, contractLine
 /** Human-readable label for formula_type codes. */
 const FORMULA_TYPE_LABELS: Record<string, string> = {
   MRP_BOUNDED: 'Effective Rate (MRP Bounded)',
-  MRP_CALCULATION: 'Payment Calculation',
+  MRP_CALCULATION: 'MRP Calculation',
+  PAYMENT_CALCULATION: 'Payment Calculation',
   PERCENTAGE_ESCALATION: 'Rate Escalation',
   FIXED_ESCALATION: 'Fixed Escalation',
   CPI_ESCALATION: 'CPI Escalation',
@@ -818,6 +823,7 @@ const FORMULA_TYPE_LABELS: Record<string, string> = {
 const FORMULA_CATEGORY_STYLE: Record<string, string> = {
   MRP_BOUNDED: 'bg-blue-50 text-blue-700 border-blue-200',
   MRP_CALCULATION: 'bg-blue-50 text-blue-700 border-blue-200',
+  PAYMENT_CALCULATION: 'bg-blue-50 text-blue-700 border-blue-200',
   PERCENTAGE_ESCALATION: 'bg-violet-50 text-violet-700 border-violet-200',
   FIXED_ESCALATION: 'bg-violet-50 text-violet-700 border-violet-200',
   CPI_ESCALATION: 'bg-violet-50 text-violet-700 border-violet-200',
@@ -883,13 +889,29 @@ function FormulaCard({ formula, compact = false }: { formula: TariffFormula; com
         {!compact && (<>
           {/* Conditions (if/then/else) */}
           {conditions.length > 0 && conditions[0].compare && (
-            <div className="text-xs space-y-1 bg-amber-50/50 border border-amber-100 rounded px-3 py-2">
+            <div className="text-xs space-y-2 bg-amber-50/50 border border-amber-100 rounded px-3 py-2">
               {conditions.map((c, i) => (
                 <div key={i}>
                   <span className="font-medium text-slate-600">Condition:</span>{' '}
                   <span className="font-mono text-slate-700">
                     {c.compare} {c.operator} {c.against}
                   </span>
+                  {(c.then || c.else) && (
+                    <div className="mt-1 ml-2 space-y-0.5">
+                      {c.then && (
+                        <div>
+                          <span className="font-medium text-green-700">Then:</span>{' '}
+                          <span className="font-mono text-slate-700">{c.then}</span>
+                        </div>
+                      )}
+                      {c.else && (
+                        <div>
+                          <span className="font-medium text-slate-500">Else:</span>{' '}
+                          <span className="font-mono text-slate-700">{c.else}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   {c.description && (
                     <div className="text-slate-500 mt-0.5">{c.description}</div>
                   )}
@@ -1069,7 +1091,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
             {tariffs.map((t, i) => {
               const periods = rate_periods
                 .filter((rp) => rp.clause_tariff_id === t.id)
-                .sort((a, b) => Number(a.contract_year) - Number(b.contract_year))
+                .sort((a, b) => Number(a.operating_year) - Number(b.operating_year))
               const isRebasedTariffHeader = REBASED_CODES.has(String(t.escalation_type_code ?? ''))
               const tariffMonthlyRates = (monthly_rates ?? [])
                     .filter((mr: R) => mr.clause_tariff_id === t.id)
@@ -1137,9 +1159,9 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                         <tbody>
                           {(() => {
                             const currentPeriod = periods.find((rp) => rp.is_current === true) ?? periods[periods.length - 1]
-                            const currentYear = currentPeriod?.contract_year as number | undefined
+                            const currentYear = currentPeriod?.operating_year as number | undefined
                             const historicalPeriods = periods.filter((rp) =>
-                              rp !== currentPeriod && currentYear != null && (rp.contract_year as number) < currentYear
+                              rp !== currentPeriod && currentYear != null && (rp.operating_year as number) < currentYear
                             )
                             const historyKey = `history-${t.id}`
                             const showHistory = expandedPeriods.has(historyKey)
@@ -1147,10 +1169,10 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                             const renderPeriodRow = (rp: R, j: number) => {
                             // Look up full tariff_rate row for USD rate
                             const matchingTr = ((tariff_rates ?? []) as R[]).find((tr) =>
-                              tr.clause_tariff_id === rp.clause_tariff_id && tr.contract_year === rp.contract_year && tr.rate_granularity === 'annual')
+                              tr.clause_tariff_id === rp.clause_tariff_id && tr.operating_year === rp.operating_year && tr.rate_granularity === 'annual')
                             const periodMonthlyRates = hasMonthlyTracking
                               ? (monthly_rates ?? [])
-                                  .filter((mr: R) => mr.clause_tariff_id === rp.clause_tariff_id && mr.contract_year === rp.contract_year)
+                                  .filter((mr: R) => mr.clause_tariff_id === rp.clause_tariff_id && mr.operating_year === rp.operating_year)
                                   .sort((a: R, b: R) => String(b.billing_month ?? '').localeCompare(String(a.billing_month ?? '')))
                               : []
                             const isExpanded = expandedPeriods.has(rp.id)
@@ -1169,8 +1191,8 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                                 )}
                                 <td className="px-3 py-1.5 text-slate-700 tabular-nums">
                                   {editMode && rp.id != null ? (
-                                    <EditableCell value={rp.contract_year} fieldKey="contract_year" entity="rate-periods" entityId={rp.id as number} type="number" editMode onSaved={onSaved} />
-                                  ) : str(rp.contract_year)}
+                                    <EditableCell value={rp.operating_year} fieldKey="operating_year" entity="rate-periods" entityId={rp.id as number} type="number" editMode onSaved={onSaved} />
+                                  ) : str(rp.operating_year)}
                                 </td>
                                 <td className="px-3 py-1.5 text-slate-600 text-xs tabular-nums">
                                   {`${str(rp.period_start)}${rp.period_end ? ` — ${str(rp.period_end)}` : ''}`}

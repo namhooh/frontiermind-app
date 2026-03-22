@@ -605,7 +605,7 @@ ON CONFLICT (contract_id, billing_product_id) DO UPDATE SET
 -- For deterministic tariffs: all 4 effective_rate columns = base_rate, calc_status = 'computed'
 -- For REBASED_MARKET_PRICE: calc_status = 'pending', effective_rate columns = NULL (engine UPSERTs)
 INSERT INTO tariff_rate (
-  clause_tariff_id, contract_year, rate_granularity,
+  clause_tariff_id, operating_year, rate_granularity,
   period_start, period_end,
   hard_currency_id, local_currency_id, billing_currency_id,
   effective_rate_contract_ccy, effective_rate_hard_ccy,
@@ -657,7 +657,7 @@ JOIN stg_project_core spc ON c.project_id = (
 )
 WHERE ct.is_current = true
   AND ct.base_rate IS NOT NULL
-ON CONFLICT (clause_tariff_id, contract_year) WHERE rate_granularity = 'annual' DO NOTHING;
+ON CONFLICT (clause_tariff_id, operating_year) WHERE rate_granularity = 'annual' DO NOTHING;
 
 -- =============================================================================
 -- Step 5: Post-Load Assertions (fail → ROLLBACK)

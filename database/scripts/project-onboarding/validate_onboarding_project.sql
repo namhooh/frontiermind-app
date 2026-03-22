@@ -650,7 +650,7 @@ SELECT
   tr.id,
   tr.clause_tariff_id,
   ct.tariff_group_key,
-  tr.contract_year,
+  tr.operating_year,
   tr.rate_granularity,
   tr.period_start,
   tr.period_end,
@@ -669,4 +669,4 @@ LEFT JOIN currency lc ON lc.id = tr.local_currency_id
 LEFT JOIN currency bc ON bc.id = tr.billing_currency_id
 WHERE p.external_project_id = :'external_project_id'
   AND tr.rate_granularity = 'annual'
-ORDER BY ct.tariff_group_key, tr.contract_year;
+ORDER BY ct.tariff_group_key, tr.operating_year;
