@@ -988,7 +988,7 @@ function ExpandedDetailRows({
   totalCols: number
 }) {
   const energyItems = expectedInvoice?.line_items
-    .filter(li => li.line_item_type_code === 'ENERGY' || li.line_item_type_code === 'AVAILABLE_ENERGY')
+    .filter(li => li.line_item_type_code === 'ENERGY' || li.line_item_type_code === 'AVAILABLE_ENERGY' || li.line_item_type_code === 'AVAILABLE_ENERGY_DISCOUNT')
     .sort((a, b) => a.sort_order - b.sort_order) ?? []
   const levyItems = expectedInvoice?.line_items
     .filter(li => li.line_item_type_code === 'LEVY')
@@ -1016,7 +1016,7 @@ function ExpandedDetailRows({
         const rate = r.rate
         // Build a lookup of persisted invoice line items for this meter
         const meterLineItems = expectedInvoice?.line_items.filter(
-          li => li.meter_name === r.meter_name && (li.line_item_type_code === 'ENERGY' || li.line_item_type_code === 'AVAILABLE_ENERGY')
+          li => li.meter_name === r.meter_name && (li.line_item_type_code === 'ENERGY' || li.line_item_type_code === 'AVAILABLE_ENERGY' || li.line_item_type_code === 'AVAILABLE_ENERGY_DISCOUNT')
         ) ?? []
         return (
           <tr key={`meter-${r.meter_id}-${idx}`} className="bg-slate-50/80 border-b border-slate-100/50 text-xs">
@@ -1082,23 +1082,27 @@ function ExpandedDetailRows({
       })}
 
       {/* Energy line items from expected invoice (fallback when no meter readings) */}
-      {showInvoiceEnergyLines && energyItems.map((li, i) => (
+      {showInvoiceEnergyLines && energyItems.map((li, i) => {
+        const isDiscount = li.line_item_type_code === 'AVAILABLE_ENERGY_DISCOUNT' || li.amount_sign === -1
+        return (
         <tr key={`energy-${i}`} className="bg-slate-50/80 border-b border-slate-100/50 text-xs">
           <td className="w-6 px-1 py-1.5" />
-          <td className={`${sc} text-slate-500 whitespace-nowrap`}>
+          <td className={`${sc} ${isDiscount ? 'text-red-500' : 'text-slate-500'} whitespace-nowrap`}>
             {li.description}
             {li.unit_price != null && (
-              <span className="ml-1.5 text-[10px] text-slate-400 tabular-nums">@{fmtNum(li.unit_price, 4)}/kWh</span>
+              <span className={`ml-1.5 text-[10px] tabular-nums ${isDiscount ? 'text-red-400' : 'text-slate-400'}`}>@{fmtNum(li.unit_price, 4)}/kWh</span>
             )}
           </td>
-          <td className={`${sc} text-right tabular-nums text-slate-500`}>
-            {fmtNum(li.quantity)}
+          <td className={`${sc} text-right tabular-nums ${isDiscount ? 'text-red-500' : 'text-slate-500'}`}>
+            {isDiscount && li.quantity != null ? `(${fmtNum(Math.abs(li.quantity))})` : fmtNum(li.quantity)}
           </td>
           <td className={sc} />
           <td className={sc} />
           {products.map((p) => (
-            <td key={p.product_code} className={`${sc} text-right tabular-nums text-slate-500`}>
-              {fmtCurrency(li.line_total_amount, currency)}
+            <td key={p.product_code} className={`${sc} text-right tabular-nums ${isDiscount ? 'text-red-500' : 'text-slate-500'}`}>
+              {isDiscount
+                ? `(${fmtCurrency(Math.abs(li.line_total_amount), currency)})`
+                : fmtCurrency(li.line_total_amount, currency)}
             </td>
           ))}
           {/* Waterfall empty */}
@@ -1108,7 +1112,8 @@ function ExpandedDetailRows({
           <td className={sc} />
           <td className={sc} />
         </tr>
-      ))}
+        )
+      })}
 
       {/* Levy breakdown rows */}
       {levyItems.length > 0 && (readings.length > 0 || showInvoiceEnergyLines) && (

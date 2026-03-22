@@ -68,17 +68,20 @@ export interface ProductWithTariffs {
 }
 
 // Post-059: revenue/product type codes now live in energy_sale_type (not tariff_type)
-const PRODUCT_REVENUE_MAP: [RegExp, string][] = [
-  [/energy|metered|available/i, 'ENERGY_SALES'],
-  [/bess|battery/i, 'BESS_LEASE'],
-  [/equipment|rental|lease/i, 'EQUIPMENT_RENTAL_LEASE'],
-  [/loan/i, 'LOAN'],
+// Maps product name patterns to one or more acceptable energy_sale_type codes.
+const PRODUCT_REVENUE_MAP: [RegExp, string[]][] = [
+  [/energy|metered|available/i, ['ENERGY_SALES', 'ENERGY_AS_SERVICE']],
+  [/bess|battery/i, ['BESS_LEASE']],
+  [/equipment|rental|lease|rent/i, ['EQUIPMENT_RENTAL_LEASE']],
+  [/loan/i, ['LOAN']],
+  [/o\s*&\s*m|maintenance|service|diesel|fuel|penal/i, ['OTHER_SERVICE']],
+  [/minimum\s*offtake/i, ['ENERGY_SALES', 'ENERGY_AS_SERVICE']],
 ]
 
-export function mapProductToTariffType(product: R): string | null {
+export function mapProductToTariffType(product: R): string[] | null {
   const name = String(product.product_name ?? product.product_code ?? '')
-  for (const [re, type] of PRODUCT_REVENUE_MAP) {
-    if (re.test(name)) return type
+  for (const [re, types] of PRODUCT_REVENUE_MAP) {
+    if (re.test(name)) return types
   }
   return null
 }
@@ -95,11 +98,12 @@ export function groupProductsWithTariffs(
   const claimedTariffIds = new Set<unknown>()
 
   const matched: ProductWithTariffs[] = contractBps.map((bp) => {
-    const revenueType = mapProductToTariffType(bp)
+    const revenueTypes = mapProductToTariffType(bp)
     let productTariffs: R[]
-    if (revenueType) {
+    if (revenueTypes) {
+      const typeSet = new Set(revenueTypes)
       productTariffs = contractTariffs.filter(
-        (t) => String(t.energy_sale_type_code).toUpperCase() === revenueType,
+        (t) => typeSet.has(String(t.energy_sale_type_code).toUpperCase()),
       )
     } else {
       // No match → show all tariffs as fallback for this product

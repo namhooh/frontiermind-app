@@ -190,7 +190,7 @@ function TariffDetailPanel({ t, pid, rate_periods, monthly_rates, onSaved, editM
 // ---------------------------------------------------------------------------
 
 // Post-059: revenue/product type codes live in energy_sale_type (not tariff_type)
-const NON_ENERGY_REVENUE_CODES = new Set(['EQUIPMENT_RENTAL_LEASE', 'BESS_LEASE', 'LOAN', 'OTHER_SERVICE'])
+const NON_ENERGY_REVENUE_CODES = new Set(['EQUIPMENT_RENTAL_LEASE', 'BESS_LEASE', 'LOAN', 'OTHER_SERVICE', 'ENERGY_AS_SERVICE'])
 
 function isNonEnergyTariff(t: R): boolean {
   return NON_ENERGY_REVENUE_CODES.has(String(t.energy_sale_type_code ?? '').toUpperCase())
@@ -580,17 +580,11 @@ function AddProductRow({ contractId, existingProductIds, billingProductOpts, onA
 // BillingProductCard — expandable card for a product + its tariffs
 // ---------------------------------------------------------------------------
 
-/** Formula types relevant to each product category — show only directly relevant formulas.
- * MRP_CALCULATION (Grid/Generator Reference Price computation) is excluded from product cards
- * — shown only in the Contract Formulas full reference section at the bottom. */
-const ENERGY_PRODUCT_FORMULA_TYPES = new Set(['MRP_BOUNDED', 'PAYMENT_CALCULATION', 'ENERGY_OUTPUT'])
-const AVAILABLE_ENERGY_FORMULA_TYPES = new Set(['DEEMED_ENERGY'])
-const MINIMUM_OFFTAKE_FORMULA_TYPES = new Set(['TAKE_OR_PAY'])
-
-function BillingProductCard({ pw, pid, rate_periods, monthly_rates, contractLines, tariffFormulas, onSaved, editMode, isOpen, onToggle, onRemove, billingProductOpts, tariffTypeOpts, energySaleTypeOpts, escalationTypeOpts, currencyOpts, hardCurrencyCode }: {
+function BillingProductCard({ pw, pid, rate_periods, monthly_rates, contractLines, tariffFormulas, allMatched, onSaved, editMode, isOpen, onToggle, onRemove, billingProductOpts, tariffTypeOpts, energySaleTypeOpts, escalationTypeOpts, currencyOpts, hardCurrencyCode }: {
   pw: { product: R; tariffs: R[] }; pid: number; rate_periods: R[]; monthly_rates: R[]
   contractLines: R[]
   tariffFormulas: TariffFormula[]
+  allMatched: { product: R; tariffs: R[] }[]
   onSaved?: () => void; editMode?: boolean; isOpen: boolean; onToggle: () => void; onRemove?: () => void
   billingProductOpts: { value: number | string; label: string }[]
   tariffTypeOpts: { value: number | string; label: string }[]
@@ -770,16 +764,24 @@ function BillingProductCard({ pw, pid, rate_periods, monthly_rates, contractLine
             )
           )}
 
-          {/* Billing Formulas — structured tariff_formula cards relevant to this product */}
+          {/* Billing Formulas — show only formulas linked to this product's clause_tariff(s) */}
+          {/* Skip for early/test products and non-primary products that share tariffs with the primary */}
           {(() => {
             const productCode = String(bp.product_code ?? '').toUpperCase()
-            const isMinOfftake = /offtake|take.or.pay/i.test(String(bp.product_name ?? '')) || productCode === 'ENER004'
-            const relevantTypes = isAvailableEnergy
-              ? AVAILABLE_ENERGY_FORMULA_TYPES
-              : isMinOfftake
-                ? MINIMUM_OFFTAKE_FORMULA_TYPES
-                : ENERGY_PRODUCT_FORMULA_TYPES
-            const productFormulas = tariffFormulas.filter(tf => relevantTypes.has(tf.formula_type))
+            const productName = String(bp.product_name ?? '')
+            if (/early|test/i.test(productName) || productCode === 'ENER001') return null
+            // Deduplicate: skip formulas for non-primary products that share tariff IDs
+            // with the primary product (formulas already shown there)
+            if (!bp.is_primary) {
+              const primaryPw = allMatched.find(m => m.product.is_primary)
+              if (primaryPw) {
+                const primaryTariffIds = new Set(primaryPw.tariffs.map(t => t.id))
+                const hasSharedTariff = pw.tariffs.some(t => primaryTariffIds.has(t.id))
+                if (hasSharedTariff) return null
+              }
+            }
+            const tariffIds = new Set(pw.tariffs.map(t => t.id as number).filter(Boolean))
+            const productFormulas = tariffFormulas.filter(tf => tariffIds.has(tf.clause_tariff_id))
             if (productFormulas.length === 0) return null
             return (
               <div className="mt-3 pt-3 border-t border-slate-100 space-y-2">
@@ -817,6 +819,7 @@ const FORMULA_TYPE_LABELS: Record<string, string> = {
   SHORTFALL_PAYMENT: 'Shortfall Payment',
   TAKE_OR_PAY: 'Take-or-Pay',
   FX_CONVERSION: 'FX Conversion',
+  AVAILABLE_ENERGY_DISCOUNT: 'Available Energy Discount',
 }
 
 /** Category colour badges for formula types. */
@@ -836,6 +839,7 @@ const FORMULA_CATEGORY_STYLE: Record<string, string> = {
   SHORTFALL_PAYMENT: 'bg-amber-50 text-amber-700 border-amber-200',
   TAKE_OR_PAY: 'bg-amber-50 text-amber-700 border-amber-200',
   FX_CONVERSION: 'bg-slate-50 text-slate-600 border-slate-200',
+  AVAILABLE_ENERGY_DISCOUNT: 'bg-red-50 text-red-700 border-red-200',
 }
 
 /** Render a formula_text with math-friendly formatting. */
@@ -1440,8 +1444,9 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
         </CollapsibleSection>
       )})()}
 
-      {contracts.filter((c) => c.parent_contract_id == null).map((c, i) => {
+      {contracts.filter((c) => c.parent_contract_id == null).map((c, i, parentContracts) => {
         const cid = c.id as number
+        const multiContract = parentContracts.length > 1
         // Include tariffs from this contract AND its amendments
         const amendmentIds = new Set(contracts.filter((a) => a.parent_contract_id === c.id).map((a) => a.id))
         const contractTariffs = tariffs.filter((t) => t.contract_id === c.id || amendmentIds.has(t.contract_id))
@@ -1452,11 +1457,17 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
           (t) => String(t.energy_sale_type_code).toUpperCase() === 'ENERGY_SALES',
         )
         const { matched, unmatched } = groupProductsWithTariffs(billing_products, tariffs, c.id, amendmentIds)
+        const hasProducts = matched.length > 0
 
         // Collect distinct tariff type names for tag badges
         const distinctTariffTypes = [
           ...new Set(contractTariffs.map((t) => t.energy_sale_type_name).filter(Boolean)),
         ] as string[]
+
+        // For multi-contract projects, only the first contract renders standalone sections
+        // (Billing Info, MRP, Shortfall); remaining contracts are skipped — products are
+        // rendered in currency-grouped sections after the loop.
+        if (multiContract && i > 0) return null
 
         return (
           <div key={i}>
@@ -1511,8 +1522,8 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
               )
             })()}
 
-            {/* Section 3: Service & Product Classification */}
-            <CollapsibleSection title="Service & Product Classification">
+            {/* Section 3: Service & Product Classification — skip in multi-contract view (info shown in contract header + product cards) */}
+            {!multiContract && <CollapsibleSection title="Service & Product Classification">
               <div className="space-y-3">
                 {/* Tariff type badges / editable dropdowns */}
                 {editMode ? (
@@ -1547,9 +1558,10 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                   ]} />
                 )}
               </div>
-            </CollapsibleSection>
+            </CollapsibleSection>}
 
-            {/* Products to be Billed */}
+            {/* Products to be Billed — rendered here for single-contract; multi-contract renders currency-grouped sections after the loop */}
+            {!multiContract && (
             <CollapsibleSection title="Products to be Billed">
               {matched.length === 0 && unmatched.length === 0 && !editMode ? (
                 <EmptyState>No billing products or tariffs found</EmptyState>
@@ -1561,6 +1573,7 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                       pw={pw} pid={pid} rate_periods={rate_periods} monthly_rates={monthly_rates}
                       contractLines={data.contract_lines ?? []}
                       tariffFormulas={tariff_formulas}
+                      allMatched={matched}
                       onSaved={onSaved} editMode={editMode}
                       isOpen={openProducts.has(pw.product.id)}
                       onToggle={() => toggleProduct(pw.product.id)}
@@ -1589,43 +1602,37 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
                     />
                   )}
 
-                  {/* Other Tariffs — not matched to any product */}
-                  {unmatched.length > 0 && (
-                    <div className="border border-slate-200 rounded-lg p-4">
-                      <div className="text-xs font-medium text-slate-400 uppercase mb-3">Other Tariffs</div>
-                      {unmatched.map((t, j) => (
-                        <div key={j} className={j > 0 ? 'mt-4 pt-4 border-t border-slate-100' : ''}>
-                          <div className="flex items-center gap-2 mb-1">
-                            <div className="text-xs font-medium text-slate-500">
-                              {str(t.energy_sale_type_name ?? t.energy_sale_type_code ?? 'Tariff')}
+                  {/* Other Tariffs — not matched to any product (excludes non-energy; those render in Non-Energy Service Lines) */}
+                  {(() => {
+                    const energyUnmatched = unmatched.filter((t) => !isNonEnergyTariff(t))
+                    if (energyUnmatched.length === 0) return null
+                    return (
+                      <div className="border border-slate-200 rounded-lg p-4">
+                        <div className="text-xs font-medium text-slate-400 uppercase mb-3">Other Tariffs</div>
+                        {energyUnmatched.map((t, j) => (
+                          <div key={j} className={j > 0 ? 'mt-4 pt-4 border-t border-slate-100' : ''}>
+                            <div className="flex items-center gap-2 mb-1">
+                              <div className="text-xs font-medium text-slate-500">
+                                {str(t.energy_sale_type_name ?? t.energy_sale_type_code ?? 'Tariff')}
+                              </div>
                             </div>
-                            {isNonEnergyTariff(t) && (
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">Non-Energy</span>
-                            )}
-                          </div>
-                          {isNonEnergyTariff(t) ? (
-                            <NonEnergyTariffPanel
-                              t={t} pid={pid} rate_periods={rate_periods} monthly_rates={monthly_rates}
-                              onSaved={onSaved} editMode={editMode}
-                              energySaleTypeOpts={energySaleTypeOpts} escalationTypeOpts={escalationTypeOpts}
-                            />
-                          ) : (
                             <TariffDetailPanel
                               t={t} pid={pid} rate_periods={rate_periods} monthly_rates={monthly_rates}
                               onSaved={onSaved} editMode={editMode}
                               currencyOpts={currencyOpts} hardCurrencyCode={hardCurrencyCode}
                             />
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  )}
+                          </div>
+                        ))}
+                      </div>
+                    )
+                  })()}
                 </div>
               )}
             </CollapsibleSection>
+            )}
 
             {/* Section 4–7: Formula Parameters (visible only when data exists) */}
-            {firstTariff != null && (<>
+            {firstTariff != null && String(firstTariff.escalation_type_code ?? '') !== 'NOT_ENERGY_SALES' && (<>
               {/* Section 4: Escalation Rules */}
               {(firstTariff.escalation_type_code != null || hasAnyValue(firstLp, ['escalation_frequency', 'escalation_start_date', 'tariff_components_to_adjust', 'escalation_rules', 'cpi_base_date'])) && (
                 <CollapsibleSection title="Escalation Rules">
@@ -1668,25 +1675,27 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
               )}
             </>)}
 
-            {/* Section 5: Market Reference Price — right after Escalation Rules */}
-            <MRPSection
-              projectId={pid}
-              orgId={data.project.organization_id as number}
-              codDate={data.project.cod_date as string | null | undefined}
-              firstTariff={firstTariff}
-              firstLp={firstLp}
-              baselineMrp={data.baseline_mrp ?? []}
-              initialMonthly={mrpMonthly}
-              initialAnnual={mrpAnnual}
-              initialTokens={mrpTokens}
-              onSaved={onSaved}
-              editMode={editMode}
-            />
+            {/* Section 5: Market Reference Price — render once (first contract only) */}
+            {i === 0 && (
+              <MRPSection
+                projectId={pid}
+                orgId={data.project.organization_id as number}
+                codDate={data.project.cod_date as string | null | undefined}
+                firstTariff={firstTariff}
+                firstLp={firstLp}
+                baselineMrp={data.baseline_mrp ?? []}
+                initialMonthly={mrpMonthly}
+                initialAnnual={mrpAnnual}
+                initialTokens={mrpTokens}
+                onSaved={onSaved}
+                editMode={editMode}
+              />
+            )}
 
             {/* Available Energy — now displayed inside the ENER003 BillingProductCard */}
 
-            {/* Section 7: Shortfall Formula */}
-            {(() => {
+            {/* Section 7: Shortfall Formula — render once (first contract only) */}
+            {i === 0 && (() => {
               const shortfallFormulas = tariff_formulas.filter(tf => tf.formula_type === 'SHORTFALL_PAYMENT' || tf.formula_type === 'TAKE_OR_PAY')
               const hasLpShortfall = firstTariff != null && hasAnyValue(firstLp, ['shortfall_formula_type', 'shortfall_formula_text', 'shortfall_formula_variables'])
               if (shortfallFormulas.length === 0 && !hasLpShortfall) return null
@@ -1740,59 +1749,173 @@ export function PricingTariffsTab({ data, onSaved, editMode, projectId, mrpMonth
               )
             })()}
 
-            {/* Section 8: Non-Energy Service Lines */}
-            {(() => {
-              const nonEnergyTariffs = contractTariffs.filter(isNonEnergyTariff)
+            {/* Section 8: Non-Energy Service Lines — only for single-contract; multi-contract handles in currency-grouped section */}
+            {!multiContract && (() => {
+              // Collect tariff IDs already claimed by product matching
+              const claimedTariffIds = new Set<unknown>()
+              for (const pw of matched) {
+                for (const t of pw.tariffs) claimedTariffIds.add(t.id)
+              }
+              const nonEnergyTariffs = contractTariffs
+                .filter(isNonEnergyTariff)
+                .filter((t) => !claimedTariffIds.has(t.id))
+              if (nonEnergyTariffs.length === 0) return null
               return (
                 <CollapsibleSection title="Non-Energy Service Lines">
-                  {nonEnergyTariffs.length === 0 ? (
-                    <EmptyState>No equipment rental, BESS lease, or loan repayment lines on this contract</EmptyState>
-                  ) : (
-                    <div className="space-y-3">
-                      {nonEnergyTariffs.map((t, j) => {
-                        const lp = (t.logic_parameters ?? {}) as R
-                        const currentMr = (monthly_rates ?? []).find(
-                          (mr: R) => mr.clause_tariff_id === t.id && mr.is_current,
-                        )
-                        const baseCurrency = t.currency_code ? ` (${t.currency_code})` : ''
-                        const localCurrency = currentMr?.currency_code ? ` (${currentMr.currency_code})` : ''
-                        return (
-                          <div key={j} className={j > 0 ? 'pt-3 border-t border-slate-100' : ''}>
-                            <div className="flex items-center gap-2 mb-2">
-                              <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
-                                {str(t.energy_sale_type_name ?? t.energy_sale_type_code)}
-                              </span>
-                            </div>
-                            <FieldGrid fields={[
-                              [`Rate per Unit${baseCurrency}`, t.base_rate],
-                              ...(t.unit != null ? [['Unit', t.unit] as FieldDef] : []),
-                              ...(t.escalation_type_code != null ? [['Escalation', t.escalation_type_code] as FieldDef] : []),
-                              ...(lp.escalation_value != null ? [['Escalation Value', lp.escalation_value] as FieldDef] : []),
-                              ...(currentMr ? [[`Effective Rate${localCurrency}${currentMr.billing_month ? ` — ${formatBillingMonth(currentMr.billing_month)}` : ''}`, currentMr.effective_tariff_local] as FieldDef] : []),
-                            ]} />
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
+                  <div className="space-y-3">
+                    {nonEnergyTariffs.map((t, j) => (
+                      <div key={j} className={j > 0 ? 'pt-3 border-t border-slate-100' : ''}>
+                        <div className="flex items-center gap-2 mb-2">
+                          <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200">
+                            {str(t.energy_sale_type_name ?? t.energy_sale_type_code)}
+                          </span>
+                          <span className="text-xs text-slate-500">{str(t.name)}</span>
+                        </div>
+                        <NonEnergyTariffPanel
+                          t={t} pid={pid} rate_periods={rate_periods} monthly_rates={monthly_rates}
+                          onSaved={onSaved} editMode={editMode}
+                          energySaleTypeOpts={energySaleTypeOpts} escalationTypeOpts={escalationTypeOpts}
+                        />
+                      </div>
+                    ))}
+                  </div>
                 </CollapsibleSection>
               )
             })()}
 
-            {/* Section 9: Contract Formulas — full reference (bottom of tab) */}
-            {tariff_formulas.length > 0 && (
-              <CollapsibleSection title={`Contract Formulas — Full Reference (${tariff_formulas.length})`}>
-                <p className="text-xs text-slate-400 mb-3">All extracted pricing formulas for this project. These are the source of truth for the billing engine.</p>
-                <div className="space-y-3">
-                  {tariff_formulas.map((tf) => (
-                    <FormulaCard key={tf.id} formula={tf} />
-                  ))}
-                </div>
-              </CollapsibleSection>
-            )}
           </div>
         )
       })}
+
+      {/* Multi-contract: currency-grouped Products sections */}
+      {(() => {
+        const parentContracts = contracts.filter((c) => c.parent_contract_id == null)
+        if (parentContracts.length <= 1) return null
+
+        // Group contracts by tariff currency
+        const ccyGroups = new Map<string, typeof parentContracts>()
+        for (const c of parentContracts) {
+          const amendIds = new Set(contracts.filter((a) => a.parent_contract_id === c.id).map((a) => a.id))
+          const ct = tariffs.filter((t) => t.contract_id === c.id || amendIds.has(t.contract_id))
+          const ccy = String(ct[0]?.currency_code ?? 'USD')
+          if (!ccyGroups.has(ccy)) ccyGroups.set(ccy, [])
+          ccyGroups.get(ccy)!.push(c)
+        }
+
+        return [...ccyGroups.entries()].map(([ccy, groupContracts]) => {
+          // Collect all products and tariffs across contracts in this currency group
+          const allContractIds = new Set<unknown>()
+          for (const c of groupContracts) {
+            allContractIds.add(c.id)
+            for (const a of contracts.filter((x) => x.parent_contract_id === c.id)) allContractIds.add(a.id)
+          }
+          const groupBps = billing_products.filter((bp) => allContractIds.has(bp.contract_id))
+          const groupTariffs = tariffs.filter((t) => allContractIds.has(t.contract_id))
+          const claimedTariffIds = new Set<unknown>()
+
+          // Match products to tariffs using the same logic as groupProductsWithTariffs
+          const matched = groupBps.map((bp) => {
+            const revenueTypes: string[] | null = (() => {
+              const name = String(bp.product_name ?? bp.product_code ?? '')
+              if (/energy|metered|available/i.test(name)) return ['ENERGY_SALES', 'ENERGY_AS_SERVICE']
+              if (/bess|battery/i.test(name)) return ['BESS_LEASE']
+              if (/equipment|rental|lease|rent/i.test(name)) return ['EQUIPMENT_RENTAL_LEASE']
+              if (/loan/i.test(name)) return ['LOAN']
+              if (/o\s*&\s*m|maintenance|service|diesel|fuel|penal/i.test(name)) return ['OTHER_SERVICE']
+              if (/minimum\s*offtake/i.test(name)) return ['ENERGY_SALES', 'ENERGY_AS_SERVICE']
+              return null
+            })()
+            let productTariffs: R[]
+            if (revenueTypes) {
+              const typeSet = new Set(revenueTypes)
+              productTariffs = groupTariffs.filter(
+                (t) => typeSet.has(String(t.energy_sale_type_code).toUpperCase()) && !claimedTariffIds.has(t.id),
+              )
+            } else {
+              productTariffs = groupTariffs.filter((t) => !claimedTariffIds.has(t.id))
+            }
+            for (const t of productTariffs) claimedTariffIds.add(t.id)
+            return { product: bp, tariffs: productTariffs }
+          })
+          const unmatched = groupTariffs.filter((t) => !claimedTariffIds.has(t.id))
+
+          return (
+            <CollapsibleSection key={ccy} title={`Products to be Billed (${ccy})`}>
+              {matched.length === 0 && unmatched.length === 0 ? (
+                <EmptyState>No billing products found</EmptyState>
+              ) : (
+                <div className="space-y-3">
+                  {matched.map((pw) => (
+                    <BillingProductCard
+                      key={pw.product.id as number}
+                      pw={pw} pid={pid} rate_periods={rate_periods} monthly_rates={monthly_rates}
+                      contractLines={data.contract_lines ?? []}
+                      tariffFormulas={tariff_formulas}
+                      allMatched={matched}
+                      onSaved={onSaved} editMode={editMode}
+                      isOpen={openProducts.has(pw.product.id)}
+                      onToggle={() => toggleProduct(pw.product.id)}
+                      onRemove={async () => {
+                        try {
+                          await adminClient.removeBillingProduct(pw.product.id as number)
+                          toast.success(`Removed ${str(pw.product.product_name)}`)
+                          onSaved?.()
+                        } catch (e) {
+                          toast.error(e instanceof Error ? e.message : 'Failed to remove product')
+                        }
+                      }}
+                      billingProductOpts={billingProductOpts} tariffTypeOpts={tariffTypeOpts}
+                      energySaleTypeOpts={energySaleTypeOpts} escalationTypeOpts={escalationTypeOpts}
+                      currencyOpts={currencyOpts} hardCurrencyCode={hardCurrencyCode}
+                    />
+                  ))}
+
+                  {/* Other Tariffs — not matched to any product */}
+                  {unmatched.length > 0 && (
+                    <div className="border border-slate-200 rounded-lg p-4">
+                      <div className="text-xs font-medium text-slate-400 uppercase mb-3">Other Tariffs</div>
+                      {unmatched.map((t, j) => (
+                        <div key={j} className={j > 0 ? 'mt-4 pt-4 border-t border-slate-100' : ''}>
+                          <div className="flex items-center gap-2 mb-1">
+                            <div className="text-xs font-medium text-slate-500">
+                              {str(t.energy_sale_type_name ?? t.energy_sale_type_code ?? 'Tariff')}
+                            </div>
+                          </div>
+                          {isNonEnergyTariff(t) ? (
+                            <NonEnergyTariffPanel
+                              t={t} pid={pid} rate_periods={rate_periods} monthly_rates={monthly_rates}
+                              onSaved={onSaved} editMode={editMode}
+                              energySaleTypeOpts={energySaleTypeOpts} escalationTypeOpts={escalationTypeOpts}
+                            />
+                          ) : (
+                            <TariffDetailPanel
+                              t={t} pid={pid} rate_periods={rate_periods} monthly_rates={monthly_rates}
+                              onSaved={onSaved} editMode={editMode}
+                              currencyOpts={currencyOpts} hardCurrencyCode={hardCurrencyCode}
+                            />
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </CollapsibleSection>
+          )
+        })
+      })()}
+
+      {/* Contract Formulas — full reference (always last section) */}
+      {tariff_formulas.length > 0 && (
+        <CollapsibleSection title={`Contract Formulas — Full Reference (${tariff_formulas.length})`}>
+          <p className="text-xs text-slate-400 mb-3">All extracted pricing formulas for this project. These are the source of truth for the billing engine.</p>
+          <div className="space-y-3">
+            {tariff_formulas.map((tf) => (
+              <FormulaCard key={tf.id} formula={tf} />
+            ))}
+          </div>
+        </CollapsibleSection>
+      )}
 
     </div>
   )

@@ -382,6 +382,7 @@ class InvoiceService:
                         sort_counter += 1
 
                 # Metered energy
+                total_metered_kwh = Decimal('0')
                 for cl in contract_lines:
                     if cl["energy_category"] != 'metered':
                         continue
@@ -391,6 +392,7 @@ class InvoiceService:
                     metered_kwh = _to_decimal(agg["metered_kwh"])
                     if metered_kwh <= 0:
                         continue
+                    total_metered_kwh += metered_kwh
                     ct_id = cl.get("clause_tariff_id") or project_tariff["id"]
                     rate = rate_by_tariff.get(ct_id, Decimal('0'))
                     line_total = _round_d(metered_kwh * rate, rounding_precision, rounding_mode)
@@ -404,6 +406,36 @@ class InvoiceService:
                         "sort_order": sort_counter, "contract_line_id": cl["id"],
                         "clause_tariff_id": ct_id, "meter_aggregate_id": agg.get("meter_aggregate_id"),
                         "meter_name": agg.get("meter_name"),
+                    })
+                    sort_counter += 1
+
+                # Available energy discount (curtailment allowance)
+                discount_config = logic_params.get("available_energy_discount")
+                if discount_config and total_available_kwh > 0 and total_metered_kwh > 0:
+                    threshold_pct = _to_decimal(discount_config.get("threshold_pct", "0.05"))
+                    total_output = total_metered_kwh + total_available_kwh
+                    if total_available_kwh > total_output * threshold_pct:
+                        discount_kwh = total_output * threshold_pct
+                    else:
+                        discount_kwh = total_available_kwh
+                    # Use the first contract line's tariff rate for pricing the discount
+                    ct_id = contract_lines[0].get("clause_tariff_id") or project_tariff["id"]
+                    rate = rate_by_tariff.get(ct_id, Decimal('0'))
+                    discount_total = _round_d(discount_kwh * rate, rounding_precision, rounding_mode)
+                    line_items.append({
+                        "type_code": "AVAILABLE_ENERGY_DISCOUNT",
+                        "type_id": type_map.get("AVAILABLE_ENERGY_DISCOUNT"),
+                        "component_code": None,
+                        "description": "Available Energy Discount",
+                        "quantity": -discount_kwh,
+                        "unit_price": rate,
+                        "basis_amount": None, "rate_pct": None,
+                        "line_total_amount": -discount_total,
+                        "amount_sign": -1,
+                        "sort_order": sort_counter,
+                        "contract_line_id": None,
+                        "clause_tariff_id": ct_id,
+                        "meter_aggregate_id": None, "meter_name": None,
                     })
                     sort_counter += 1
 
