@@ -9,9 +9,9 @@ const backendUrl =
 const cspDirectives = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.sentry.io",
-  "style-src 'self' 'unsafe-inline'",
+  "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
   "img-src 'self' data: blob:",
-  "font-src 'self'",
+  "font-src 'self' https://fonts.gstatic.com",
   "connect-src 'self' https://api.frontiermind.co https://*.supabase.co https://*.sentry.io",
   "frame-ancestors 'none'",
   "base-uri 'self'",
