@@ -34,7 +34,7 @@ const nextConfig: NextConfig = {
   async headers() {
     return [
       {
-        source: "/(.*)",
+        source: "/((?!api/).*)",
         headers: securityHeaders,
       },
     ];
