@@ -245,15 +245,16 @@ function ProjectsPageContent() {
     refreshPendingCount()
   }, [selectedProjectId, loadProjectDashboard, fetchMrpData, applyMrpData, refreshPendingCount])
 
-  // Load project from URL ?id= on mount
+  // Load project from URL ?id= — only after org is resolved
   useEffect(() => {
+    if (!orgId) return
     const idParam = searchParams.get('id')
     if (idParam) {
       const id = parseInt(idParam, 10)
       if (!isNaN(id)) handleSelectProject(id)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [orgId])
 
   function handleSelectHome() {
     projectRequestRef.current += 1
