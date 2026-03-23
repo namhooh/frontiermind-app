@@ -107,18 +107,25 @@ try:
 except Exception as e:
     logger.warning(f"Audit middleware failed to initialize: {e}")
 
+# Setup security headers middleware
+try:
+    from middleware.security_headers import SecurityHeadersMiddleware
+    app.add_middleware(SecurityHeadersMiddleware)
+    logger.info("Security headers middleware enabled")
+except Exception as e:
+    logger.warning(f"Security headers middleware failed to initialize: {e}")
+
 # Configure CORS for Vercel frontend and local development
-# Note: allow_origins doesn't support wildcards, so we use allow_origin_regex for Vercel
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",  # Next.js development server
         "http://localhost:3001",
     ],
-    allow_origin_regex=r"https://.*\.vercel\.app",  # Matches all Vercel deployments
+    allow_origin_regex=r"https://frontiermind-(app|demo)(-[a-z0-9]+)?\.vercel\.app",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allow_headers=["*"],
+    allow_headers=["Authorization", "Content-Type", "X-Organization-ID", "X-Request-ID", "sentry-trace", "baggage"],
 )
 
 # Register API routers

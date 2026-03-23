@@ -1080,6 +1080,51 @@ CREATE POLICY "contract_delete_admin_only" ON contract
 | No access reviews | Orphaned permissions | Quarterly access reviews |
 | No break-glass procedure | Emergency lockout | Document emergency access process |
 
+### 6.8 Attack Vector Defenses
+
+#### 6.8.1 Session Fixation
+
+**Strategy: No server-side sessions — Supabase JWT delegation**
+
+- The app does not manage sessions itself. Supabase Auth issues JWTs on login.
+- Since JWTs are stateless (no session store on the server), there is no session ID for an attacker to "fix" ahead of time.
+- On every login, Supabase generates a fresh JWT — even if an attacker planted a token, it is replaced.
+- For OAuth flows (Enphase, SMA), the `state` parameter is HMAC-signed with `OAUTH_STATE_SECRET` and expires in 10 minutes. An attacker cannot pre-generate a valid state or reuse an old one.
+
+#### 6.8.2 CSRF (Cross-Site Request Forgery)
+
+**Strategy: Bearer token in headers, not cookies**
+
+- All API calls use `Authorization: Bearer <jwt>` set explicitly by `adminClient.getAuthHeaders()`.
+- CSRF exploits the browser's automatic cookie attachment. Since auth lives in a manually-set header, a cross-origin `<form>` or `<img>` tag cannot trigger an authenticated request.
+- `X-Organization-ID` is also required on every request — another header a cross-origin request cannot set.
+- OAuth flows get additional CSRF protection: the HMAC-signed `state` parameter acts as a CSRF token, verified server-side before exchanging the authorization code.
+- Supabase's own session cookie defaults to `SameSite=Lax`, which blocks cross-origin POST submissions.
+
+#### 6.8.3 Token Theft
+
+**Strategy: Multi-layer mitigation**
+
+| Layer | Defense |
+|-------|---------|
+| **Short JWT expiry** | Supabase JWTs expire in 3600s (1 hour). A stolen token has a limited exploitation window. |
+| **HTTPS everywhere** | Production uses `api.frontiermind.co` (Railway auto-HTTPS) and Vercel (HTTPS by default). Tokens cannot be intercepted in transit. |
+| **Tenant scoping** | Even with a stolen token, the attacker is confined to the victim's `organization_id`. Cross-org access is blocked by `assert_project_in_org()` and similar checks in `middleware/authorization.py`. |
+| **Role-based access** | `viewer` tokens cannot mutate data (`require_write_access` blocks POST/PUT/PATCH/DELETE). |
+| **Change Request workflow** | For financially sensitive fields, even a stolen `editor` token cannot directly modify data — changes queue for approval by a different user (four-eyes principle, `allow_self_approve = false`). |
+| **Demo token isolation** | `DEMO_ACCESS_TOKEN` is read-only and pinned to org 1. Theft has minimal impact. |
+| **API Key security** | Machine-to-machine keys use `hmac.compare_digest()` for timing-safe comparison, preventing timing side-channel attacks. |
+
+#### 6.8.4 Known Gaps & Hardening Status
+
+| Gap | Risk | Status |
+|-----|------|--------|
+| ~~`localStorage` token storage~~ | ~~XSS would expose JWT~~ | **RESOLVED** — tokens stored in `httpOnly` cookies via `@supabase/ssr` (`lib/supabase/server.ts`, `lib/supabase/middleware.ts`) |
+| ~~No API rate limiting~~ | ~~Unlimited requests with stolen token~~ | **RESOLVED** — `slowapi` rate limiter with 6 tiers: default 100/min, upload 10/min, auth 5/min, admin 50/min, health 300/min, export 20/min (`python-backend/middleware/rate_limiter.py`) |
+| ~~No security headers~~ | ~~XSS, clickjacking, MIME-sniffing~~ | **RESOLVED** — HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, and CSP added to both frontend (`next.config.ts`) and backend (`python-backend/middleware/security_headers.py`) |
+| ~~Permissive CORS~~ | ~~Any Vercel app could make authenticated requests~~ | **RESOLVED** — `allow_origin_regex` restricted to `frontiermind-(app\|demo)` projects; `allow_headers` restricted to actual headers used (`python-backend/main.py`) |
+| Refresh token rotation | If not enabled, stolen refresh token grants indefinite access | **ACTION NEEDED** — verify `refresh_token_reuse_interval` is set in Supabase dashboard (Auth → Settings) |
+
 ---
 
 ## 7. Logging, Monitoring & Alerting
