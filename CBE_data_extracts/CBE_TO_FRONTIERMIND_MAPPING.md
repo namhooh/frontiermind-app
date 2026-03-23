@@ -5,8 +5,8 @@ This document maps CBE's data architecture to FrontierMind's canonical schema an
 **Sources:** AM Onboarding Template (Excel), PPA Contract PDFs, Utility Invoices (GRP — Grid Reference Price), Snowflake data warehouse, Operations Plant Performance Workbook, Operating Revenue Masterfile.
 
 **Schema version:** v10.18 (migration 060 + oy_start_date population)
-**Latest population step:** oy_start_date population — 36 clause_tariff rows (2026-03-17)
-**Latest architecture update:** Section 34 — oy_start_date as Canonical OY Anchor (2026-03-17)
+**Latest population step:** Step 11b — ancillary doc production guarantees (UGL01, UTK01, LOI01) (2026-03-23)
+**Latest architecture update:** Section 8 — Amendment tracking expanded with classification groups, ancillary doc hierarchy (2026-03-23)
 
 **Companion documentation:**
 - [`contract-digitization/docs/IMPLEMENTATION_GUIDE.md`](../contract-digitization/docs/IMPLEMENTATION_GUIDE.md) — Full contract digitization pipeline (OCR, PII, clause extraction, ontology)
@@ -26,6 +26,8 @@ This document maps CBE's data architecture to FrontierMind's canonical schema an
 - [`python-backend/scripts/step10b_tariff_rate_population.py`](../python-backend/scripts/step10b_tariff_rate_population.py) — Step 10b: Tariff rate population (Section 30)
 - [`python-backend/scripts/extend_forecasts.py`](../python-backend/scripts/extend_forecasts.py) — Step 11: Forecast extension engine (Section 31)
 - [`python-backend/reports/cbe-population/extend_forecasts_2026-03-09.json`](../python-backend/reports/cbe-population/extend_forecasts_2026-03-09.json) — Step 11 report
+- [`python-backend/scripts/apply_amendment_changes.py`](../python-backend/scripts/apply_amendment_changes.py) — Step 11a: Amendment classification & source_metadata population
+- [`python-backend/scripts/populate_ancillary_production_guarantees.py`](../python-backend/scripts/populate_ancillary_production_guarantees.py) — Step 11b: Ancillary doc production guarantee population (UGL01, UTK01, LOI01)
 
 ---
 
@@ -416,7 +418,7 @@ OnboardingCommitResponse {success, project_id, contract_id, warnings, counts}
 | 4.8 | `production_guarantee` | `(project_id, operating_year)` | UPDATE year dates, guaranteed_kwh, pct_of_p50, p50_annual_kwh, shortfall_cap, fx_rule |
 | 4.9 | `meter` | `(project_id, serial_number)` | UPDATE location_description, metering_type |
 | 4.10 | `contract_billing_product` | `(contract_id, billing_product_id)` | UPDATE is_primary. Uses `LATERAL` subquery: `ORDER BY organization_id NULLS LAST LIMIT 1` (prefers org-scoped over canonical) |
-| 4.11 | `tariff_rate` | `(clause_tariff_id, contract_year) WHERE rate_granularity = 'annual'` | `DO NOTHING`. Creates Year 1 where `effective_rate_billing_ccy = base_rate` |
+| 4.11 | `tariff_rate` | `(clause_tariff_id, operating_year) WHERE rate_granularity = 'annual'` | `DO NOTHING`. Creates Year 1 where `effective_rate_billing_ccy = base_rate` |
 
 **Step 4.5 detail:** `logic_parameters` JSONB is built from `discount_pct`, `floor_rate`, `ceiling_rate`, `escalation_value`, `grp_method` merged with `logic_parameters_extra`.
 
@@ -960,33 +962,75 @@ Future: Support for country-specific CPI indices (GH CPI, KE CPI, etc.) using th
 
 ---
 
-### 12. Loan Schedules → `loan_schedule` / `loan_payment`
+### 12. Loan Repayment → `clause_tariff` (terms) + `loan_repayment` (periods)
 
-From the Operating Revenue Masterfile "Loans" tab. CBE currently has 3 active loans.
+From the Operating Revenue Masterfile "Loans" tab. Implemented in migration 066.
 
-**`loan_schedule`:**
+**Design:** Loan terms are stored as `clause_tariff` rows (`energy_sale_type = LOAN`, `tariff_type = FINANCE_LEASE`). Monthly repayment data is stored in `loan_repayment` — parallels `tariff_rate` for energy tariffs.
 
-| Source | FrontierMind Column | Notes |
-|--------|-------------------|-------|
-| Loan name | `loan_name` | e.g. "Zoodlabs Loan 1" |
-| Opening balance | `opening_balance` | e.g. $1,857,005.50 |
-| Monthly payment | `monthly_payment` | e.g. $15,436 (may step up) |
-| Interest rate | `interest_rate` | Implied from amortization |
-| Term | `term_months` | e.g. 180 (15 years) |
-| Start date | `start_date` | |
-| (FK) | `project_id`, `contract_id`, `counterparty_id` | |
+**Loan clause_tariff rows (terms):**
 
-**`loan_payment`:**
+| Project | clause_tariff | contract | logic_parameters |
+|---------|--------------|----------|------------------|
+| ZL02 | ct#66 "SL-ZL02 Loan Schedule" | #96 (LEASE) | `{loan_variant: "amortization", opening_balance: 60271}` |
+| GC001 | ct#67 "KE-GC001 Loan Schedule" | #16 (LEASE) | `{loan_variant: "interest_income"}` |
+| iSAT01 | ct#68 "iSAT01 Loan Repayment" | — (none) | `{loan_variant: "fixed_repayment", fixed_payment: 61632}` |
+
+**`loan_repayment` table (period rows):**
 
 | Source | FrontierMind Column | Notes |
 |--------|-------------------|-------|
-| Month # | `month_number` | Sequential from loan start |
-| Principal | `principal` | |
-| Interest | `interest` | |
-| Payment | `payment` | principal + interest |
-| Closing balance | `closing_balance` | |
-| | `notice_sent_at` | Tracks when repayment notice was sent |
-| (FK) | `loan_schedule_id`, `billing_period_id` | |
+| (FK) | `clause_tariff_id` | Parent loan clause_tariff row |
+| (FK) | `contract_line_id` | Billing grain (ZL02→cl#290, GC001→NULL) |
+| Month date | `billing_month` | First of month |
+| (FK) | `billing_period_id` | FK to `billing_period` |
+| OY | `operating_year` | Derived from loan start date |
+| Payment/Invoiced | `scheduled_amount` | Total repayment for the period |
+| Principal/Capital Repayment | `principal_amount` | Principal component |
+| Interest/Interest Income | `interest_amount` | Interest component |
+| Closing Balance | `closing_balance` | Outstanding balance after payment (NULL for GC001) |
+| (FK) | `billing_currency_id` | USD (#1) for all current loans |
+| | `data_quality` | `ok`, `quarantined`, or `needs_review` |
+
+**Source field mapping (Revenue Masterfile "Loans" tab → unified columns):**
+- ZL02: `payment → scheduled_amount`, `principal → principal_amount`, `interest → interest_amount`
+- GC001: `invoiced → scheduled_amount`, `capital_repayment → principal_amount`, `interest_income → interest_amount`
+
+**Unique constraint:** `(clause_tariff_id, billing_month)` — follows `tariff_rate` pattern.
+
+**Reconciliation:** Via existing `expected_invoice_line_item.clause_tariff_id` and `invoice_line_item.contract_line_id` joins (invoice → schedule direction). No reverse FK on schedule tables.
+
+### 12b. Rental/Ancillary Charges → `clause_tariff` (terms) + `rental_ancillary_charge` (periods)
+
+From the Operating Revenue Masterfile "Rental and Ancillary" tab. Implemented in migration 066.
+
+**Design:** Charge terms live on existing non-energy `clause_tariff` rows. Monthly charges stored in `rental_ancillary_charge` — parallels `tariff_rate`. Charge type derived from parent `clause_tariff.energy_sale_type_id` (no separate ENUM).
+
+**Project resolution:**
+
+| Project | clause_tariff | contract_line | energy_sale_type | base_rate |
+|---------|--------------|---------------|------------------|-----------|
+| LOI01 | ct#14 | cl#209 | BESS_LEASE | $2,000/mo |
+| AR01 | ct#46 | cl#184 | EQUIPMENT_RENTAL_LEASE | $9,050/mo |
+| QMM01 | ct#33 | cl#262 | BESS_LEASE | MGA 57,878/mo |
+| TWG01 | ct#45 | cl#267 | EQUIPMENT_RENTAL_LEASE | $306,250/mo |
+| TWG01 | ct#31 | cl#266 | OTHER_SERVICE (O&M) | $39,583/mo |
+| AMP01 | ct#65 | cl#181 | EQUIPMENT_RENTAL_LEASE | SKIPPED (placeholder data) |
+
+**`rental_ancillary_charge` table:**
+
+| Field | Notes |
+|-------|-------|
+| `clause_tariff_id` (FK) | Parent non-energy clause_tariff |
+| `contract_line_id` (FK) | Billing grain for reconciliation |
+| `billing_month` | First of month |
+| `billing_period_id` (FK) | FK to billing_period |
+| `operating_year` | From source data |
+| `scheduled_amount` | Contractual charge amount |
+| `billing_currency_id` (FK) | Settlement currency |
+| `data_quality` | `ok`, `quarantined`, or `needs_review` |
+
+**Unique constraint:** `(clause_tariff_id, contract_line_id, billing_month)`
 
 ---
 
@@ -1041,7 +1085,7 @@ Migration 040 merged `tariff_annual_rate` + `tariff_monthly_rate` into a unified
 | Field | Notes |
 |-------|-------|
 | `clause_tariff_id` (FK) | Parent tariff |
-| `contract_year` | INTEGER, 1-based from COD |
+| `operating_year` | INTEGER, 1-based from COD |
 | `rate_granularity` | Enum: `'annual'` or `'monthly'` |
 | `billing_month` | DATE (first of month) for monthly rows; NULL for annual |
 | `period_start`, `period_end` | DATE range for this period |
@@ -1064,7 +1108,7 @@ Migration 040 merged `tariff_annual_rate` + `tariff_monthly_rate` into a unified
 | `is_current` | BOOLEAN, separate unique index per granularity (annual/monthly) |
 
 **Key constraints:**
-- Annual rows: one per `(clause_tariff_id, contract_year)`, `billing_month` must be NULL
+- Annual rows: one per `(clause_tariff_id, operating_year)`, `billing_month` must be NULL
 - Monthly rows: one per `(clause_tariff_id, billing_month)`, `period_start = billing_month`
 - `billing_currency_id` must equal `hard_currency_id` or `local_currency_id`
 
@@ -1187,6 +1231,74 @@ When a tariff is amended:
 **Table:** `contract_amendment` (migration 033) tracks amendment metadata.
 
 **Views:** `clause_tariff_current_v` filters to `is_current = true` for downstream consumers.
+
+### 8.1 Amendment Classification & Population (Step 11a)
+
+All 21 amendments across 13 projects have been classified and populated. Classification determines handling:
+
+| Group | Criteria | Handling | `source_metadata` content |
+|-------|----------|----------|---------------------------|
+| **A** — No pricing | COD extension, ownership transfer, facility expansion (no rate changes) | Description + summary only | `{description, summary, group: "A"}` |
+| **B** — Simple pricing | Discount %, floor/ceiling, term changes with known before/after values | Computed diffs in `changes[]` array | `{description, summary, group: "B", changes: [...]}` |
+| **D** — Complex | Full restatement, exhibit replacement, new tariff structures | Full Claude pipeline extraction (Step 11P) | `{description, summary, group: "D", skip_reason}` then full extraction |
+
+**`changes[]` array format:**
+```json
+[
+  {"field": "discount_pct", "from": 0.185, "to": 0.195, "action": "modified"},
+  {"field": "floor_rate", "from": 0.1199, "to": 0.0874, "action": "modified"},
+  {"field": "contract_term_years", "from": 16, "to": 18, "action": "modified"}
+]
+```
+
+**Dashboard integration:** `PendingChangesPanel.tsx` and `ProjectOverviewTab.tsx` read `source_metadata.changes` to render Amendment History cards with field-level diffs.
+
+**Script:** `python-backend/scripts/apply_amendment_changes.py` — populates descriptions, changes arrays, and summaries for Groups A/B. Group D amendments are processed via `step11p_pricing_extraction.py --amendment`.
+
+### 8.2 Amendment Portfolio Summary
+
+| Project | Amendments | Group | Key Changes |
+|---------|-----------|-------|-------------|
+| GBL01 | #1, #2 | A | System owner transfer, COD date |
+| LOI01 | #1 | A | Energy Storage upgrade, facility definition |
+| MIR01 | #1 | A | COD extension to May 2022 |
+| NBL01 | #1 | A | Early termination fee, purchase option |
+| UNSOS | #1, #2 | A | Missing PDF; contract assignment (Kube Energy) |
+| XF-AB | #1 (×4 projects) | A | COD extension to Sep 30, 2020 (COVID) |
+| KAS01 | #1, #2, #3 | B | Discount 18.5→19.5→19.2%, floor rate, term 16→18yr |
+| NBL01 | #2 | B | Solar discount 10→15% |
+| UNSOS | #3 | B | Rate $0.48/kWh |
+| IVL01 | #1 | D | Full 54-page restatement |
+| NBL01 | #3 | D | Expansion — replaces Exhibit C, discount 15.17% |
+| QMM01 | #2 | D | Expansion — tariff $0.0735/kWh, BESS $115,756/mo |
+
+### 8.3 Ancillary Document Hierarchy
+
+Ancillary documents (schedules, annexures, COD certificates) are stored as separate `contract` rows with `parent_contract_id` pointing to the base contract. They are listed in the base contract's `extraction_metadata.document_inventory` and `extraction_metadata.ancillary_documents`.
+
+```
+contract (base SSA)
+  ├── contract (SSA Schedules)       — parent_contract_id → base
+  ├── contract (Revised Annexures)   — parent_contract_id → base
+  ├── contract (COD Certificate)     — parent_contract_id → base
+  └── contract_amendment (1st Amend) — contract_id → base
+```
+
+**Billing safety:** `api/billing.py` filters `AND c.parent_contract_id IS NULL` to prevent ancillary docs from being picked as the active contract.
+
+### 8.4 Ancillary Doc Production Guarantee Population (Step 11b)
+
+Three ancillary documents contained production estimate data (Expected Solar Output schedules) that was not captured during initial contract parsing:
+
+| Project | Source Doc | Ancillary Type | Data Extracted |
+|---------|-----------|---------------|----------------|
+| UGL01 | SSA Schedules (Schedule 5, p17) | `ssa_schedules` | 15 years × kWh/kWp → absolute kWh (×970.2 kWp) |
+| UTK01 | SSA Schedules (Schedule 5, p17) | `ssa_schedules` | 15 years × absolute MWh |
+| LOI01 | Revised Annexures (Annexure D, p5) | `revised_annexures` | 10 years × combined MWh (2 sites) |
+
+**Script:** `python-backend/scripts/populate_ancillary_production_guarantees.py`
+
+All `production_guarantee` rows carry `source_metadata` tracing back to the specific PDF page and schedule number.
 
 ---
 
@@ -1653,7 +1765,7 @@ Tracks which tables/views referenced in this mapping doc have concrete migration
 | `meter_aggregate` | 000_baseline + 007 + 022 + 026 | Implemented |
 | `customer_contact` | 028 | Implemented |
 | `production_forecast` | 029 | Implemented |
-| `production_guarantee` | 029 | Implemented |
+| `production_guarantee` | 029 | Implemented — enriched with ancillary doc data (UGL01 15yr, UTK01 15yr, LOI01 10yr updated) via Step 11b |
 | Deferred energy calculation | — | Deferred to pricing calculator / rules engine — no DB view |
 | `exchange_rate` | 022 | Implemented |
 | `currency` (seeded) | 022 | Implemented (11 currencies) |
@@ -1668,7 +1780,7 @@ Tracks which tables/views referenced in this mapping doc have concrete migration
 | `contract.external_contract_id`, `contract_term_years`, `interconnection_voltage_kv` | 033 | Implemented |
 | `contract.payment_security_required/details`, `agreed_fx_rate_source` | 033 | Implemented |
 | `reference_price` | 033 | Implemented |
-| `contract_amendment` | 033 | Implemented |
+| `contract_amendment` | 033 | Implemented — 23 rows populated, `source_metadata.changes[]` for Group B diffs (Step 11a) |
 | `onboarding_preview` | 033 | Implemented |
 | `billing_product` + `contract_billing_product` | 034 | Implemented |
 | `tariff_rate` (unified from `tariff_annual_rate` + `tariff_monthly_rate`) | 040 | Implemented (four-currency repr., calc_detail JSONB, FX audit trail, calc_status enum) |
@@ -1684,7 +1796,7 @@ Tracks which tables/views referenced in this mapping doc have concrete migration
 | `contract.parent_contract_id` | 046 | Implemented (BIGINT FK, self-ref with CHECK + trigger for same-project) |
 | `contract_amendment.amendment_date` nullable | 046 | Implemented (nullable — unknown signing dates) |
 | `price_index` | — | **Pending** — needed for CPI escalation |
-| `loan_schedule` / `loan_payment` | — | **Pending** — needed for loan repayment tracking |
+| `loan_repayment` + `rental_ancillary_charge` | 066 | **Done** — loan terms in `clause_tariff` (LOAN), period rows in `loan_repayment` and `rental_ancillary_charge` |
 
 ---
 
@@ -2669,8 +2781,9 @@ Extracted data from 7 Revenue Masterfile tabs:
 - **7b. PO Summary** → `project.technical_specs` JSONB (29 projects), `clause_tariff` fields (50 updates, 14 with base_rate)
 - **7c. Invoiced SAGE** → `exchange_rate` table (43 new GHS/KES/NGN monthly closing spot rates, 2024-2026)
 - **7d. Energy Sales** → cross-check only (informational)
-- **7e. Loans** → `project.technical_specs.loan_schedule` for ZL02 (199 rows) and GC001 (132 rows)
-- **7f. Rental/Ancillary** → `project.technical_specs.rental_schedule` for LOI01, AR01, QMM01, TWG01, AMP01
+- **7e. Loans** → `loan_repayment` table: ZL02 (199 rows, ct#66) and GC001 (132 rows, ct#67). Loan terms in `clause_tariff.logic_parameters` (energy_sale_type=LOAN). Legacy JSONB in `technical_specs.loan_schedule` retained.
+- **7f. Rental/Ancillary** → `rental_ancillary_charge` table: LOI01 (60), AR01 (38), QMM01 (41), TWG01 (11). AMP01 skipped (placeholder data). Legacy JSONB in `technical_specs.rental_schedule` retained.
+- **7h. Normalization** → Step 7h script (`step7h_loan_rental_normalize.py`) migrates JSONB → normalized tables, backfills clause_tariff.base_rate, creates loan clause_tariff rows.
 - **7g. US CPI** → staging JSON (192 data points, 2010-2025, pending `price_index` migration)
 
 ### 27.2 Results

@@ -4,7 +4,7 @@
 > Merges former `DATA_POPULATION_WORKFLOW.md` and `PROJECT_SOURCE_INVENTORY.md`.
 >
 > **Schema version:** v10.12+ (migration 049+, 033 updated with forecast_pr_poa)
-> **Last updated:** 2026-03-10
+> **Last updated:** 2026-03-23
 >
 > **Companion documentation:**
 > - [`CBE_TO_FRONTIERMIND_MAPPING.md`](./CBE_TO_FRONTIERMIND_MAPPING.md) — Field-level schema mapping (CBE → FM)
@@ -237,6 +237,8 @@ STAGE D: Pricing & Enrichment (Steps 9-11)
   [D2] tariff_rate (Revenue Masterfile: 4-currency)
   [D3] billing_tax_rule (invoice tax lines, project-scoped)
   [D4] PPA PDF parsing — clause extraction, amendment reconciliation (final)
+  [D5] Amendment extraction — classify & populate source_metadata.changes (Step 11a)
+  [D6a] Ancillary doc production guarantee population (Step 11b)
   [D5] price_index (US CPI data from Revenue Masterfile) — BLOCKED: migration pending
   [D6] loan_repayment + rental_ancillary_charge — DONE (migration 066, Step 7h)
 ```
@@ -539,7 +541,7 @@ One row per project (some projects have Phase 1/Phase 2 as separate rows). Heade
 
 | Column | Field | Target |
 |--------|-------|--------|
-| AG (33) | Loan Fixed Payment | `project.technical_specs.loan_fixed_payment` or `loan_schedule` (PENDING) |
+| AG (33) | Loan Fixed Payment | `project.technical_specs.loan_fixed_payment` + `clause_tariff.base_rate` (LOAN rows, migration 066) |
 | AH (34) | Lease Rental | `project.technical_specs.lease_rental` |
 | AI (35) | Energy Fee | `project.technical_specs.energy_fee` |
 | AJ (36) | BESS Charge | `project.technical_specs.bess_charge` |
@@ -752,7 +754,7 @@ Generates tariff_rate rows for all clause_tariff entries that have a `base_rate`
    - Formula: `rate_year_n = base_rate × (1 + escalation_rate)^(n-1)`
    - For flat tariffs (NONE/unknown): single row for current year
    - Period boundaries: `valid_from + (year-1)` to `valid_from + year - 1 day`
-   - Conflict key: `(clause_tariff_id, contract_year) WHERE rate_granularity = 'annual'`
+   - Conflict key: `(clause_tariff_id, operating_year) WHERE rate_granularity = 'annual'`
 
 2. **Monthly rows** — FX-converted amounts for local-currency tariffs (non-USD only)
    - One row per exchange_rate record for that currency
@@ -798,6 +800,58 @@ Generates tariff_rate rows for all clause_tariff entries that have a `base_rate`
 | **OY derivation** | Operating Year is always computed from COD: `OY_n = floor(months_since_cod / 12) + 1`. Months before COD = OY 0 (early_ops). Never let stale DB values override. |
 | **Billing allocation** | When per-product kWh breakdown is unavailable, leave product amounts as null. Never multiply total actual kWh by rate for every metered product (duplicates amounts). |
 | **Available energy** | SAGE meter_readings.csv may not include available energy lines — fall back to Operations Plant Performance Workbook. Performance queries must include `energy_category IN ('metered', 'available')`. |
+
+#### Step 11a: Amendment Extraction — COMPLETE (2026-03-23)
+
+**Source:** 21 amendment PDFs across 13 projects (62 total PPA/SSA docs in portfolio)
+**Tables:** `contract_amendment` (source_metadata), `contract` (extraction_metadata)
+**Script:** `python-backend/scripts/apply_amendment_changes.py`
+
+All amendments classified into three groups with different handling:
+
+| Group | Description | Count | Action |
+|-------|-------------|-------|--------|
+| **A** (no pricing) | COD extensions, ownership transfers, facility definition changes | 12 | Description + summary in `source_metadata` |
+| **B** (simple pricing) | Discount %, floor/ceiling rate changes, term extensions | 6 | Computed diffs stored in `source_metadata.changes[]` |
+| **D** (complex) | Full restatements, exhibit replacements, new tariff structures | 3 | Processed via Step 11P Claude pipeline |
+
+**`source_metadata.changes[]` format** (Group B):
+```json
+[
+  {"field": "discount_pct", "from": 0.185, "to": 0.195, "action": "modified"},
+  {"field": "floor_rate", "from": 0.1199, "to": 0.0874, "action": "modified"}
+]
+```
+
+**Group D amendments** (processed via `step11p_pricing_extraction.py --amendment`):
+- IVL01 #1: Full 54-page restatement
+- NBL01 #3: Expansion — replaces Exhibit C, new discount 15.17%
+- QMM01 #2: Expansion — tariff $0.0735/kWh, BESS charge $115,756/mo
+
+**Data issues identified:**
+- NBL02 #2: File is misfiled — content is NBL01's 2nd amendment, not NBL02
+- QMM01 #1: Stamped copy, unreadable — needs manual review
+- UNSOS #2: Effective date corrected from 2023-11-14 → 2022-12-13
+
+#### Step 11b: Ancillary Document Data Population — COMPLETE (2026-03-23)
+
+**Source:** SSA Schedules (UGL01, UTK01) + Revised Annexures (LOI01)
+**Tables:** `production_guarantee`
+**Script:** `python-backend/scripts/populate_ancillary_production_guarantees.py`
+
+Ancillary schedule/annexure documents linked to base contracts via `contract.parent_contract_id` contain production estimates and guarantee terms not available in the base contract text. These companion docs are the authoritative source for `production_guarantee` data for Unilever SSAs.
+
+| Project | Source Doc | Action | Rows | Data |
+|---------|-----------|--------|------|------|
+| UGL01 | SSA Schedules, Schedule 5 (p17) | INSERT | 15 | kWh/kWp × 970.2 kWp, guarantee 80% |
+| UTK01 | SSA Schedules, Schedule 5 (p17) | INSERT | 15 | Absolute MWh, guarantee 80% |
+| LOI01 | Revised Annexures, Annexure D (p5) | UPDATE | 10 | Combined Tented Camp + HQ (supersedes original SSA values) |
+
+**UGL01/UTK01 pricing terms** confirmed from Schedule 2:
+- UGL01: Discount 84% (→ `discount_pct: 0.16`), Floor $0.1199, Ceiling $0.3000, CPI-escalated bounds — all already correct in DB
+- UTK01: Discount 95%, Floor $0.1099, Ceiling $0.2500, both escalated 2.5%/year — all already correct in `clause_tariff.logic_parameters`
+
+**LOI01 value correction:** Existing rows had values from original 2015 SSA/PPW (Year 1: 57.7 MWh). Updated to 2018 Revised Annexure D combined values (Year 1: 79.2 MWh) — a 37% increase reflecting combined two-site output.
 
 ### Step 12: Sage Business Partner Import
 
@@ -981,7 +1035,7 @@ Decision needed: Keep in JSONB or promote to first-class columns?
 | Q3 | **Phase 1/Phase 2 forecast storage** | Capture phases as separate `contract_line`/`billing_product`/`meter` entries where generation is tracked separately. For `production_forecast` (UNIQUE on project_id+forecast_month), store combined kWh in operational column and per-phase breakdown in `source_metadata` JSONB. Aggregate at whole project level. |
 | Q4 | **Hybrid plant handling** | Follow same rule as Q1. If hybrid billing lines are under same project/SAGE ID, capture as separate `contract_line` entries. Use hybrid-specific formula for expected output (not PV-only). |
 | Q5 | **Indexation context** | Check PO Summary col AD notation AND col AF comments per project to determine what indexation applies to (fixed tariff, floor, ceiling, or combination). Parse per-project — not a blanket rule. |
-| Q6 | **Loan/rental extraction schema** | Minimum fields: principal, interest, due_date, period, currency, status, source_doc_ref, invoice_line_linkage. Use as design input for `loan_schedule` migration. Interim: store in `project.technical_specs` JSONB with these fields. |
+| Q6 | **Loan/rental extraction schema** | **Implemented** (migration 066): `loan_repayment` table with `scheduled_amount`, `principal_amount`, `interest_amount`, `closing_balance`, `billing_currency_id`, `operating_year`. Loan terms in `clause_tariff.logic_parameters` (energy_sale_type=LOAN). Rental charges in `rental_ancillary_charge`. Legacy JSONB retained for backward compat. |
 | Q7 | **Contract currency canonical location** | There is no `contract_currency` column on the `contract` table. Currency is stored on `clause_tariff.currency_id`. The 4-currency system (hard/local/billing/contract) in `tariff_rate` + `exchange_rate` derives from this. |
 | Q8 | **customer_contact source** | Primary source is invoice .eml contact lists (To/CC email addresses and names), NOT Customer Summary. |
 | Q9 | **Active contract line definition** | Both filters required: DIM_CURRENT_RECORD=1 AND ACTIVE_STATUS=1 for "active" lines. DIM_CURRENT_RECORD=1 AND ACTIVE_STATUS=0 → insert with `is_active=false`. |
