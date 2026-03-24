@@ -2,7 +2,7 @@
 --
 -- Adds:
 --   1. approval_chain_type table — defines approval workflow steps
---   2. escalation_rule table — threshold-based conditions that select a chain
+--   2. approval_escalation_rule table — threshold-based conditions that select a chain
 --   3. New columns on change_request for multi-step tracking
 --   4. Renames change_request.policy_key → change_type
 --
@@ -57,10 +57,10 @@ CREATE INDEX idx_approval_chain_lookup
     WHERE is_active = true;
 
 -- ============================================================================
--- 3. escalation_rule — threshold conditions that select a chain
+-- 3. approval_escalation_rule — threshold conditions that select a chain
 -- ============================================================================
 
-CREATE TABLE IF NOT EXISTS escalation_rule (
+CREATE TABLE IF NOT EXISTS approval_escalation_rule (
     id                    BIGSERIAL PRIMARY KEY,
     organization_id       BIGINT NOT NULL REFERENCES organization(id),
 
@@ -94,8 +94,8 @@ CREATE TABLE IF NOT EXISTS escalation_rule (
     )
 );
 
-CREATE INDEX idx_escalation_rule_lookup
-    ON escalation_rule (organization_id, change_type, priority)
+CREATE INDEX idx_approval_escalation_rule_lookup
+    ON approval_escalation_rule (organization_id, change_type, priority)
     WHERE is_active = true;
 
 -- ============================================================================

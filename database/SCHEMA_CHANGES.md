@@ -2983,7 +2983,7 @@ When `meter_aggregate` data is ingested for these meters (grid-sourced kWh), the
 
 Each row represents one step in a multi-step approval chain. Steps are grouped by `(organization_id, approval_chain_type)` and ordered by `step_order`.
 
-**New Table: `escalation_rule`**
+**New Table: `approval_escalation_rule`**
 - `id` - BIGSERIAL PRIMARY KEY
 - `organization_id` - BIGINT (org-scoped)
 - `change_type` - TEXT (matches `change_request.change_type`)

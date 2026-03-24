@@ -103,7 +103,7 @@ database/
 │   ├── 063_role_expansion.sql                       # Role expansion (admin/approver/editor/viewer), member_status enum, invite lifecycle, RLS
 │   ├── 065_change_request.sql                       # Change request workflow: two-step edit/approval for sensitive fields
 │   ├── 066_loan_and_recurring_charge.sql            # loan_repayment + rental_ancillary_charge tables, rename tariff_rate.contract_year → operating_year
-│   ├── 067_approval_escalation.sql                  # Multi-approver escalation: approval_chain, escalation_rule tables, change_request enhancements
+│   ├── 067_approval_escalation.sql                  # Multi-approver escalation: approval_chain, approval_escalation_rule tables, change_request enhancements
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -1234,7 +1234,7 @@ database/
 - New table: `approval_chain` — ordered approval steps grouped by `(organization_id, approval_chain_type)`
   - Columns: `id`, `organization_id`, `approval_chain_type`, `step_order`, `step_name`, `assigned_approver_id`, `approver_role_type`, `approver_department`, `allow_self_approve`, `is_active`, `created_at`
   - Each row is one step in a multi-step approval chain, ordered by `step_order`
-- New table: `escalation_rule` — threshold-based conditions that select which approval chain to use
+- New table: `approval_escalation_rule` — threshold-based conditions that select which approval chain to use
   - Columns: `id`, `organization_id`, `change_type`, `name`, `priority`, `condition_type`, `condition_field`, `condition_operator`, `condition_value` (JSONB), `approval_chain_type`, `is_active`, `created_at`, `updated_at`
   - Rules evaluated by priority to match a change request to the appropriate approval chain
 - Extended table: `change_request` — new columns for multi-step tracking

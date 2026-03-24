@@ -45,7 +45,7 @@ def evaluate_escalation(
             """
             SELECT condition_type, condition_field, condition_operator,
                    condition_value, approval_chain_type
-            FROM escalation_rule
+            FROM approval_escalation_rule
             WHERE organization_id = %s
               AND change_type = %s
               AND is_active = true

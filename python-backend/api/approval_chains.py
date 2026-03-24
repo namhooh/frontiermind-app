@@ -184,7 +184,7 @@ async def list_rules(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                SELECT * FROM escalation_rule
+                SELECT * FROM approval_escalation_rule
                 WHERE organization_id = %s AND is_active = true
                 ORDER BY change_type, priority
                 """,
@@ -216,7 +216,7 @@ async def create_rule(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                INSERT INTO escalation_rule (
+                INSERT INTO approval_escalation_rule (
                     organization_id, change_type, name, priority,
                     condition_type, condition_field, condition_operator, condition_value,
                     approval_chain_type
@@ -250,7 +250,7 @@ async def delete_rule(
         with conn.cursor() as cur:
             cur.execute(
                 """
-                UPDATE escalation_rule
+                UPDATE approval_escalation_rule
                 SET is_active = false, updated_at = NOW()
                 WHERE id = %s AND organization_id = %s AND is_active = true
                 """,
