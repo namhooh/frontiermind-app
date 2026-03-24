@@ -226,7 +226,7 @@ export interface ChangeRequest {
   old_value: unknown
   new_value: unknown
   display_label: string | null
-  policy_key: string
+  change_type: string
   change_request_status: 'pending' | 'conflicted' | 'approved' | 'rejected' | 'cancelled' | 'superseded'
   auto_approved: boolean
   requested_by: string
@@ -238,6 +238,20 @@ export interface ChangeRequest {
   review_note: string | null
   requester_name: string | null
   reviewer_name: string | null
+  // Multi-step approval
+  approval_chain_type: string | null
+  current_step_order: number
+  total_steps: number
+  approval_steps: ApprovalStep[] | null
+}
+
+export interface ApprovalStep {
+  step_order: number
+  step_name: string | null
+  step_status: 'waiting' | 'pending' | 'approved' | 'rejected'
+  approved_by: string | null
+  approved_at: string | null
+  approval_note: string | null
 }
 
 export interface ChangeRequestSummary {

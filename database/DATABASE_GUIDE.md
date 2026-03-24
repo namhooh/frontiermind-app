@@ -3,7 +3,7 @@
 
 Quick links: [Directory Structure](#directory-structure) | [Workflows](#common-workflows) | [Scripts](#scripts-reference) | [Troubleshooting](#troubleshooting)
 
-Last updated: 2026-02-26
+Last updated: 2026-03-24
 
 ---
 
@@ -81,7 +81,7 @@ database/
 │   ├── 038_moh01_amendment_version_history.sql         # Phase 10.2: Amendment version chain for MOH01 (original tariff row + supersedes linkage)
 │   ├── 039_pipeline_integrity_fixes.sql               # Phase 10.1: Annual ref_price partial unique index, asset_type seeds, metering_type CHECK, idempotent MRP seed
 │   ├── 040_merge_tariff_rate_tables.sql               # Phase 10.3: Unified tariff_rate table (merges + drops tariff_annual_rate + tariff_monthly_rate), four-currency, JSONB calc_detail, FX audit trail, integrity constraints
-│   ├── 041_multi_meter_billing_and_performance.sql    # Phase 10.4: contract_line, plant_performance, meter_aggregate enhancements, meter names, dedup index fix, external_line_id unique index
+│   ├── 041_multi_meter_billing_and_performance.sql    # Phase 10.4: contract_line, plant_performance, meter_aggregate enhancements, meter names, dedup index fix, external_line_id unique index. energy_category enum: metered, available, test, deduction
 │   ├── 042_invoice_generation_prerequisites.sql       # Phase 10.5: clean dedup index, billing_tax_rule (GiST), invoice header versioning, line item audit/sign, new line item types
 │   ├── 043_billing_gap_analysis_fixes.sql              # Phase 10.6: org-scoped billing_tax_rule RLS
 │   ├── 044_legal_entity_industry_and_moh01_fixes.sql  # Phase 10.7: legal_entity table, counterparty.industry, MOH01 data fixes
@@ -102,7 +102,8 @@ database/
 │   ├── 062_tariff_formula.sql                       # Tariff formula + amendment versioning. Variables use semantic bindings (resolver_registry.py)
 │   ├── 063_role_expansion.sql                       # Role expansion (admin/approver/editor/viewer), member_status enum, invite lifecycle, RLS
 │   ├── 065_change_request.sql                       # Change request workflow: two-step edit/approval for sensitive fields
-│   ├── 066_swap_energy_column_mappings.sql          # Data migration: swap E_metered/Energy Output column mappings in tariff_formula
+│   ├── 066_loan_and_recurring_charge.sql            # loan_repayment + rental_ancillary_charge tables, rename tariff_rate.contract_year → operating_year
+│   ├── 067_approval_escalation.sql                  # Multi-approver escalation: approval_chain, escalation_rule tables, change_request enhancements
 │   ├── snapshot_v2.0.sql                  # (Optional) Schema snapshot after Phase 2
 │   └── README.md
 │
@@ -1209,6 +1210,38 @@ database/
 - Phase 3 endpoint-level policies: `billing_entry`, `performance_entry`, `mrp_manual_entry`, `mrp_upload`
 - Endpoint-level approval service: `python-backend/services/approval_service.py`
 - New API: `python-backend/api/change_requests.py` — summary, list, approve, reject, cancel, assign + `_apply_row_change()` dispatcher
+
+**v12.3 (Loan Repayment & Rental/Ancillary Charge Tables)** - Complete
+- Migration: `066_loan_and_recurring_charge.sql`
+- Renamed column: `tariff_rate.contract_year` → `operating_year` (consistency with `oy_start_date`, `oy_definition` convention)
+- New table: `loan_repayment` — amortization schedule rows per loan `clause_tariff`, parallels `tariff_rate`
+  - Columns: `scheduled_amount`, `principal_amount`, `interest_amount`, `closing_balance`, `billing_currency_id`, `operating_year`
+  - Unique: `(clause_tariff_id, billing_month)` — same pattern as `tariff_rate`
+  - Loan terms stored in `clause_tariff.logic_parameters` JSONB with `energy_sale_type = LOAN`, `tariff_type = FINANCE_LEASE`
+  - Projects: ZL02 (ct#66, 199 rows), GC001 (ct#67, 132 rows), iSAT01 (ct#68, header only)
+- New table: `rental_ancillary_charge` — monthly charge rows per non-energy `clause_tariff`, parallels `tariff_rate`
+  - Columns: `scheduled_amount`, `billing_currency_id`, `operating_year`, `contract_line_id`
+  - Charge type derived from parent `clause_tariff.energy_sale_type_id` (BESS_LEASE, EQUIPMENT_RENTAL_LEASE, OTHER_SERVICE)
+  - Unique: `(clause_tariff_id, contract_line_id, billing_month)`
+  - Projects: LOI01 (60), AR01 (38), QMM01 (41), TWG01 (11)
+- Backfilled `clause_tariff.base_rate` for AMP01 (ct#65), LOI01 (ct#14), TWG01 (ct#31)
+- Population script: `python-backend/scripts/step7h_loan_rental_normalize.py`
+- Step 8 dual-read: `_check_loan_rental()` reads normalized tables first, falls back to `technical_specs` JSONB
+
+**v12.4 (Multi-Approver Escalation System)** - Complete
+- Migration: `067_approval_escalation.sql`
+- Renamed column: `change_request.policy_key` → `change_type`
+- New table: `approval_chain` — ordered approval steps grouped by `(organization_id, approval_chain_type)`
+  - Columns: `id`, `organization_id`, `approval_chain_type`, `step_order`, `step_name`, `assigned_approver_id`, `approver_role_type`, `approver_department`, `allow_self_approve`, `is_active`, `created_at`
+  - Each row is one step in a multi-step approval chain, ordered by `step_order`
+- New table: `escalation_rule` — threshold-based conditions that select which approval chain to use
+  - Columns: `id`, `organization_id`, `change_type`, `name`, `priority`, `condition_type`, `condition_field`, `condition_operator`, `condition_value` (JSONB), `approval_chain_type`, `is_active`, `created_at`, `updated_at`
+  - Rules evaluated by priority to match a change request to the appropriate approval chain
+- Extended table: `change_request` — new columns for multi-step tracking
+  - `approval_chain_type` (TEXT) — links to the selected approval chain
+  - `current_step_order` (INT DEFAULT 1) — tracks progress through multi-step chain
+  - `total_steps` (INT DEFAULT 1) — total steps in the chain
+  - `approval_steps` (JSONB) — records each step's outcome (approver, timestamp, decision)
 
 ---
 

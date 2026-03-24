@@ -16,7 +16,7 @@ from typing import Optional
 
 @dataclass
 class ApprovalPolicy:
-    policy_key: str
+    change_type: str
     fields: set[tuple[str, str]]  # (table, field) pairs
     allow_self_approve: bool = False  # four-eyes: requester != approver
     display_name: str = ""
@@ -26,12 +26,12 @@ class ApprovalPolicy:
 POLICIES: dict[str, ApprovalPolicy] = {
     # Phase 1: independent fields
     "exchange_rate_update": ApprovalPolicy(
-        policy_key="exchange_rate_update",
+        change_type="exchange_rate_update",
         fields={("exchange_rate", "rate")},
         display_name="Exchange Rate Change",
     ),
     "guarantee_update": ApprovalPolicy(
-        policy_key="guarantee_update",
+        change_type="guarantee_update",
         fields={
             ("production_guarantee", "guaranteed_kwh"),
             ("production_guarantee", "p50_annual_kwh"),
@@ -40,7 +40,7 @@ POLICIES: dict[str, ApprovalPolicy] = {
     ),
     # Phase 2: pricing and contract fields
     "base_rate_update": ApprovalPolicy(
-        policy_key="base_rate_update",
+        change_type="base_rate_update",
         fields={
             ("clause_tariff", "base_rate"),
             ("clause_tariff", "lp_floor_rate"),
@@ -50,12 +50,12 @@ POLICIES: dict[str, ApprovalPolicy] = {
         display_name="Base Rate / Pricing Bounds Change",
     ),
     "tariff_rate_update": ApprovalPolicy(
-        policy_key="tariff_rate_update",
+        change_type="tariff_rate_update",
         fields={("tariff_rate", "effective_rate_contract_ccy")},
         display_name="Tariff Rate Change",
     ),
     "contract_terms_update": ApprovalPolicy(
-        policy_key="contract_terms_update",
+        change_type="contract_terms_update",
         fields={
             ("contract", "effective_date"),
             ("contract", "end_date"),
@@ -65,22 +65,22 @@ POLICIES: dict[str, ApprovalPolicy] = {
     ),
     # Phase 3: endpoint-level policies (full-row proposals, not field-level)
     "billing_entry": ApprovalPolicy(
-        policy_key="billing_entry",
+        change_type="billing_entry",
         fields=set(),
         display_name="Monthly Billing Entry",
     ),
     "performance_entry": ApprovalPolicy(
-        policy_key="performance_entry",
+        change_type="performance_entry",
         fields=set(),
         display_name="Plant Performance Entry",
     ),
     "mrp_manual_entry": ApprovalPolicy(
-        policy_key="mrp_manual_entry",
+        change_type="mrp_manual_entry",
         fields=set(),
         display_name="Manual MRP Rate Entry",
     ),
     "mrp_upload": ApprovalPolicy(
-        policy_key="mrp_upload",
+        change_type="mrp_upload",
         fields=set(),
         display_name="MRP Invoice Upload",
     ),
@@ -98,9 +98,9 @@ def find_policy(table: str, field: str) -> Optional[ApprovalPolicy]:
     return _APPROVAL_LOOKUP.get((table, field))
 
 
-def find_policy_by_key(policy_key: str) -> Optional[ApprovalPolicy]:
-    """Return the ApprovalPolicy for a given policy_key, or None."""
-    return POLICIES.get(policy_key)
+def find_policy_by_change_type(change_type: str) -> Optional[ApprovalPolicy]:
+    """Return the ApprovalPolicy for a given change_type, or None."""
+    return POLICIES.get(change_type)
 
 
 def requires_approval(table: str, field: str) -> bool:

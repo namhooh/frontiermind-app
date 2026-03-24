@@ -52,7 +52,7 @@ class ChangeRequestOut(BaseModel):
     old_value: object | None = None
     new_value: object
     display_label: str | None = None
-    policy_key: str
+    change_type: str
     change_request_status: str
     auto_approved: bool
     requested_by: str
@@ -64,6 +64,11 @@ class ChangeRequestOut(BaseModel):
     review_note: str | None = None
     requester_name: str | None = None
     reviewer_name: str | None = None
+    # Multi-step approval fields
+    approval_chain_type: str | None = None
+    current_step_order: int = 1
+    total_steps: int = 1
+    approval_steps: list | None = None
 
 
 class ReviewBody(BaseModel):
@@ -158,7 +163,7 @@ def create_change_request(
     field_name: str,
     old_value,
     new_value,
-    policy_key: str,
+    change_type: str,
     display_label: str | None,
     requested_by: str,
     base_updated_at,
@@ -186,7 +191,7 @@ def create_change_request(
                 """
                 INSERT INTO change_request (
                     organization_id, project_id, target_table, target_id,
-                    field_name, old_value, new_value, display_label, policy_key,
+                    field_name, old_value, new_value, display_label, change_type,
                     change_request_status, auto_approved,
                     requested_by, requested_at,
                     assigned_approver_id,
@@ -200,7 +205,7 @@ def create_change_request(
                     field_name,
                     json.dumps(old_value, default=_json_default) if old_value is not None else None,
                     json.dumps(new_value, default=_json_default),
-                    display_label, policy_key,
+                    display_label, change_type,
                     cr_status, auto_approved,
                     requested_by, now,
                     assigned_approver_id,
@@ -209,6 +214,47 @@ def create_change_request(
                 ),
             )
             cr_id = cur.fetchone()["id"]
+
+            # Evaluate escalation rules for non-auto-approved requests
+            if not auto_approved:
+                from services.escalation_engine import (
+                    evaluate_escalation,
+                    build_approval_steps_json,
+                    resolve_step_approvers,
+                    get_chain_step_config,
+                )
+                chain_type = evaluate_escalation(
+                    org_id, change_type, old_value, new_value, project_id
+                )
+                if chain_type:
+                    steps = build_approval_steps_json(chain_type, org_id)
+                    if steps:
+                        total = len(steps)
+                        # Resolve step 1 approver for backward compat
+                        step1_config = get_chain_step_config(chain_type, org_id, 1)
+                        step1_approver = None
+                        if step1_config:
+                            approvers = resolve_step_approvers(step1_config, org_id)
+                            step1_approver = approvers[0] if approvers else None
+                        cur.execute(
+                            """
+                            UPDATE change_request
+                            SET approval_chain_type = %s,
+                                current_step_order = 1,
+                                total_steps = %s,
+                                approval_steps = %s,
+                                assigned_approver_id = COALESCE(%s, assigned_approver_id)
+                            WHERE id = %s
+                            """,
+                            (
+                                chain_type,
+                                total,
+                                json.dumps(steps),
+                                step1_approver,
+                                cr_id,
+                            ),
+                        )
+
             conn.commit()
     return cr_id
 
@@ -217,12 +263,12 @@ def create_change_request(
 # Full-row proposal dispatcher (Phase 3)
 # ---------------------------------------------------------------------------
 
-async def _apply_row_change(policy_key: str, payload: dict, project_id: int, org_id: int) -> None:
+async def _apply_row_change(change_type: str, payload: dict, project_id: int, org_id: int) -> None:
     """Replay the original endpoint logic for a full-row change_request approval.
 
-    Each policy_key maps to the extracted core function from the original endpoint.
+    Each change_type maps to the extracted core function from the original endpoint.
     """
-    if policy_key == "billing_entry":
+    if change_type == "billing_entry":
         from api.billing import _apply_billing_entry, ManualEntryRequest
         body = ManualEntryRequest(**payload)
         parts = body.billing_month.split("-")
@@ -230,20 +276,20 @@ async def _apply_row_change(policy_key: str, payload: dict, project_id: int, org
         # auth not needed for core logic — pass a minimal dict
         await _apply_billing_entry(project_id, body, bm_date, {"organization_id": org_id, "role": "admin"})
 
-    elif policy_key == "performance_entry":
+    elif change_type == "performance_entry":
         from api.performance import _apply_performance_entry, ManualPerformanceEntry
         body = ManualPerformanceEntry(**payload)
         parts = body.billing_month.split("-")
         bm_date = date(int(parts[0]), int(parts[1]), 1)
         await _apply_performance_entry(project_id, body, bm_date, {"organization_id": org_id, "role": "admin"})
 
-    elif policy_key == "mrp_manual_entry":
+    elif change_type == "mrp_manual_entry":
         from api.mrp import _apply_mrp_manual
         from models.mrp import ManualMRPBatchRequest
         body = ManualMRPBatchRequest(**payload)
         await _apply_mrp_manual(project_id, body, org_id)
 
-    elif policy_key == "mrp_upload":
+    elif change_type == "mrp_upload":
         from api.mrp import _apply_mrp_upload
         # For MRP upload, the file is already in S3. Download and re-extract.
         import boto3
@@ -268,7 +314,7 @@ async def _apply_row_change(policy_key: str, payload: dict, project_id: int, org
         )
 
     else:
-        raise HTTPException(status_code=400, detail=f"Unknown policy_key for row change: {policy_key}")
+        raise HTTPException(status_code=400, detail=f"Unknown change_type for row change: {change_type}")
 
 
 # ---------------------------------------------------------------------------
@@ -369,9 +415,19 @@ async def approve_change_request(
     if cr["change_request_status"] != "pending":
         raise HTTPException(status_code=400, detail=f"Cannot approve a {cr['change_request_status']} request")
 
+    # -----------------------------------------------------------------------
+    # Multi-step approval path
+    # -----------------------------------------------------------------------
+    if cr.get("approval_chain_type"):
+        return await _approve_multi_step(cr, cr_id, user_id, org_id, body, background_tasks)
+
+    # -----------------------------------------------------------------------
+    # Legacy single-approver path
+    # -----------------------------------------------------------------------
+
     # Four-eyes check
-    from services.approval_config import find_policy_by_key
-    policy = find_policy(cr["target_table"], cr["field_name"]) or find_policy_by_key(cr["policy_key"])
+    from services.approval_config import find_policy_by_change_type
+    policy = find_policy(cr["target_table"], cr["field_name"]) or find_policy_by_change_type(cr["change_type"])
     if policy and not policy.allow_self_approve and str(cr["requested_by"]) == user_id:
         raise HTTPException(status_code=403, detail="Cannot approve your own change request (four-eyes principle)")
 
@@ -379,51 +435,20 @@ async def approve_change_request(
     is_row_proposal = cr["field_name"] == "*"
 
     if not is_row_proposal:
-        # Conflict check: compare base_updated_at with current row
-        with get_db_connection() as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    f"SELECT updated_at FROM {cr['target_table']} WHERE id = %s",
-                    (cr["target_id"],),
-                )
-                target_row = cur.fetchone()
-
-        if not target_row:
-            raise HTTPException(status_code=404, detail="Target row no longer exists")
-
-        if cr["base_updated_at"] and target_row.get("updated_at"):
-            if target_row["updated_at"] != cr["base_updated_at"]:
-                # Move to conflicted
-                now = datetime.now(timezone.utc)
-                with get_db_connection() as conn:
-                    with conn.cursor() as cur:
-                        cur.execute(
-                            """
-                            UPDATE change_request
-                            SET change_request_status = 'conflicted', reviewed_by = %s, reviewed_at = %s,
-                                review_note = 'Underlying data changed since submission'
-                            WHERE id = %s
-                            """,
-                            (user_id, now, cr_id),
-                        )
-                        conn.commit()
-                return {"success": False, "status": "conflicted", "message": "Underlying data changed since submission. Please re-submit."}
+        _conflict_check(cr, cr_id, user_id)
 
     # Apply the change
     new_value = cr["new_value"]
-    # new_value is stored as JSONB — extract the raw value
     if isinstance(new_value, str):
         new_value = json.loads(new_value)
 
     now = datetime.now(timezone.utc)
 
     if is_row_proposal:
-        # Full-row proposal — dispatch to the original endpoint logic
-        await _apply_row_change(cr["policy_key"], new_value, cr["project_id"], cr["organization_id"])
+        await _apply_row_change(cr["change_type"], new_value, cr["project_id"], cr["organization_id"])
     else:
         with get_db_connection() as conn:
             with conn.cursor() as cur:
-                # Apply the UPDATE
                 cur.execute(
                     f"UPDATE {cr['target_table']} SET {cr['field_name']} = %s, updated_at = NOW() WHERE id = %s RETURNING id",
                     (new_value, cr["target_id"]),
@@ -446,7 +471,47 @@ async def approve_change_request(
             )
             conn.commit()
 
-    # Audit
+    _audit_approval(cr, cr_id, org_id, user_id, background_tasks)
+    return {"success": True, "status": "approved", "id": cr_id}
+
+
+def _conflict_check(cr: dict, cr_id: int, user_id: str) -> None:
+    """Check for concurrent edits on the target row (Phase 1-2 only)."""
+    with get_db_connection() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                f"SELECT updated_at FROM {cr['target_table']} WHERE id = %s",
+                (cr["target_id"],),
+            )
+            target_row = cur.fetchone()
+
+    if not target_row:
+        raise HTTPException(status_code=404, detail="Target row no longer exists")
+
+    if cr["base_updated_at"] and target_row.get("updated_at"):
+        if target_row["updated_at"] != cr["base_updated_at"]:
+            now = datetime.now(timezone.utc)
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        """
+                        UPDATE change_request
+                        SET change_request_status = 'conflicted', reviewed_by = %s, reviewed_at = %s,
+                            review_note = 'Underlying data changed since submission'
+                        WHERE id = %s
+                        """,
+                        (user_id, now, cr_id),
+                    )
+                    conn.commit()
+            raise HTTPException(
+                status_code=409,
+                detail={"success": False, "status": "conflicted",
+                        "message": "Underlying data changed since submission. Please re-submit."},
+            )
+
+
+def _audit_approval(cr: dict, cr_id: int, org_id: int, user_id: str, background_tasks) -> None:
+    """Log a CHANGE_APPROVED audit event."""
     if background_tasks:
         background_tasks.add_task(
             audit_service.log_event,
@@ -467,7 +532,125 @@ async def approve_change_request(
             ),
         )
 
-    return {"success": True, "status": "approved", "id": cr_id}
+
+async def _approve_multi_step(
+    cr: dict, cr_id: int, user_id: str, org_id: int, body, background_tasks
+) -> dict:
+    """Handle approval for a multi-step change request."""
+    from services.escalation_engine import resolve_step_approvers, get_chain_step_config
+
+    chain_type = cr["approval_chain_type"]
+    current_step = cr["current_step_order"]
+    total_steps = cr["total_steps"]
+    steps = cr["approval_steps"]
+    if isinstance(steps, str):
+        steps = json.loads(steps)
+
+    # Validate current step is pending
+    step_idx = current_step - 1
+    if step_idx >= len(steps) or steps[step_idx]["step_status"] != "pending":
+        raise HTTPException(status_code=400, detail="Current step is not pending")
+
+    # Load step config for eligibility and four-eyes check
+    step_config = get_chain_step_config(chain_type, org_id, current_step)
+    if not step_config:
+        raise HTTPException(status_code=500, detail="Approval chain step config not found")
+
+    # Check caller is eligible for this step
+    eligible = resolve_step_approvers(step_config, org_id)
+    if user_id not in eligible:
+        raise HTTPException(status_code=403, detail="You are not eligible to approve this step")
+
+    # Four-eyes check per step
+    if not step_config.get("allow_self_approve", False) and str(cr["requested_by"]) == user_id:
+        raise HTTPException(status_code=403, detail="Cannot approve your own change request (four-eyes principle)")
+
+    # Conflict check for field-level changes
+    is_row_proposal = cr["field_name"] == "*"
+    if not is_row_proposal:
+        _conflict_check(cr, cr_id, user_id)
+
+    now = datetime.now(timezone.utc)
+
+    # Update the current step in JSONB
+    steps[step_idx]["step_status"] = "approved"
+    steps[step_idx]["approved_by"] = user_id
+    steps[step_idx]["approved_at"] = now.isoformat()
+    steps[step_idx]["approval_note"] = body.note
+
+    if current_step < total_steps:
+        # Advance to next step
+        next_step = current_step + 1
+        steps[next_step - 1]["step_status"] = "pending"
+
+        # Resolve next step's approver
+        next_config = get_chain_step_config(chain_type, org_id, next_step)
+        next_approver = None
+        if next_config:
+            next_eligible = resolve_step_approvers(next_config, org_id)
+            next_approver = next_eligible[0] if next_eligible else None
+
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE change_request
+                    SET current_step_order = %s,
+                        approval_steps = %s,
+                        assigned_approver_id = COALESCE(%s, assigned_approver_id)
+                    WHERE id = %s
+                    """,
+                    (next_step, json.dumps(steps, default=_json_default), next_approver, cr_id),
+                )
+                conn.commit()
+
+        _audit_approval(cr, cr_id, org_id, user_id, background_tasks)
+        return {
+            "success": True,
+            "status": "step_approved",
+            "id": cr_id,
+            "current_step": next_step,
+            "total_steps": total_steps,
+            "step_name": steps[step_idx]["step_name"],
+        }
+
+    else:
+        # Final step — apply the change
+        new_value = cr["new_value"]
+        if isinstance(new_value, str):
+            new_value = json.loads(new_value)
+
+        if is_row_proposal:
+            await _apply_row_change(cr["change_type"], new_value, cr["project_id"], cr["organization_id"])
+        else:
+            with get_db_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(
+                        f"UPDATE {cr['target_table']} SET {cr['field_name']} = %s, updated_at = NOW() WHERE id = %s RETURNING id",
+                        (new_value, cr["target_id"]),
+                    )
+                    if not cur.fetchone():
+                        conn.rollback()
+                        raise HTTPException(status_code=404, detail="Target row not found during apply")
+                    conn.commit()
+
+        # Mark fully approved
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    """
+                    UPDATE change_request
+                    SET change_request_status = 'approved',
+                        reviewed_by = %s, reviewed_at = %s, review_note = %s,
+                        approval_steps = %s
+                    WHERE id = %s
+                    """,
+                    (user_id, now, body.note, json.dumps(steps, default=_json_default), cr_id),
+                )
+                conn.commit()
+
+        _audit_approval(cr, cr_id, org_id, user_id, background_tasks)
+        return {"success": True, "status": "approved", "id": cr_id}
 
 
 @router.post("/{cr_id}/reject", summary="Reject a change request")
@@ -487,7 +670,7 @@ async def reject_change_request(
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
-                "SELECT id, change_request_status FROM change_request WHERE id = %s AND organization_id = %s",
+                "SELECT id, change_request_status, approval_steps FROM change_request WHERE id = %s AND organization_id = %s",
                 (cr_id, org_id),
             )
             cr = cur.fetchone()
@@ -496,13 +679,25 @@ async def reject_change_request(
             if cr["change_request_status"] != "pending":
                 raise HTTPException(status_code=400, detail=f"Cannot reject a {cr['change_request_status']} request")
 
+            # Mark all remaining steps as rejected in JSONB
+            steps = cr.get("approval_steps")
+            steps_json = None
+            if steps:
+                if isinstance(steps, str):
+                    steps = json.loads(steps)
+                for s in steps:
+                    if s["step_status"] in ("pending", "waiting"):
+                        s["step_status"] = "rejected"
+                steps_json = json.dumps(steps, default=_json_default)
+
             cur.execute(
                 """
                 UPDATE change_request
-                SET change_request_status = 'rejected', reviewed_by = %s, reviewed_at = %s, review_note = %s
+                SET change_request_status = 'rejected', reviewed_by = %s, reviewed_at = %s, review_note = %s,
+                    approval_steps = COALESCE(%s, approval_steps)
                 WHERE id = %s
                 """,
-                (user_id, now, body.note, cr_id),
+                (user_id, now, body.note, steps_json, cr_id),
             )
             conn.commit()
 

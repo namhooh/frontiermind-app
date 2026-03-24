@@ -1322,7 +1322,7 @@ and token-based external submission collection.
 **New Table: tariff_annual_rate** (originally tariff_rate_period, renamed in migration 036)
 - `id` - BIGSERIAL PRIMARY KEY
 - `clause_tariff_id` - BIGINT NOT NULL REFERENCES clause_tariff(id)
-- `contract_year` - INTEGER NOT NULL — Contract operating year (1-based)
+- `contract_year` - INTEGER NOT NULL — Contract operating year (1-based) *(renamed to `operating_year` in migration 066)*
 - `period_start` - DATE NOT NULL
 - `period_end` - DATE
 - `effective_tariff` - DECIMAL NOT NULL — Rate after escalation (renamed from effective_rate in migration 036)
@@ -2888,8 +2888,122 @@ Source: PO Summary col E "Energy Sale Type" (offtake model)
 - Data quality quarantine: ZL02 corrupt date_paid → needs_review, AMP01 placeholder amounts → skipped, AR01 outlier amounts → quarantined
 - Report: `python-backend/reports/cbe-population/step7h_YYYY-MM-DD.json`
 
+---
+
+### v12.5 - 2026-03-23 (Invoice Engine Audit & Tax Rule Corrections)
+
+**Description:** Full line-item audit of 29 invoice PDFs against DB records. Fixed critical bugs in the expected invoice generation engine (tax rule resolution, basis calculation) and corrected tax rule data for 7 projects. Added `deduction` enum value to `energy_category` for negative invoice lines (e.g., Sourced Energy on NBL projects). Added `available_energy_discount` config for XFlora projects.
+
+**Modified migration:** `database/migrations/041_multi_meter_billing_and_performance.sql`
+- `energy_category` enum: added `'deduction'` value (metered, available, test, **deduction**)
+- Comment updated to document all four values
+
+**Engine fixes (`python-backend/services/billing/invoice_service.py`):**
+
+1. **Tax rule resolution query** — was ignoring `project_id`, returning non-deterministic results when multiple rules existed for the same country. Now does two-step lookup: project-specific override first (`project_id = ?`), then country default (`project_id IS NULL`)
+2. **`_resolve_basis()`** — added `invoice_total` parameter and `grand_total`/`invoice_total` basis support. Previously any unrecognized basis silently fell back to `energy_subtotal`
+3. **Deduction line handling** — new block processes `energy_category = 'deduction'` contract lines, emitting `LD_CREDIT` type items with `amount_sign = -1` and negative quantity/amount
+4. **Description precision** — VAT and withholding line descriptions now use `.1f%` format (e.g., "7.5%" instead of "7%")
+
+**Tax rule data corrections (applied directly, no migration file):**
+
+| Action | IDs | Projects | Detail |
+|--------|-----|----------|--------|
+| Deactivated | 21, 10, 11, 12, 13 | MB01, MP02, NC02, UTK01, XFSS | KE overrides incorrectly removed WHVAT 2%. Now fall back to KE Standard |
+| Fixed basis | 19 | MOH01 | WHT `applies_to` → `energy_subtotal`, WHVAT → `subtotal_after_levies` (was `grand_total` for both) |
+| Fixed rate+basis | 20 | XFBV | WHVAT rate 1.72% → 2%, basis `grand_total` → `energy_subtotal` |
+
+**Tariff config updates (clause_tariff.logic_parameters):**
+
+| Tariff | Project | Added Key | Value |
+|--------|---------|-----------|-------|
+| ct#34 | XFAB | `available_energy_discount` | `{threshold_pct: 0.05}` |
+| ct#35 | XFBV | `available_energy_discount` | `{threshold_pct: 0.05}` |
+| ct#55 | XFL01 | `available_energy_discount` | `{threshold_pct: 0.05}` |
+| ct#60 | XFSS | `available_energy_discount` | `{threshold_pct: 0.05}` |
+
+**New data: NBL Sourced Energy deduction lines**
+
+| Project | Meter | Contract Line | energy_category |
+|---------|-------|--------------|-----------------|
+| NBL01 | meter#109 "Sourced Energy" | cl#295 (line 8000) | `deduction` |
+| NBL02 | meter#110 "Sourced Energy" | cl#296 (line 3000) | `deduction` |
+
+When `meter_aggregate` data is ingested for these meters (grid-sourced kWh), the engine emits a negative `LD_CREDIT` line at the tariff rate — matching the "Sourced Energy" deduction on actual invoices.
+
 **Step 8 dual-read transition:** `python-backend/scripts/step8_invoice_calibration.py`
 - `_check_loan_rental()` reads normalized tables first, falls back to `technical_specs` JSONB
 - `technical_specs` JSONB left intact for backward compatibility
+
+---
+
+### v0.67 - 2026-03-22 (QMM01 Tariff & Billing Cross-Validation Remediation)
+
+**Description:** Fixes gaps found during cross-validation of QMM01 tariff_formula rows against invoice SINQMM012512028 (Dec 2025). Populates `contract_line.clause_tariff_id` for active lines, fixes billing engine tariff resolution (cross-join → lateral join), corrects BESS base rate and metadata, and adds 2 missing payment formulas.
+
+**Migration:** `database/migrations/067_qmm01_tariff_billing_remediation.sql`
+
+**Data fixes:**
+- `contract_line.clause_tariff_id` populated for 4 active lines (CL 258,260,261 → ct 32; CL 262 → ct 33)
+- `clause_tariff` id=33: base_rate 57,878 → 115,756 (Phase 1+2 combined BESS), unit → 'USD/month', escalation_type_id 23 → 8
+- `clause_tariff` id=32: unit → 'USD/kWh'
+- `tariff_formula` 266,272: N variable maps_to fixed to derived year offset
+
+**New tariff_formula rows:**
+- Available Energy Payment Calculation (PAYMENT_CALCULATION, ct 32) — `Available_Payment = Solar_Tariff × DE`
+- BESS Capacity Payment Calculation (PAYMENT_CALCULATION, ct 33) — `BESS_Payment = Charge_N × FX_Rate`
+
+**Code changes:**
+- `python-backend/api/billing.py`: Added `MAREVS003` to `FIXED_FEE_PRODUCT_CODES` (BESS is monthly, not kWh-based)
+- `python-backend/api/billing.py`: Replaced clause_tariff cross-join with lateral join through `contract_line.clause_tariff_id` for correct product→tariff resolution
+
+---
+
+### v12.4 - 2026-03-24 (Multi-Approver Escalation System)
+
+**Description:** Added multi-step approval chains and threshold-based escalation rules to the change request workflow. Organizations can now define ordered approval chains with multiple steps and configure escalation rules that select the appropriate chain based on conditions (e.g., amount thresholds). The `change_request` table is extended to track progress through multi-step chains.
+
+**Migration:** `database/migrations/067_approval_escalation.sql`
+
+**Renamed column on `change_request`:**
+- `policy_key` → `change_type` — clearer naming for the type of change being requested
+
+**New Table: `approval_chain`**
+- `id` - BIGSERIAL PRIMARY KEY
+- `organization_id` - BIGINT (org-scoped)
+- `approval_chain_type` - TEXT (chain identifier, grouped with org)
+- `step_order` - INTEGER (position in the chain)
+- `step_name` - TEXT (human-readable step label)
+- `assigned_approver_id` - UUID (specific approver for this step)
+- `approver_role_type` - TEXT (role-based assignment alternative)
+- `approver_department` - TEXT (department-based assignment alternative)
+- `allow_self_approve` - BOOLEAN (four-eyes override per step)
+- `is_active` - BOOLEAN
+- `created_at` - TIMESTAMPTZ
+
+Each row represents one step in a multi-step approval chain. Steps are grouped by `(organization_id, approval_chain_type)` and ordered by `step_order`.
+
+**New Table: `escalation_rule`**
+- `id` - BIGSERIAL PRIMARY KEY
+- `organization_id` - BIGINT (org-scoped)
+- `change_type` - TEXT (matches `change_request.change_type`)
+- `name` - TEXT (human-readable rule name)
+- `priority` - INTEGER (evaluation order, lower = higher priority)
+- `condition_type` - TEXT (type of condition to evaluate)
+- `condition_field` - TEXT (field to inspect)
+- `condition_operator` - TEXT (comparison operator)
+- `condition_value` - JSONB (threshold or match value)
+- `approval_chain_type` - TEXT (chain to use when rule matches)
+- `is_active` - BOOLEAN
+- `created_at` - TIMESTAMPTZ
+- `updated_at` - TIMESTAMPTZ
+
+Rules are evaluated by priority for a given `change_type`. The first matching rule determines which `approval_chain_type` is used for the change request.
+
+**New columns on `change_request`:**
+- `approval_chain_type` - TEXT (selected approval chain for this request)
+- `current_step_order` - INTEGER DEFAULT 1 (current position in the chain)
+- `total_steps` - INTEGER DEFAULT 1 (total steps in the chain)
+- `approval_steps` - JSONB (audit log of each step's outcome: approver, timestamp, decision)
 
 ---

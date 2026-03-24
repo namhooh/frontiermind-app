@@ -74,9 +74,13 @@ export function PendingChangesPanel({ projectId, open, onClose, userRole, userId
   const handleApprove = async (id: number) => {
     setActionLoading(id)
     try {
-      const result = await adminClient.approveChangeRequest(id)
+      const result = await adminClient.approveChangeRequest(id) as Record<string, unknown>
       if (result.success) {
-        toast.success('Change approved and applied')
+        if (result.status === 'step_approved') {
+          toast.success(`Step ${(result.current_step as number) - 1} approved. Awaiting step ${result.current_step}: ${result.step_name || 'next review'}`)
+        } else {
+          toast.success('Change approved and applied')
+        }
         await loadRequests()
         onChanged?.()
       } else {
@@ -214,6 +218,28 @@ export function PendingChangesPanel({ projectId, open, onClose, userRole, userId
                   </div>
                   <Badge variant={statusInfo.variant}>{statusInfo.label}</Badge>
                 </div>
+
+                {/* Multi-step progress */}
+                {cr.total_steps > 1 && cr.approval_steps && (
+                  <div className="flex items-center gap-1 text-xs overflow-x-auto pb-1">
+                    {cr.approval_steps.map((step, i) => (
+                      <div key={step.step_order} className="flex items-center gap-1 shrink-0">
+                        {i > 0 && <span className="text-slate-300">&rarr;</span>}
+                        <span className={
+                          step.step_status === 'approved' ? 'text-green-600 font-medium' :
+                          step.step_status === 'pending' ? 'text-amber-600 font-medium' :
+                          step.step_status === 'rejected' ? 'text-red-600 font-medium' :
+                          'text-slate-400'
+                        }>
+                          {step.step_status === 'approved' ? '\u2713' :
+                           step.step_status === 'pending' ? '\u25CF' :
+                           step.step_status === 'rejected' ? '\u2717' : '\u25CB'}
+                          {' '}{step.step_name || `Step ${step.step_order}`}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                )}
 
                 {/* Diff */}
                 {cr.field_name === '*' ? (

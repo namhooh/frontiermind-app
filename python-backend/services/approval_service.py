@@ -17,18 +17,18 @@ from services.approval_config import POLICIES
 logger = logging.getLogger(__name__)
 
 
-def check_approval_required(auth: dict, policy_key: str) -> bool:
+def check_approval_required(auth: dict, change_type: str) -> bool:
     """Return True if this action requires approval (editor role + policy exists)."""
     if auth.get("role") in ("admin", "approver"):
         return False
-    return policy_key in POLICIES
+    return change_type in POLICIES
 
 
 def create_row_change_request(
     auth: dict,
     org_id: int,
     project_id: int,
-    policy_key: str,
+    change_type: str,
     target_table: str,
     payload: dict,
     display_label: str,
@@ -37,7 +37,7 @@ def create_row_change_request(
 
     Returns the change_request ID.
     """
-    policy = POLICIES.get(policy_key)
+    policy = POLICIES.get(change_type)
     approver_id = _get_default_approver(project_id, org_id)
 
     return create_change_request(
@@ -48,8 +48,8 @@ def create_row_change_request(
         field_name="*",
         old_value=None,
         new_value=payload,
-        policy_key=policy_key,
-        display_label=display_label or (policy.display_name if policy else policy_key),
+        change_type=change_type,
+        display_label=display_label or (policy.display_name if policy else change_type),
         requested_by=auth["user_id"],
         base_updated_at=None,
         assigned_approver_id=approver_id,
@@ -60,13 +60,13 @@ def create_auto_approved_row_record(
     auth: dict,
     org_id: int,
     project_id: int,
-    policy_key: str,
+    change_type: str,
     target_table: str,
     payload: dict,
     display_label: str,
 ) -> int:
     """Create an auto-approved audit record for admin/approver actions."""
-    policy = POLICIES.get(policy_key)
+    policy = POLICIES.get(change_type)
 
     return create_change_request(
         org_id=org_id,
@@ -76,8 +76,8 @@ def create_auto_approved_row_record(
         field_name="*",
         old_value=None,
         new_value=payload,
-        policy_key=policy_key,
-        display_label=display_label or (policy.display_name if policy else policy_key),
+        change_type=change_type,
+        display_label=display_label or (policy.display_name if policy else change_type),
         requested_by=auth["user_id"],
         base_updated_at=None,
         assigned_approver_id=None,
