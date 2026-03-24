@@ -11,7 +11,7 @@ import logging
 import operator
 from typing import Optional
 
-from db.connection import get_connection
+from db.database import get_db_connection as get_connection
 
 logger = logging.getLogger(__name__)
 

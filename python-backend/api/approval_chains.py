@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from db.connection import get_connection as get_db_connection
+from db.database import get_db_connection
 from middleware.supabase_auth import require_supabase_auth
 from middleware.authorization import require_admin
 from middleware.rate_limiter import limit_admin
