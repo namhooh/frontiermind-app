@@ -62,6 +62,7 @@ class InboundMessageResponse(BaseModel):
     subject: Optional[str] = None
     sender_email: Optional[str] = None
     sender_name: Optional[str] = None
+    body_text: Optional[str] = None
     inbound_message_status: InboundMessageStatus
     classification_reason: Optional[str] = None
     failed_reason: Optional[str] = None

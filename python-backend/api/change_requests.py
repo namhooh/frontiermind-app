@@ -326,22 +326,77 @@ async def _apply_row_change(change_type: str, payload: dict, project_id: int, or
 async def get_summary(
     request: Request,
     project_id: int | None = Query(None),
+    my_approvals: bool = Query(False, alias="my"),
+    submitted_by_me: bool = Query(False, alias="submitted_by_me"),
     auth: dict = Depends(require_supabase_auth),
 ) -> SummaryOut:
     org_id = auth["organization_id"]
-    where = "organization_id = %s AND change_request_status IN ('pending', 'conflicted')"
+    user_id = auth["user_id"]
+    user_role = auth["role"]
+    where = "cr.organization_id = %s AND cr.change_request_status IN ('pending', 'conflicted')"
     params: list = [org_id]
     if project_id is not None:
-        where += " AND project_id = %s"
+        where += " AND cr.project_id = %s"
         params.append(project_id)
+
+    # Filter to only CRs the current user is eligible to approve
+    if my_approvals and user_role in ("admin", "approver"):
+        # Look up user's department for department-based matching
+        with get_db_connection() as conn:
+            with conn.cursor() as cur:
+                cur.execute(
+                    "SELECT department FROM role WHERE user_id = %s AND organization_id = %s AND is_active = true LIMIT 1",
+                    (user_id, org_id),
+                )
+                role_row = cur.fetchone()
+        user_dept = role_row["department"] if role_row else None
+
+        # Match: assigned directly, OR current step matches user's department/role
+        dept_conditions = ["cr.assigned_approver_id = %s"]
+        params.append(user_id)
+
+        if user_dept:
+            # Also match CRs where the current step's chain config targets this department
+            dept_conditions.append("""
+                EXISTS (
+                    SELECT 1 FROM approval_chain ac
+                    WHERE ac.organization_id = cr.organization_id
+                      AND ac.approval_chain_type = cr.approval_chain_type
+                      AND ac.step_order = cr.current_step_order
+                      AND ac.is_active = true
+                      AND ac.approver_department = %s
+                )
+            """)
+            params.append(user_dept)
+
+        # Also match CRs where step targets user's role_type
+        dept_conditions.append("""
+            EXISTS (
+                SELECT 1 FROM approval_chain ac
+                WHERE ac.organization_id = cr.organization_id
+                  AND ac.approval_chain_type = cr.approval_chain_type
+                  AND ac.step_order = cr.current_step_order
+                  AND ac.is_active = true
+                  AND ac.approver_role_type = %s
+            )
+        """)
+        params.append(user_role)
+
+        where += f" AND ({' OR '.join(dept_conditions)})"
+
+    # Filter to only CRs submitted by the current user (for editors tracking their own)
+    if submitted_by_me:
+        where += " AND cr.requested_by = %s"
+        params.append(user_id)
+
     with get_db_connection() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 f"""
                 SELECT
-                    COUNT(*) FILTER (WHERE change_request_status = 'pending') AS pending,
-                    COUNT(*) FILTER (WHERE change_request_status = 'conflicted') AS conflicted
-                FROM change_request
+                    COUNT(*) FILTER (WHERE cr.change_request_status = 'pending') AS pending,
+                    COUNT(*) FILTER (WHERE cr.change_request_status = 'conflicted') AS conflicted
+                FROM change_request cr
                 WHERE {where}
                 """,
                 params,

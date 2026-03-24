@@ -661,6 +661,12 @@ function NotificationsPageContent() {
                                 <tr className="bg-slate-50 border-b border-slate-100">
                                   <td colSpan={7} className="px-6 py-4">
                                     <div className="space-y-3">
+                                      {msg.body_text && (
+                                        <div>
+                                          <span className="text-xs font-medium text-slate-500 uppercase">Message</span>
+                                          <pre className="text-sm text-slate-700 mt-0.5 whitespace-pre-wrap font-sans max-h-48 overflow-y-auto bg-white rounded border border-slate-100 p-2">{msg.body_text}</pre>
+                                        </div>
+                                      )}
                                       {msg.classification_reason && (
                                         <div>
                                           <span className="text-xs font-medium text-slate-500 uppercase">Classification</span>

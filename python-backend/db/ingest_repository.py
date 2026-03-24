@@ -137,7 +137,8 @@ class IngestRepository:
                 cur.execute(
                     f"""
                     SELECT id, organization_id, channel,
-                           subject, sender_email, sender_name, inbound_message_status,
+                           subject, sender_email, sender_name, body_text,
+                           inbound_message_status,
                            classification_reason, failed_reason, attachment_count,
                            invoice_header_id, project_id, counterparty_id,
                            outbound_message_id, created_at,

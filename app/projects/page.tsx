@@ -216,13 +216,23 @@ function ProjectsPageContent() {
     })
   }, [])
 
-  // Pending change request count (org-wide, not per-project)
+  // Pending change request counts — scoped by role
+  const canApprove = userRole === 'admin' || userRole === 'approver'
+  const isEditor = userRole === 'editor'
+  const [submittedCount, setSubmittedCount] = useState(0)
   const refreshPendingCount = useCallback(() => {
     if (!orgId) return
-    adminClient.getChangeRequestSummary()
-      .then((s) => setPendingCount(s.pending + s.conflicted))
-      .catch(() => {})
-  }, [orgId])
+    if (canApprove) {
+      adminClient.getChangeRequestSummary(undefined, { myApprovals: true })
+        .then((s) => setPendingCount(s.pending + s.conflicted))
+        .catch(() => {})
+    }
+    if (isEditor) {
+      adminClient.getChangeRequestSummary(undefined, { submittedByMe: true })
+        .then((s) => setSubmittedCount(s.pending + s.conflicted))
+        .catch(() => {})
+    }
+  }, [orgId, canApprove, isEditor])
 
   useEffect(() => {
     refreshPendingCount()
@@ -449,6 +459,30 @@ function ProjectsPageContent() {
             </p>
           </div>
           <div className="flex items-center gap-3">
+            {/* Pending approvals badge — approvers/admins */}
+            {canApprove && (
+              <button
+                onClick={() => setPendingPanelOpen(true)}
+                className={`inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border transition-colors ${
+                  pendingCount > 0
+                    ? 'border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100'
+                    : 'border-slate-200 bg-white text-slate-400 hover:bg-slate-50'
+                }`}
+              >
+                <Clock className="h-3.5 w-3.5" />
+                {pendingCount > 0 ? `${pendingCount} pending` : 'No pending approvals'}
+              </button>
+            )}
+            {/* Submitted changes badge — editors */}
+            {isEditor && submittedCount > 0 && (
+              <button
+                onClick={() => setPendingPanelOpen(true)}
+                className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border border-blue-200 bg-blue-50 text-blue-700 hover:bg-blue-100 transition-colors"
+              >
+                <Clock className="h-3.5 w-3.5" />
+                {submittedCount} submitted
+              </button>
+            )}
             {userRole !== 'viewer' && (
               <button
                 onClick={() => setEditMode(!editMode)}
@@ -460,15 +494,6 @@ function ProjectsPageContent() {
               >
                 {editMode ? <PencilOff className="h-3.5 w-3.5" /> : <Pencil className="h-3.5 w-3.5" />}
                 {editMode ? 'Finish Editing' : 'Edit'}
-              </button>
-            )}
-            {pendingCount > 0 && (
-              <button
-                onClick={() => setPendingPanelOpen(true)}
-                className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 transition-colors"
-              >
-                <Clock className="h-3.5 w-3.5" />
-                {pendingCount} pending
               </button>
             )}
             {!IS_DEMO && userRole === 'admin' && (

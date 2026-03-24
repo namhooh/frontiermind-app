@@ -1415,11 +1415,15 @@ export class AdminClient {
   // Change Requests
   // ==========================================================================
 
-  async getChangeRequestSummary(projectId?: number): Promise<ChangeRequestSummary> {
-    this.log('Getting change request summary', { projectId })
+  async getChangeRequestSummary(projectId?: number, options?: { myApprovals?: boolean; submittedByMe?: boolean }): Promise<ChangeRequestSummary> {
+    this.log('Getting change request summary', { projectId, ...options })
     const headers = await this.getAuthHeaders()
-    const params = projectId != null ? `?project_id=${projectId}` : ''
-    const response = await fetch(`${this.baseUrl}/api/change-requests/summary${params}`, { headers })
+    const params = new URLSearchParams()
+    if (projectId != null) params.set('project_id', String(projectId))
+    if (options?.myApprovals) params.set('my', 'true')
+    if (options?.submittedByMe) params.set('submitted_by_me', 'true')
+    const qs = params.toString() ? `?${params.toString()}` : ''
+    const response = await fetch(`${this.baseUrl}/api/change-requests/summary${qs}`, { headers })
     return this.handleResponse<ChangeRequestSummary>(response)
   }
 

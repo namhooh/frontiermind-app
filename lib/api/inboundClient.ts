@@ -57,6 +57,7 @@ export interface InboundMessage {
   subject?: string
   sender_email?: string
   sender_name?: string
+  body_text?: string
   inbound_message_status: InboundMessageStatus
   classification_reason?: string
   failed_reason?: string
